@@ -1,7 +1,8 @@
 import type { ContentItem, Monitor } from '../types.ts';
 
 const ENDPOINT = 'https://qiita.com/api/v2/items';
-const PER_PAGE = 50;
+const PER_PAGE = 20;
+const MAX_PAGE = 100;
 
 interface QiitaRow {
   id: string;
@@ -33,12 +34,17 @@ export function parseQiita(body: unknown): ContentItem[] {
 export interface FetchResult {
   items: ContentItem[];
   potentiallyTruncated: boolean;
+  nextCursor?: string | null;
 }
 
 // Initial newest-page fetch. Full catch-up/pagination remains future work.
-export async function fetchQiita(monitor: Monitor, fetcher: typeof fetch = fetch): Promise<FetchResult> {
+export async function fetchQiita(
+  monitor: Monitor, fetcher: typeof fetch = fetch, cursor?: string | null,
+): Promise<FetchResult> {
+  const page = cursor == null ? 1 : Number(cursor);
+  if (!Number.isSafeInteger(page) || page < 1 || page > MAX_PAGE) throw new Error('Invalid Qiita page cursor');
   const url = new URL(ENDPOINT);
-  url.searchParams.set('page', '1');
+  url.searchParams.set('page', String(page));
   url.searchParams.set('per_page', String(PER_PAGE));
   if (monitor.query.trim()) url.searchParams.set('query', monitor.query.trim());
   const response = await fetcher(url, {
@@ -46,5 +52,9 @@ export async function fetchQiita(monitor: Monitor, fetcher: typeof fetch = fetch
   });
   if (!response.ok) throw new Error('Qiita HTTP ' + response.status);
   const items = parseQiita(await response.json());
-  return { items, potentiallyTruncated: items.length >= PER_PAGE };
+  return {
+    items,
+    nextCursor: items.length >= PER_PAGE && page < MAX_PAGE ? String(page + 1) : null,
+    potentiallyTruncated: items.length >= PER_PAGE && page === MAX_PAGE,
+  };
 }
