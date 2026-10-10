@@ -3,9 +3,9 @@ import { entries, fetchTextBounded, parseDate, requiredText } from './xml.ts';
 
 const PAGE_SIZE = 50;
 export function stableArxivId(raw: string): string {
-  const withoutPrefix = raw.trim().replace(/^https?:\\/\\/(?:export\\.)?arxiv\\.org\\/abs\\//, '');
+  const withoutPrefix = raw.trim().replace(/^https?:\/\/(?:export\.)?arxiv\.org\/abs\//, '');
   const id = withoutPrefix.replace(/v[0-9]+$/, '');
-  if (!/^(?:[0-9]{4}\\.[0-9]{4,5}|[a-z-]+(?:\\.[A-Z]{2})?\\/[0-9]{7})$/i.test(id))
+  if (!/^(?:[0-9]{4}\.[0-9]{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/[0-9]{7})$/i.test(id))
     throw new Error('Invalid arXiv paper ID');
   return id;
 }
