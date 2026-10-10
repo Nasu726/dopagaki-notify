@@ -5,6 +5,7 @@ import { fetchWikipedia } from './sources/wikipedia.ts';
 import { fetchArxiv } from './sources/arxiv.ts';
 import { fetchZenn } from './sources/zenn.ts';
 import { fetchYouTube } from './sources/youtube.ts';
+import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, ensureMonitor, getPending, getRunnableIds,
   getState, markSent, postponeFetch, release, retryLater, stage,
@@ -13,18 +14,18 @@ import type { Env, Monitor, ContentItem } from './types.ts';
 
 const MAX_NOTIFICATIONS_PER_TICK = 3;
 export interface Dependencies {
-  fetchItems(monitor: Monitor): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean }>;
+  fetchItems(monitor: Monitor, env: Env): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean }>;
   send(webhook: string, source: string, item: ContentItem): Promise<void>;
   randomId(): string;
 }
 const defaults: Dependencies = {
-  fetchItems: (monitor) => {
+  fetchItems: (monitor, env) => {
     switch (monitor.source) {
       case 'qiita': return fetchQiita(monitor);
       case 'wikipedia': return fetchWikipedia(monitor);
       case 'arxiv': return fetchArxiv(monitor);
       case 'zenn': return fetchZenn(monitor);
-      case 'youtube': return fetchYouTube(monitor);
+      case 'youtube': return fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));
     }
   },
   send: notifyDiscord,
@@ -47,7 +48,7 @@ export async function runTick(
     if (state.next_due_at <= now) {
       webhookFor(runnable, env);
       try {
-        const result = await deps.fetchItems(runnable);
+        const result = await deps.fetchItems(runnable, env);
         if (result.potentiallyTruncated) {
           console.warn('monitor ' + runnable.id + ': source page full; complete coverage not guaranteed');
         }

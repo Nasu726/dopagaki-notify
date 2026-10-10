@@ -31,7 +31,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 ## GitHub / Cloudflare deployment (not yet performed)
 
-1. Create a D1 database named `dopagaki-notify`, put its real `database_id` in `wrangler.jsonc`, and apply the SQL in `migrations/0001_init.sql` using Wrangler's migration command.
+1. Create a D1 database named `dopagaki-notify`, put its real `database_id` in `wrangler.jsonc`, and apply **all** SQL migrations in the `migrations/` directory (including `0002_youtube_channel_cache.sql`) using Wrangler.
 2. Set the corresponding **Cloudflare Secrets** for the enabled sources: `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_WIKIPEDIA`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_YOUTUBE`. Never commit Webhook URLs to Git.
 3. Configure monitors in `src/config.ts` and integer-minute intervals in `config/intervals.json`.
 4. Connect GitHub to Cloudflare Workers Builds or deploy with Wrangler. Keep deployment disabled until D1/Secrets are configured.
@@ -48,13 +48,13 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 - **Wikipedia** recent *page creations*, not random articles or edits.
 - **arXiv** Atom API: creation date and version-independent paper ID.
 - **Zenn** user/topic RSS: stable GUID and publication date (trend feeds deliberately excluded).
-- **YouTube** channel Atom RSS: stable video ID and publication date; supports channel UC... ID or @handle/channel URL.
+- **YouTube** channel Atom RSS: stable video ID and publication date; supports channel UC... ID or @handle/channel URL with D1 resolution cache.
 - Automated tests using an in-memory SQLite database executing the same migration SQL.
 
 ## Limitations
 
 - **arXiv, Zenn and YouTube** adapters have been ported from the Rust reference. Feed parsing is intentionally bounded, but actual Cloudflare runtime and source API behavior have not been verified live.
-- YouTube @handle resolution currently fetches the public channel page on every check. Use the channel UC... ID to avoid extra work; D1-backed channel ID caching is a future improvement.
+- YouTube @handle resolution caches the corresponding channel UC... ID in D1 for seven days. The public channel page is fetched only on cache misses or expiry. A raw channel UC... ID needs no resolution.
 - Current source adapters fetch only the newest bounded API page, warning on possible truncation. Complete pagination and safe stop conditions are **not** yet implemented; busy feeds may lose new items.
 - The Worker processes one due monitor per Cron invocation and sends at most three notifications per invocation. Repeated high-frequency checks are best-effort.
 - Cloudflare Workers Free CPU budget is 10 ms per invocation; it has **not** been measured on actual Workers. API waiting time is excluded from CPU accounting.
