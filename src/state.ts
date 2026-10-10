@@ -4,8 +4,17 @@ export const LEASE_MS = 120_000;
 const MIN_RETRY_MS = 5 * 60_000;
 const MAX_RETRY_MS = 60 * 60_000;
 
+// One bounded D1 write for all enabled monitors, instead of a request for every ID.
+export async function ensureMonitors(db: Database, ids: readonly string[]): Promise<void> {
+  for (let offset = 0; offset < ids.length; offset += 40) {
+    const chunk = ids.slice(offset, offset + 40);
+    const placeholders = chunk.map(() => '(?)').join(',');
+    await db.prepare('INSERT OR IGNORE INTO monitor_state (id) VALUES ' + placeholders)
+      .bind(...chunk).run();
+  }
+}
 export async function ensureMonitor(db: Database, id: string): Promise<void> {
-  await db.prepare('INSERT OR IGNORE INTO monitor_state (id) VALUES (?)').bind(id).run();
+  await ensureMonitors(db, [id]);
 }
 export async function getState(db: Database, id: string): Promise<MonitorState> {
   const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at FROM monitor_state WHERE id = ?')
@@ -38,19 +47,28 @@ const OUTBOX_INSERT_BATCH = 20;
 export async function stage(
   db: Database, monitorId: string, items: readonly ContentItem[], baselineAt: number | null, now: number,
 ): Promise<void> {
-  // Each chunk is a single D1 operation, not one round trip per content item.
-  // A failed chunk leaves the scan cursor unchanged; INSERT OR IGNORE makes retries idempotent.
-  for (let offset = 0; offset < items.length; offset += OUTBOX_INSERT_BATCH) {
-    const chunk = items.slice(offset, offset + OUTBOX_INSERT_BATCH);
+  // The initial observation is a silent time-based baseline; there is no reason to
+  // persist legacy content IDs. Older backfilled items are likewise never eligible.
+  if (baselineAt === null) return;
+  const eligible = items.filter((item) => item.publishedAt > baselineAt);
+  for (let offset = 0; offset < eligible.length; offset += OUTBOX_INSERT_BATCH) {
+    const chunk = eligible.slice(offset, offset + OUTBOX_INSERT_BATCH);
+    // Read-before-write avoids D1 writes during the common "no new article" scan.
+    // INSERT OR IGNORE still guarantees idempotence if a lease expires mid-scan.
+    const placeholders = chunk.map(() => '?').join(',');
+    const existingRows = await db.prepare(
+      'SELECT item_id FROM deliveries WHERE monitor_id = ? AND item_id IN (' + placeholders + ')'
+    ).bind(monitorId, ...chunk.map((item) => item.id)).all<{ item_id: string }>();
+    const existing = new Set(existingRows.results.map((row) => row.item_id));
+    const unseen = chunk.filter((item) => !existing.has(item.id));
+    if (!unseen.length) continue;
     const values: unknown[] = [];
-    for (const item of chunk) {
-      const status = baselineAt === null || item.publishedAt <= baselineAt ? 'ignored' : 'pending';
-      values.push(monitorId, item.id, status, item.title, item.url, item.publishedAt, now);
+    for (const item of unseen) {
+      values.push(monitorId, item.id, 'pending', item.title, item.url, item.publishedAt, now);
     }
-    const tuples = chunk.map(() => '(?,?,?,?,?,?,?)').join(',');
     await db.prepare(
       'INSERT OR IGNORE INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at) ' +
-      'VALUES ' + tuples
+      'VALUES ' + unseen.map(() => '(?,?,?,?,?,?,?)').join(',')
     ).bind(...values).run();
   }
 }
