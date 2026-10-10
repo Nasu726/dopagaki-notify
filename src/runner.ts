@@ -8,22 +8,23 @@ import { fetchYouTube } from './sources/youtube.ts';
 import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, ensureMonitor, getPending, getRunnableIds,
-  getState, markSent, postponeFetch, release, retryLater, stage,
+  getState, markSent, postponeFetch, release, retryLater, stage, saveScanCursor,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
 
 const MAX_NOTIFICATIONS_PER_TICK = 3;
+const LOOKBACK_MS = 48 * 60 * 60_000;
 export interface Dependencies {
-  fetchItems(monitor: Monitor, env: Env): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean }>;
+  fetchItems(monitor: Monitor, env: Env, cursor?: string | null): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor?: string | null }>;
   send(webhook: string, source: string, item: ContentItem): Promise<void>;
   randomId(): string;
 }
 const defaults: Dependencies = {
-  fetchItems: (monitor, env) => {
+  fetchItems: (monitor, env, cursor) => {
     switch (monitor.source) {
-      case 'qiita': return fetchQiita(monitor);
-      case 'wikipedia': return fetchWikipedia(monitor);
-      case 'arxiv': return fetchArxiv(monitor);
+      case 'qiita': return fetchQiita(monitor, fetch, cursor);
+      case 'wikipedia': return fetchWikipedia(monitor, fetch, cursor);
+      case 'arxiv': return fetchArxiv(monitor, fetch, cursor);
       case 'zenn': return fetchZenn(monitor);
       case 'youtube': return fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));
     }
@@ -48,12 +49,21 @@ export async function runTick(
     if (state.next_due_at <= now) {
       webhookFor(runnable, env);
       try {
-        const result = await deps.fetchItems(runnable, env);
+        const result = await deps.fetchItems(runnable, env, state.scan_cursor);
         if (result.potentiallyTruncated) {
-          console.warn('monitor ' + runnable.id + ': source page full; complete coverage not guaranteed');
+          console.warn('monitor ' + runnable.id + ': source exhausted its paging limit; coverage incomplete');
         }
         await stage(env.DB, runnable.id, result.items, state.initialized_at, now);
-        await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes);
+        // Never stop Qiita query searches merely because an ID or timestamp is familiar:
+        // relevance ordering is not guaranteed to be creation ordering.
+        const chronologicallyOrdered = runnable.source === 'arxiv' || runnable.source === 'wikipedia';
+        const reachedOverlap = chronologicallyOrdered && state.last_complete_at !== null &&
+          result.items.some((item) => item.publishedAt <= state.last_complete_at! - LOOKBACK_MS);
+        if (state.initialized_at !== null && result.nextCursor && !reachedOverlap) {
+          await saveScanCursor(env.DB, runnable.id, token, now, state.scan_started_at ?? now, result.nextCursor);
+        } else {
+          await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes, state.scan_started_at ?? now);
+        }
       } catch (error) {
         await postponeFetch(env.DB, runnable.id, token, now);
         throw error;
