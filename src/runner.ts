@@ -2,6 +2,9 @@ import { validateMonitors } from './config.ts';
 import { notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
 import { fetchWikipedia } from './sources/wikipedia.ts';
+import { fetchArxiv } from './sources/arxiv.ts';
+import { fetchZenn } from './sources/zenn.ts';
+import { fetchYouTube } from './sources/youtube.ts';
 import {
   claim, completeFetch, ensureMonitor, getPending, getRunnableIds,
   getState, markSent, postponeFetch, release, retryLater, stage,
@@ -19,6 +22,9 @@ const defaults: Dependencies = {
     switch (monitor.source) {
       case 'qiita': return fetchQiita(monitor);
       case 'wikipedia': return fetchWikipedia(monitor);
+      case 'arxiv': return fetchArxiv(monitor);
+      case 'zenn': return fetchZenn(monitor);
+      case 'youtube': return fetchYouTube(monitor);
     }
   },
   send: notifyDiscord,
