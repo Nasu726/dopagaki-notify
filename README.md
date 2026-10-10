@@ -43,7 +43,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 - Single Cron Trigger with per-monitor D1 deadlines, leases, independent identity, and resumable API scan checkpoints.
 - First run creates a **silent baseline**. Unknown older articles and edits are not notified.
-- D1 durable outbox; bounded Discord delivery and retry; webhook host validation; no arbitrary mentions.
+- D1 durable outbox with **bounded batched inserts** (up to 20 articles per D1 write); bounded Discord delivery and retry; webhook host validation; no arbitrary mentions.
 - **Qiita** JSON API adapter: stable ID and `created_at`, not `updated_at`.
 - **Wikipedia** recent *page creations*, not random articles or edits.
 - **arXiv** Atom API: creation date and version-independent paper ID.
