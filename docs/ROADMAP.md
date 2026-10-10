@@ -12,7 +12,7 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 
 ## Stage A — complete local correctness and resource hygiene (current)
 
-1. Eliminate needless per-minute D1 writes and re-inserts of old/known articles.
+1. Eliminate needless per-minute D1 writes and re-inserts of old/known articles. **Implemented; local regression-tested, Cloudflare CPU not yet measured.**
 2. Ensure a source outage does not starve already queued Discord notifications.
 3. Add fixture-based regression tests for feed order, malformed XML/JSON, overlap boundary, duplicate events and partial failures.
 4. Examine unsafe scan-stop conditions and the catch-up lag on active Qiita searches; treat a page limit as **incomplete**, not a successful exhaustive scan.

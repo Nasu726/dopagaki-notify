@@ -7,7 +7,7 @@ import { fetchZenn } from './sources/zenn.ts';
 import { fetchYouTube } from './sources/youtube.ts';
 import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
-  claim, completeFetch, ensureMonitors, getPending, getRunnableIds,
+  claim, completeFetch, getPending, getRunnableIds,
   getState, markSent, postponeFetch, release, retryLater, stage, saveScanCursor,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
@@ -39,8 +39,8 @@ export async function runTick(
   validateMonitors(monitors);
   const enabled = new Map(monitors.filter((monitor) => monitor.enabled).map((monitor) => [monitor.id, monitor]));
   if (!enabled.size) return 'idle';
-  await ensureMonitors(env.DB, [...enabled.keys()]);
-  const runnable = (await getRunnableIds(env.DB, now)).map((id) => enabled.get(id)).find(Boolean);
+  const runnable = (await getRunnableIds(env.DB, now, [...enabled.keys()]))
+    .map((id) => enabled.get(id)).find(Boolean);
   if (!runnable) return 'idle';
   const token = deps.randomId();
   if (!await claim(env.DB, runnable.id, token, now)) return 'busy';

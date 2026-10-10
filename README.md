@@ -43,7 +43,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 - Single Cron Trigger with per-monitor D1 deadlines, leases, independent identity, and resumable API scan checkpoints.
 - First run creates a **silent baseline**. Unknown older articles and edits are not notified.
-- D1 durable outbox with bounded 20-article insert batches, **no baseline/old-article inserts**, and known-ID read-before-write to skip repeated inserts when nothing is new. Enabled monitor initialization is batched into one query per Cron when five or fewer monitors are configured. These are SQL-statement savings, not measured Cloudflare CPU results.
+- D1 durable outbox with bounded 20-article insert batches, **no baseline/old-article inserts**, and known-ID read-before-write to skip repeated inserts when nothing is new. New monitors are batch-initialized only when first encountered; once initialized, a quiet Cron invocation makes **no D1 INSERT**. These are SQL-statement savings, not measured Cloudflare CPU results.
 - Bounded Discord delivery and retry; queued deliveries can drain even during a source fetch outage; webhook host validation; no arbitrary mentions.
 - **Qiita** JSON API adapter: stable ID and `created_at`, not `updated_at`.
 - **Wikipedia** recent *page creations*, not random articles or edits.
