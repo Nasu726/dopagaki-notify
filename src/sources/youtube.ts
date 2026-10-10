@@ -41,12 +41,26 @@ export function parseYouTube(xml: string): ContentItem[] {
     };
   });
 }
+export interface ChannelIdCache {
+  get(reference: string): Promise<string | null>;
+  set(reference: string, channelId: string): Promise<void>;
+}
 export async function fetchYouTube(
-  monitor: Monitor, fetcher: typeof fetch = fetch,
+  monitor: Monitor, fetcher: typeof fetch = fetch, cache?: ChannelIdCache,
 ): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean }> {
   const reference = normalizeChannelReference(monitor.query);
-  const channelId = CHANNEL_ID.test(reference) ? reference
-    : extractChannelId(await fetchTextBounded(new URL('https://www.youtube.com/' + reference), 'YouTube channel', fetcher, 2 * 1024 * 1024));
+  let channelId = reference;
+  if (!CHANNEL_ID.test(reference)) {
+    const cached = await cache?.get(reference);
+    if (cached && CHANNEL_ID.test(cached)) {
+      channelId = cached;
+    } else {
+      channelId = extractChannelId(await fetchTextBounded(
+        new URL('https://www.youtube.com/' + reference), 'YouTube channel', fetcher, 2 * 1024 * 1024,
+      ));
+      await cache?.set(reference, channelId);
+    }
+  }
   const url = new URL('https://www.youtube.com/feeds/videos.xml');
   url.searchParams.set('channel_id', channelId);
   const items = parseYouTube(await fetchTextBounded(url, 'YouTube RSS', fetcher));
