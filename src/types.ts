@@ -1,4 +1,4 @@
-export type SourceName = 'qiita' | 'wikipedia'; // arXiv, Zenn, YouTube follow.
+export type SourceName = 'qiita' | 'wikipedia' | 'arxiv' | 'zenn' | 'youtube'; // arXiv, Zenn, YouTube follow.
 
 export interface ContentItem {
   id: string;
@@ -26,6 +26,9 @@ export interface Env {
   DB: Database;
   DISCORD_WEBHOOK_QIITA?: string;
   DISCORD_WEBHOOK_WIKIPEDIA?: string;
+  DISCORD_WEBHOOK_ARXIV?: string;
+  DISCORD_WEBHOOK_ZENN?: string;
+  DISCORD_WEBHOOK_YOUTUBE?: string;
 }
 export interface MonitorState {
   id: string;
