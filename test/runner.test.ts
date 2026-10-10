@@ -120,7 +120,7 @@ test('lease excludes concurrent monitor claims', async () => {
   await ensureMonitor(s.env.DB, qiita.id);
   assert.equal(await claim(s.env.DB, qiita.id, 'first', 1_000), true);
   assert.equal(await claim(s.env.DB, qiita.id, 'second', 1_000), false);
-  assert.deepEqual(await getRunnableIds(s.env.DB, 1_000), []);
+  assert.deepEqual(await getRunnableIds(s.env.DB, 1_000, [qiita.id]), []);
   assert.equal(await claim(s.env.DB, qiita.id, 'third', 122_000), true);
 });
 
@@ -262,4 +262,24 @@ test('fetch errors do not starve pending Discord deliveries', async () => {
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:fresh'").get()?.status, 'sent');
   assert.equal(s.raw.prepare("SELECT next_due_at FROM monitor_state WHERE id='qiita-rust'").get()?.next_due_at,
     now + 125 * 60_000);
+});
+
+test('quiet Cron performs no D1 initialization write; newly enabled monitor bootstraps once', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  const originalPrepare = s.env.DB.prepare.bind(s.env.DB);
+  let bootstrapStatements = 0;
+  s.env.DB.prepare = (sql: string) => {
+    if (sql.startsWith('INSERT OR IGNORE INTO monitor_state')) bootstrapStatements++;
+    return originalPrepare(sql);
+  };
+  assert.equal(await runTick(s.env, [qiita], now, s.deps), 'processed');
+  assert.equal(bootstrapStatements, 1);
+  assert.equal(await runTick(s.env, [qiita], now + 60_000, s.deps), 'idle');
+  assert.equal(bootstrapStatements, 1, 'idle tick must issue zero bootstrap writes');
+  const second: Monitor = { ...qiita, id: 'qiita-second' };
+  assert.equal(await runTick(s.env, [qiita, second], now + 120_000, s.deps), 'processed');
+  assert.equal(bootstrapStatements, 2, 'a newly added monitor bootstraps one time');
+  assert.equal(await runTick(s.env, [qiita, second], now + 180_000, s.deps), 'idle');
+  assert.equal(bootstrapStatements, 2);
 });
