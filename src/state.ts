@@ -8,7 +8,7 @@ export async function ensureMonitor(db: Database, id: string): Promise<void> {
   await db.prepare('INSERT OR IGNORE INTO monitor_state (id) VALUES (?)').bind(id).run();
 }
 export async function getState(db: Database, id: string): Promise<MonitorState> {
-  const state = await db.prepare('SELECT id, initialized_at, next_due_at FROM monitor_state WHERE id = ?')
+  const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at FROM monitor_state WHERE id = ?')
     .bind(id).first<MonitorState>();
   if (!state) throw new Error('Missing monitor state for ' + id);
   return state;
@@ -44,12 +44,24 @@ export async function stage(
     ).bind(monitorId, item.id, status, item.title, item.url, item.publishedAt, now).run();
   }
 }
+export async function saveScanCursor(
+  db: Database, id: string, token: string, now: number, scanStartedAt: number, cursor: string,
+): Promise<void> {
+  if (!cursor || cursor.length > 512) throw new Error('Invalid scan cursor');
+  const result = await db.prepare(
+    'UPDATE monitor_state SET scan_cursor = ?, scan_started_at = ?, next_due_at = ? ' +
+    'WHERE id = ? AND lease_token = ?'
+  ).bind(cursor, scanStartedAt, now + 60_000, id, token).run();
+  if (result.meta.changes !== 1) throw new Error('Lost lease while saving scan cursor');
+}
+
 export async function completeFetch(
-  db: Database, id: string, token: string, now: number, intervalMinutes: number,
+  db: Database, id: string, token: string, now: number, intervalMinutes: number, scanStartedAt = now,
 ): Promise<void> {
   const result = await db.prepare(
-    'UPDATE monitor_state SET initialized_at = COALESCE(initialized_at, ?), next_due_at = ? WHERE id = ? AND lease_token = ?'
-  ).bind(now, now + intervalMinutes * 60_000, id, token).run();
+    'UPDATE monitor_state SET initialized_at = COALESCE(initialized_at, ?), next_due_at = ?, ' +
+    'last_complete_at = ?, scan_cursor = NULL, scan_started_at = NULL WHERE id = ? AND lease_token = ?'
+  ).bind(scanStartedAt, now + intervalMinutes * 60_000, scanStartedAt, id, token).run();
   if (result.meta.changes !== 1) throw new Error('Lost lease while saving fetch checkpoint');
 }
 export async function postponeFetch(db: Database, id: string, token: string, now: number): Promise<void> {
