@@ -1,7 +1,8 @@
 import type { ContentItem, Monitor } from '../types.ts';
 import { entries, fetchTextBounded, parseDate, requiredText } from './xml.ts';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
+const MAX_OFFSET = 10_000;
 export function stableArxivId(raw: string): string {
   const withoutPrefix = raw.trim().replace(/^https?:\/\/(?:export\.)?arxiv\.org\/abs\//, '');
   const id = withoutPrefix.replace(/v[0-9]+$/, '');
@@ -21,15 +22,23 @@ export function parseArxiv(xml: string): ContentItem[] {
   });
 }
 export async function fetchArxiv(
-  monitor: Monitor, fetcher: typeof fetch = fetch,
-): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean }> {
+  monitor: Monitor, fetcher: typeof fetch = fetch, cursor?: string | null,
+): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor?: string | null }> {
+  const offset = cursor == null ? 0 : Number(cursor);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX_OFFSET || offset % PAGE_SIZE !== 0)
+    throw new Error('Invalid arXiv offset cursor');
   const query = monitor.query.trim();
   if (!query || query.length > 512) throw new Error('Invalid arXiv query');
   const url = new URL('https://export.arxiv.org/api/query');
   for (const [k, v] of Object.entries({
-    search_query: query, start: '0', max_results: String(PAGE_SIZE),
+    search_query: query, start: String(offset), max_results: String(PAGE_SIZE),
     sortBy: 'submittedDate', sortOrder: 'descending',
   })) url.searchParams.set(k, v);
   const items = parseArxiv(await fetchTextBounded(url, 'arXiv', fetcher));
-  return { items, potentiallyTruncated: items.length >= PAGE_SIZE };
+  const hasAnotherPage = items.length >= PAGE_SIZE;
+  return {
+    items,
+    nextCursor: hasAnotherPage && offset < MAX_OFFSET ? String(offset + PAGE_SIZE) : null,
+    potentiallyTruncated: hasAnotherPage && offset >= MAX_OFFSET,
+  };
 }
