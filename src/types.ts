@@ -34,6 +34,9 @@ export interface MonitorState {
   id: string;
   initialized_at: number | null;
   next_due_at: number;
+  scan_cursor: string | null;
+  scan_started_at: number | null;
+  last_complete_at: number | null;
 }
 export interface Delivery {
   item_id: string;

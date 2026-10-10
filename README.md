@@ -31,7 +31,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 ## GitHub / Cloudflare deployment (not yet performed)
 
-1. Create a D1 database named `dopagaki-notify`, put its real `database_id` in `wrangler.jsonc`, and apply **all** SQL migrations in the `migrations/` directory (including `0002_youtube_channel_cache.sql`) using Wrangler.
+1. Create a D1 database named `dopagaki-notify`, put its real `database_id` in `wrangler.jsonc`, and apply **all** SQL migrations in the `migrations/` directory (including `0003_catchup.sql`) in filename order using Wrangler.
 2. Set the corresponding **Cloudflare Secrets** for the enabled sources: `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_WIKIPEDIA`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_YOUTUBE`. Never commit Webhook URLs to Git.
 3. Configure monitors in `src/config.ts` and integer-minute intervals in `config/intervals.json`.
 4. Connect GitHub to Cloudflare Workers Builds or deploy with Wrangler. Keep deployment disabled until D1/Secrets are configured.
@@ -41,7 +41,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 ## Implemented
 
-- Single Cron Trigger with per-monitor D1 deadlines, leases and independent identity.
+- Single Cron Trigger with per-monitor D1 deadlines, leases, independent identity, and resumable API scan checkpoints.
 - First run creates a **silent baseline**. Unknown older articles and edits are not notified.
 - D1 durable outbox; bounded Discord delivery and retry; webhook host validation; no arbitrary mentions.
 - **Qiita** JSON API adapter: stable ID and `created_at`, not `updated_at`.
@@ -55,8 +55,10 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 - **arXiv, Zenn and YouTube** adapters have been ported from the Rust reference. Feed parsing is intentionally bounded, but actual Cloudflare runtime and source API behavior have not been verified live.
 - YouTube @handle resolution caches the corresponding channel UC... ID in D1 for seven days. The public channel page is fetched only on cache misses or expiry. A raw channel UC... ID needs no resolution.
-- Current source adapters fetch only the newest bounded API page, warning on possible truncation. Complete pagination and safe stop conditions are **not** yet implemented; busy feeds may lose new items.
-- The Worker processes one due monitor per Cron invocation and sends at most three notifications per invocation. Repeated high-frequency checks are best-effort.
+- **Qiita, Wikipedia and arXiv now resume bounded API pages across Cron ticks** using D1 checkpointed cursors. Each tick fetches at most one page for its selected monitor. A broken fetch retries the same page after backoff.
+- The first scan establishes a silent baseline from the newest page only. Follow-up arXiv and MediaWiki scans use a **48-hour overlap** from the preceding completed scan to bound older-page traversal, as those feeds explicitly request creation/submission order. Qiita searches may use relevance ordering, so they paginate until exhausted or the API's 100-page limit rather than stopping at a known ID.
+- **This is not an absolute no-loss guarantee.** Late-indexed posts older than the 48-hour overlap, Qiita results beyond 100 pages, and fixed-length Zenn/YouTube RSS feeds may leave undiscovered items. Full RSS/Atom XML is still read within a size bound before individual entries are parsed; HTTP streaming currently bounds response bytes but does not stop after a matching known ID. Watch warnings when a paging limit is reached.
+- The Worker processes one due monitor and one API page per Cron invocation and sends at most three notifications per invocation. A scan that needs many pages can temporarily extend effective monitoring intervals. Repeated high-frequency checks are best-effort.
 - Cloudflare Workers Free CPU budget is 10 ms per invocation; it has **not** been measured on actual Workers. API waiting time is excluded from CPU accounting.
 - Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.
 - Changing a monitor ID creates a new independent first-run baseline. Changing its query with the same ID requires deliberate state migration.
