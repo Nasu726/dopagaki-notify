@@ -6,6 +6,9 @@ import type { Monitor } from './types.ts';
 const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
   { id: 'qiita-rust', source: 'qiita', query: 'tag:Rust', enabled: false },
   { id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: false },
+  { id: 'arxiv-cs-ai', source: 'arxiv', query: 'cat:cs.AI', enabled: false },
+  { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: false },
+  { id: 'youtube-example', source: 'youtube', query: '@example', enabled: false },
 ];
 
 export function withIntervals(
