@@ -22,13 +22,32 @@ export async function getState(db: Database, id: string): Promise<MonitorState> 
   if (!state) throw new Error('Missing monitor state for ' + id);
   return state;
 }
-export async function getRunnableIds(db: Database, now: number): Promise<string[]> {
+export async function getRunnableIds(
+  db: Database, now: number, enabledIds: readonly string[],
+): Promise<string[]> {
+  if (!enabledIds.length) return [];
+  // The enabled roster is the driving table. Missing monitor rows are bootstrapped
+  // only once; otherwise a quiet Cron reads D1 without any initialization writes.
+  const inputs = enabledIds.map(() => '(?)').join(',');
   const rows = await db.prepare(
-    "SELECT m.id FROM monitor_state m WHERE (m.lease_until IS NULL OR m.lease_until <= ?) " +
-    "AND (m.next_due_at <= ? OR EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = m.id " +
-    "AND d.status = 'pending' AND d.next_attempt_at <= ?)) ORDER BY m.next_due_at, m.id"
-  ).bind(now, now, now).all<{ id: string }>();
-  return rows.results.map((row) => row.id);
+    'WITH enabled(id) AS (VALUES ' + inputs + ') ' +
+    'SELECT e.id AS id, m.id AS existing_id, m.next_due_at, m.lease_until, ' +
+    "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = e.id AND d.status = 'pending' " +
+    'AND d.next_attempt_at <= ?) AS pending_due ' +
+    'FROM enabled e LEFT JOIN monitor_state m ON m.id = e.id ' +
+    'ORDER BY m.next_due_at, e.id'
+  ).bind(...enabledIds, now).all<{
+    id: string; existing_id: string | null; next_due_at: number | null;
+    lease_until: number | null; pending_due: number;
+  }>();
+  const missing = rows.results.filter((row) => row.existing_id === null).map((row) => row.id);
+  if (missing.length) await ensureMonitors(db, missing);
+  const runnable = rows.results.filter((row) =>
+    row.existing_id !== null &&
+    (row.lease_until === null || row.lease_until <= now) &&
+    ((row.next_due_at !== null && row.next_due_at <= now) || row.pending_due !== 0)
+  ).map((row) => row.id);
+  return [...missing, ...runnable];
 }
 export async function claim(db: Database, id: string, token: string, now: number): Promise<boolean> {
   const result = await db.prepare(
