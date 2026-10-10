@@ -34,14 +34,24 @@ export async function release(db: Database, id: string, token: string): Promise<
   await db.prepare('UPDATE monitor_state SET lease_token = NULL, lease_until = NULL WHERE id = ? AND lease_token = ?')
     .bind(id, token).run();
 }
+const OUTBOX_INSERT_BATCH = 20;
 export async function stage(
   db: Database, monitorId: string, items: readonly ContentItem[], baselineAt: number | null, now: number,
 ): Promise<void> {
-  for (const item of items) {
-    const status = baselineAt === null || item.publishedAt <= baselineAt ? 'ignored' : 'pending';
+  // Each chunk is a single D1 operation, not one round trip per content item.
+  // A failed chunk leaves the scan cursor unchanged; INSERT OR IGNORE makes retries idempotent.
+  for (let offset = 0; offset < items.length; offset += OUTBOX_INSERT_BATCH) {
+    const chunk = items.slice(offset, offset + OUTBOX_INSERT_BATCH);
+    const values: unknown[] = [];
+    for (const item of chunk) {
+      const status = baselineAt === null || item.publishedAt <= baselineAt ? 'ignored' : 'pending';
+      values.push(monitorId, item.id, status, item.title, item.url, item.publishedAt, now);
+    }
+    const tuples = chunk.map(() => '(?,?,?,?,?,?,?)').join(',');
     await db.prepare(
-      'INSERT OR IGNORE INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at) VALUES (?,?,?,?,?,?,?)'
-    ).bind(monitorId, item.id, status, item.title, item.url, item.publishedAt, now).run();
+      'INSERT OR IGNORE INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at) ' +
+      'VALUES ' + tuples
+    ).bind(...values).run();
   }
 }
 export async function saveScanCursor(
