@@ -2,7 +2,7 @@
 
 **Development starter — not production ready.** Cloudflare Workers + D1 sends alerts to Discord **only for newly published content**. No resident application, public GUI, or GitHub Actions cron. The code lives in GitHub; Cloudflare runs one Cron Trigger and handles per-monitor deadlines.
 
-See [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the Japanese product specification and deployment boundaries.
+See [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the Japanese product specification and deployment boundaries, and [docs/ROADMAP.md](docs/ROADMAP.md) for the engineering plan and validation gates.
 
 ## Quick setup
 
@@ -43,7 +43,8 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 - Single Cron Trigger with per-monitor D1 deadlines, leases, independent identity, and resumable API scan checkpoints.
 - First run creates a **silent baseline**. Unknown older articles and edits are not notified.
-- D1 durable outbox with **bounded batched inserts** (up to 20 articles per D1 write); bounded Discord delivery and retry; webhook host validation; no arbitrary mentions.
+- D1 durable outbox with bounded 20-article insert batches, **no baseline/old-article inserts**, and known-ID read-before-write to skip repeated inserts when nothing is new. Enabled monitor initialization is batched into one query per Cron when five or fewer monitors are configured. These are SQL-statement savings, not measured Cloudflare CPU results.
+- Bounded Discord delivery and retry; queued deliveries can drain even during a source fetch outage; webhook host validation; no arbitrary mentions.
 - **Qiita** JSON API adapter: stable ID and `created_at`, not `updated_at`.
 - **Wikipedia** recent *page creations*, not random articles or edits.
 - **arXiv** Atom API: creation date and version-independent paper ID.
@@ -60,6 +61,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 - **This is not an absolute no-loss guarantee.** Late-indexed posts older than the 48-hour overlap, Qiita results beyond 100 pages, and fixed-length Zenn/YouTube RSS feeds may leave undiscovered items. Full RSS/Atom XML is still read within a size bound before individual entries are parsed; HTTP streaming currently bounds response bytes but does not stop after a matching known ID. Watch warnings when a paging limit is reached.
 - The Worker processes one due monitor and one API page per Cron invocation and sends at most three notifications per invocation. A scan that needs many pages can temporarily extend effective monitoring intervals. Repeated high-frequency checks are best-effort.
 - Cloudflare Workers Free CPU budget is 10 ms per invocation; it has **not** been measured on actual Workers. API waiting time is excluded from CPU accounting.
+- Initial baseline and permanently ineligible pre-baseline items are excluded without storing `ignored` outbox rows; existing legacy rows remain compatible.
 - Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.
 - Changing a monitor ID creates a new independent first-run baseline. Changing its query with the same ID requires deliberate state migration.
 - The example monitors are **disabled by default**. No live notification or cloud deployment has taken place.
