@@ -7,7 +7,7 @@ import { fetchZenn } from './sources/zenn.ts';
 import { fetchYouTube } from './sources/youtube.ts';
 import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
-  claim, completeFetch, ensureMonitor, getPending, getRunnableIds,
+  claim, completeFetch, ensureMonitors, getPending, getRunnableIds,
   getState, markSent, postponeFetch, release, retryLater, stage, saveScanCursor,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
@@ -39,13 +39,14 @@ export async function runTick(
   validateMonitors(monitors);
   const enabled = new Map(monitors.filter((monitor) => monitor.enabled).map((monitor) => [monitor.id, monitor]));
   if (!enabled.size) return 'idle';
-  for (const id of enabled.keys()) await ensureMonitor(env.DB, id);
+  await ensureMonitors(env.DB, [...enabled.keys()]);
   const runnable = (await getRunnableIds(env.DB, now)).map((id) => enabled.get(id)).find(Boolean);
   if (!runnable) return 'idle';
   const token = deps.randomId();
   if (!await claim(env.DB, runnable.id, token, now)) return 'busy';
   try {
     const state = await getState(env.DB, runnable.id);
+    let fetchError: unknown;
     if (state.next_due_at <= now) {
       webhookFor(runnable, env);
       try {
@@ -66,7 +67,8 @@ export async function runTick(
         }
       } catch (error) {
         await postponeFetch(env.DB, runnable.id, token, now);
-        throw error;
+        // A source outage must not block already queued Discord notifications.
+        fetchError = error;
       }
     }
     const webhook = webhookFor(runnable, env);
@@ -82,6 +84,7 @@ export async function runTick(
         console.error('Discord delivery failed for ' + runnable.id + '/' + item.item_id + '; retry scheduled');
       }
     }
+    if (fetchError !== undefined) throw fetchError;
     return 'processed';
   } finally {
     await release(env.DB, runnable.id, token);

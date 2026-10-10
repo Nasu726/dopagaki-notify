@@ -76,7 +76,7 @@ test('first observation creates silent baseline; subsequent article sends once',
   assert.deepEqual(s.sent, ['qiita:new']);
   await runTick(s.env, [qiita], now + 120 * 60_000, s.deps);
   assert.deepEqual(s.sent, ['qiita:new']);
-  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:backfill'").get()?.status, 'ignored');
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:backfill'").get(), undefined);
 });
 
 test('a configured seven-minute interval determines next due and rejects early checks', async () => {
@@ -243,4 +243,23 @@ test('time-based overlap stops arXiv page scans but not Qiita relevance searches
     items: [old], nextCursor: '2', potentiallyTruncated: false,
   }) });
   assert.equal(s.raw.prepare("SELECT scan_cursor FROM monitor_state WHERE id='qiita-rust'").get()?.scan_cursor, '2');
+});
+
+test('fetch errors do not starve pending Discord deliveries', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  s.setItems([item('old', now - 1000)]);
+  await runTick(s.env, [qiita], now, s.deps);
+  s.setItems([item('fresh', now + 1000)]);
+  s.fail(true);
+  await runTick(s.env, [qiita], now + 60 * 60_000, s.deps);
+  s.fail(false);
+  // A fresh fetch fails, but an earlier pending Discord notification is due.
+  await assert.rejects(() => runTick(s.env, [qiita], now + 120 * 60_000, {
+    ...s.deps, fetchItems: async () => { throw new Error('source 503'); },
+  }), /source 503/);
+  assert.deepEqual(s.sent, ['qiita:fresh']);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:fresh'").get()?.status, 'sent');
+  assert.equal(s.raw.prepare("SELECT next_due_at FROM monitor_state WHERE id='qiita-rust'").get()?.next_due_at,
+    now + 125 * 60_000);
 });
