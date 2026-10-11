@@ -54,34 +54,44 @@ export async function assertMonitorIdentity(
   ).bind(identity, monitorId, leaseToken).run();
   if (result.meta.changes !== 1) throw new Error('Monitor identity could not be pinned under the active lease');
 }
+// D1 permits at most 100 SQL bindings. Each monitor uses two; reserve
+// two additional bindings for the current time and bound each read to 40.
+const MONITOR_SELECT_BATCH = 40;
 export async function getRunnableIds(
   db: Database, now: number, enabled: readonly { id: string; source: SourceName }[],
 ): Promise<string[]> {
   if (!enabled.length) return [];
-  // All monitors of a source share one Cloudflare Webhook Secret.
-  const inputs = enabled.map(() => '(?,?)').join(',');
-  const params = enabled.flatMap((monitor) => [monitor.id, monitor.source]);
-  const rows = await db.prepare(
-    'WITH enabled(id, source) AS (VALUES ' + inputs + ') ' +
-    'SELECT e.id AS id, m.id AS existing_id, m.next_due_at, m.lease_until, ' +
-    'CASE WHEN COALESCE(w.cooldown_until, 0) <= ? AND w.blocked_status IS NULL THEN ' +
-    "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = e.id AND d.status = 'pending' " +
-    'AND d.next_attempt_at <= ?) ELSE 0 END AS pending_due ' +
-    'FROM enabled e LEFT JOIN monitor_state m ON m.id = e.id ' +
-    'LEFT JOIN webhook_source_state w ON w.source = e.source ' +
-    'ORDER BY m.next_due_at, e.id'
-  ).bind(...params, now, now).all<{
+  type Row = {
     id: string; existing_id: string | null; next_due_at: number | null;
     lease_until: number | null; pending_due: number;
-  }>();
-  const missing = rows.results.filter((row) => row.existing_id === null).map((row) => row.id);
+  };
+  const all: Row[] = [];
+  for (let offset = 0; offset < enabled.length; offset += MONITOR_SELECT_BATCH) {
+    const batch = enabled.slice(offset, offset + MONITOR_SELECT_BATCH);
+    const inputs = batch.map(() => '(?,?)').join(',');
+    const params = batch.flatMap((monitor) => [monitor.id, monitor.source]);
+    const rows = await db.prepare(
+      'WITH enabled(id, source) AS (VALUES ' + inputs + ') ' +
+      'SELECT e.id AS id, m.id AS existing_id, m.next_due_at, m.lease_until, ' +
+      'CASE WHEN COALESCE(w.cooldown_until, 0) <= ? AND w.blocked_status IS NULL THEN ' +
+      "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = e.id AND d.status = 'pending' " +
+      'AND d.next_attempt_at <= ?) ELSE 0 END AS pending_due ' +
+      'FROM enabled e LEFT JOIN monitor_state m ON m.id = e.id ' +
+      'LEFT JOIN webhook_source_state w ON w.source = e.source'
+    ).bind(...params, now, now).all<Row>();
+    all.push(...rows.results);
+  }
+  const missing = all.filter((row) => row.existing_id === null).map((row) => row.id);
   if (missing.length) await ensureMonitors(db, missing);
-  const runnable = rows.results.filter((row) =>
+  const runnable = all.filter((row) =>
     row.existing_id !== null &&
     (row.lease_until === null || row.lease_until <= now) &&
     ((row.next_due_at !== null && row.next_due_at <= now) || row.pending_due !== 0)
-  ).map((row) => row.id);
-  return [...missing, ...runnable];
+  );
+  // The order must be global rather than each chunk's local SQL order.
+  runnable.sort((a, b) => (a.next_due_at ?? 0) - (b.next_due_at ?? 0) ||
+    a.id.localeCompare(b.id));
+  return [...missing.sort(), ...runnable.map((row) => row.id)];
 }
 export async function claim(db: Database, id: string, token: string, now: number): Promise<boolean> {
   const result = await db.prepare(
