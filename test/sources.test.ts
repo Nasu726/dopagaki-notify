@@ -113,3 +113,19 @@ test('all five monitors have individual minute intervals and separate webhook se
     assert.equal(webhookFor(base(source, 'test'), env), env[key as keyof Env]);
   }
 });
+
+test('malformed and incomplete RSS/Atom are not mistaken for empty feeds', () => {
+  for (const broken of [
+    '<feed><entry><title>incomplete</title></feed>',
+    '<feed><entry><title>incomplete</title></entry>',
+    '<rss><channel><item><title>half</title></channel></rss>',
+    '<rss><channel><item><title>A</title></item><item><title>B</title></channel></rss>',
+  ]) {
+    assert.throws(() => entries(broken, broken.startsWith('<rss') ? 'item' : 'entry'),
+      /Malformed|Truncated/);
+  }
+  assert.deepEqual(entries('<feed><title>No new entries</title></feed>', 'entry'), []);
+  assert.deepEqual(entries('<rss><channel></channel></rss>', 'item'), []);
+  // A tag-shaped phrase within a comment is not an actual entry.
+  assert.deepEqual(entries('<feed><!-- <entry>an example</entry> --></feed>', 'entry'), []);
+});
