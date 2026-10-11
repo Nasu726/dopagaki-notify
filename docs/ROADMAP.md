@@ -59,7 +59,7 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 
 ## Current risks and known limitations
 
-- D1 SQL bind parameters cap at 100 per statement; notification inserts now use at most 84 binds per query (12 rows × 7 fields).
+- D1 SQL bind parameters cap at 100 per statement; notification inserts use at most 84 binds per query (12 rows × 7 fields), and due-monitor selection is chunked at 40 monitors (82 binds).
 
 - **Workers Free CPU time is 10 ms/invocation** (Cloudflare's actual measurement is required).
 - A Cron tick processes **one monitor and at most one paginated API page**, so many concurrently due monitors can run late.
