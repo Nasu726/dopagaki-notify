@@ -3,13 +3,14 @@
 // the D1 scan cursor as if no new items existed. This is not a general XML validator.
 export function entries(xml: string, tag: 'entry' | 'item'): string[] {
   // Avoid treating tag-like text in comments or CDATA as actual XML structure.
-  const structure = xml.replace(/<!--[\s\S]*?-->/g, '').replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
+  const withoutComments = xml.replace(/<!--[\s\S]*?-->/g, '');
+  const structure = withoutComments.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
   const root = /<((?:[a-zA-Z_][\w.-]*:)?(?:feed|rss))(?=\s|>)/i.exec(structure);
   if (!root) throw new Error('Invalid XML feed root');
   const rootClosing = new RegExp('</' + root[1] + '\\s*>', 'i');
   if (!rootClosing.test(structure)) throw new Error('Truncated XML feed: missing closing root');
   const pattern = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/' + tag + '\\s*>', 'gi');
-  const found = [...xml.matchAll(pattern)].map((match) => match[1] ?? '');
+  const found = [...withoutComments.matchAll(pattern)].map((match) => match[1] ?? '');
   const openingPattern = new RegExp('<' + tag + '(?=\\s|>)', 'gi');
   const closingPattern = new RegExp('<\\/' + tag + '\\s*>', 'gi');
   const opens = [...structure.matchAll(openingPattern)].length;
