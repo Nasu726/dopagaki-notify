@@ -19,7 +19,7 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 5. Verify that a change in a monitor's query/identity cannot silently carry over an unrelated seen-state baseline. **Implemented via fail-closed semantic ID pinning; Cloudflare staging not yet run.**
 6. Verify config/secret validation and prevent unintended pings, SSRF and arbitrary domain fetches.
 
-**Gate:** GitHub Actions CI passes; all five source adapters have realistic parser fixtures and failure cases; no known unhandled duplicate/loss scenarios within stated coverage guarantees.
+**Gate:** GitHub Actions CI passes (typecheck, Node tests, and a Wrangler dry-run bundle); all five source adapters have realistic parser fixtures and failure cases; no known unhandled duplicate/loss scenarios within stated coverage guarantees.
 
 ## Stage B — constrained Cloudflare staging deployment
 
