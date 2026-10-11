@@ -9,7 +9,7 @@
     {
       "binding": "DB",
       "database_name": "dopagaki-notify",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "database_id": "ef0e68ff-4cbb-4b67-b5e8-62446c62e35f",
       "migrations_dir": "migrations"
     }
   ],
