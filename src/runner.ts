@@ -67,7 +67,8 @@ export async function runTick(
         if (state.initialized_at !== null && result.nextCursor && !reachedOverlap) {
           await saveScanCursor(env.DB, runnable.id, token, now, state.scan_started_at ?? now, result.nextCursor);
         } else {
-          await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes, state.scan_started_at ?? now);
+          await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes,
+            state.scan_started_at ?? now, !result.potentiallyTruncated);
         }
       } catch (error) {
         await postponeFetch(env.DB, runnable.id, token, now, suggestedRetryDelay(error));
