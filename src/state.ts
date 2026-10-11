@@ -23,7 +23,7 @@ export async function ensureMonitor(db: Database, id: string): Promise<void> {
   await ensureMonitors(db, [id]);
 }
 export async function getState(db: Database, id: string): Promise<MonitorState> {
-  const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at, config_identity, last_incomplete_at, incomplete_count FROM monitor_state WHERE id = ?')
+  const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at, config_identity, last_incomplete_at, incomplete_count, webhook_cooldown_until FROM monitor_state WHERE id = ?')
     .bind(id).first<MonitorState>();
   if (!state) throw new Error('Missing monitor state for ' + id);
   return state;
@@ -59,11 +59,12 @@ export async function getRunnableIds(
   const rows = await db.prepare(
     'WITH enabled(id) AS (VALUES ' + inputs + ') ' +
     'SELECT e.id AS id, m.id AS existing_id, m.next_due_at, m.lease_until, ' +
+    "CASE WHEN COALESCE(m.webhook_cooldown_until, 0) <= ? THEN " +
     "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = e.id AND d.status = 'pending' " +
-    'AND d.next_attempt_at <= ?) AS pending_due ' +
+    'AND d.next_attempt_at <= ?) ELSE 0 END AS pending_due ' +
     'FROM enabled e LEFT JOIN monitor_state m ON m.id = e.id ' +
     'ORDER BY m.next_due_at, e.id'
-  ).bind(...enabledIds, now).all<{
+  ).bind(...enabledIds, now, now).all<{
     id: string; existing_id: string | null; next_due_at: number | null;
     lease_until: number | null; pending_due: number;
   }>();
@@ -81,8 +82,9 @@ export async function claim(db: Database, id: string, token: string, now: number
     "UPDATE monitor_state SET lease_token = ?, lease_until = ? WHERE id = ? " +
     "AND (lease_until IS NULL OR lease_until <= ?) AND (next_due_at <= ? OR EXISTS " +
     "(SELECT 1 FROM deliveries d WHERE d.monitor_id = monitor_state.id " +
-    "AND d.status = 'pending' AND d.next_attempt_at <= ?))"
-  ).bind(token, now + LEASE_MS, id, now, now, now).run();
+    "AND d.status = 'pending' AND d.next_attempt_at <= ?) " +
+    "AND webhook_cooldown_until <= ?)"
+  ).bind(token, now + LEASE_MS, id, now, now, now, now).run();
   return result.meta.changes === 1;
 }
 export async function release(db: Database, id: string, token: string): Promise<void> {
@@ -149,15 +151,16 @@ export async function postponeFetch(db: Database, id: string, token: string, now
     .bind(now + retryDelay(MIN_RETRY_MS, suggestedMs), id, token).run();
 }
 export async function coolDownPending(
-  db: Database, id: string, now: number, suggestedMs?: number | null,
+  db: Database, id: string, leaseToken: string, now: number, suggestedMs?: number | null,
 ): Promise<void> {
   const nextAllowedAt = now + retryDelay(MIN_RETRY_MS, suggestedMs);
-  // The entire monitor uses one webhook; do not immediately send a second
-  // pending item to the same webhook after Discord rejects the first with 429.
-  await db.prepare(
-    "UPDATE deliveries SET next_attempt_at = ? WHERE monitor_id = ? " +
-    "AND status = 'pending' AND next_attempt_at <= ?"
-  ).bind(nextAllowedAt, id, now).run();
+  // Gate future messages too: a later fetch may stage more items while the
+  // existing backlog is waiting out Discord's 429.
+  const result = await db.prepare(
+    'UPDATE monitor_state SET webhook_cooldown_until = MAX(webhook_cooldown_until, ?) ' +
+    'WHERE id = ? AND lease_token = ?'
+  ).bind(nextAllowedAt, id, leaseToken).run();
+  if (result.meta.changes !== 1) throw new Error('Lost lease while saving Discord cooldown');
 }
 export async function getPending(db: Database, id: string, now: number, limit: number): Promise<Delivery[]> {
   const rows = await db.prepare(
