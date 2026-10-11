@@ -1,4 +1,4 @@
-import { isRateLimited, suggestedRetryDelay } from './http.ts';
+import { isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors } from './config.ts';
 import { notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
@@ -9,7 +9,7 @@ import { fetchYouTube } from './sources/youtube.ts';
 import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, getPending, getRunnableIds,
-  getState, markSent, coolDownPending, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
+  getState, markSent, coolDownPending, blockWebhook, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
 
@@ -77,7 +77,7 @@ export async function runTick(
       }
     }
     const webhook = webhookFor(runnable, env);
-    const pending = state.webhook_cooldown_until > now
+    const pending = state.webhook_cooldown_until > now || state.webhook_blocked_status !== null
       ? [] : await getPending(env.DB, runnable.id, now, MAX_NOTIFICATIONS_PER_TICK);
     for (const item of pending) {
       try {
@@ -86,6 +86,12 @@ export async function runTick(
         });
         await markSent(env.DB, runnable.id, item.item_id, now);
       } catch (error) {
+        if (isWebhookInvalid(error)) {
+          await blockWebhook(env.DB, runnable.id, token, error.status, now);
+          console.error('Discord webhook disabled for monitor ' + runnable.id +
+            ' after HTTP ' + error.status + '; replace secret and explicitly reset D1 block');
+          break;
+        }
         await retryLater(env.DB, runnable.id, item.item_id, item.attempts, now, suggestedRetryDelay(error));
         console.error('Discord delivery failed for ' + runnable.id + '/' + item.item_id + '; retry scheduled');
         // All items for this monitor share a webhook; a 429 must stop the burst.
