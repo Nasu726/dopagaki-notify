@@ -129,3 +129,25 @@ test('malformed and incomplete RSS/Atom are not mistaken for empty feeds', () =>
   // A tag-shaped phrase within a comment is not an actual entry.
   assert.deepEqual(entries('<feed><!-- <entry>an example</entry> --></feed>', 'entry'), []);
 });
+
+test('RSS CDATA and comments cannot fabricate or hide article boundaries', () => {
+  const rss = '<rss version="2.0"><channel>' +
+    '<!-- <item><title>not a real article</title></item> -->' +
+    '<item><title><![CDATA[The <item> syntax &amp; </item> literals]]></title>' +
+    '<link>https://zenn.dev/a/articles/cdata</link>' +
+    '<guid>https://zenn.dev/a/articles/cdata</guid>' +
+    '<pubDate>Sat, 10 Oct 2026 00:00:00 GMT</pubDate></item>' +
+    '</channel></rss>';
+  assert.equal(entries(rss, 'item').length, 1,
+    'literal XML-like text in CDATA must not count as article tags');
+  const [article] = parseZenn(rss);
+  assert.equal(article?.title, 'The <item> syntax &amp; </item> literals',
+    'literal CDATA text must keep brackets and ampersand entity syntax');
+  assert.equal(article?.id, 'zenn:https://zenn.dev/a/articles/cdata');
+});
+
+test('mixed XML entities and CDATA are decoded only outside CDATA', () => {
+  const source = '<title>Head &amp; <![CDATA[A &amp; <entry>]]> tail &lt;end&gt;</title>';
+  assert.equal(tagText(source, 'title'), 'Head & A &amp; <entry> tail <end>');
+  assert.equal(entries('<feed><!-- <entry><id>fake</id></entry> --></feed>', 'entry').length, 0);
+});
