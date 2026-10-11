@@ -27,7 +27,7 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 
 1. Deploy with all monitors disabled and check the single Cron Trigger exists; HTTP handler stays 404.
 2. Enable only one low-traffic test monitor, verify silent initial baseline, subsequent delivery and duplicate suppression.
-3. Verify D1 checkpoint replay across runs, notification retry after 429/5xx, lease expiry and recovery.
+3. Verify D1 checkpoint replay across runs, notification retry after 429/5xx, lease expiry and recovery. **Retry-After/cooldown logic implemented and unit-tested; live 429s not yet observed.**
 4. Capture **Cloudflare's actual invocation CPU time** (not wall time), D1 rows read/written, Worker errors and outgoing request count. Distinguish normal empty/no-due ticks from busiest page+Discord ticks.
 5. Collect representative samples (at least 100 invocations across due and idle cases) and inspect p50, p95, maxima, and whether any invocation is terminated by the **10 ms Free CPU budget**.
 6. Keep real-time Cloudflare logs free of Webhook URLs and unnecessary article content.
