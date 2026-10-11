@@ -23,7 +23,7 @@ export async function ensureMonitor(db: Database, id: string): Promise<void> {
   await ensureMonitors(db, [id]);
 }
 export async function getState(db: Database, id: string): Promise<MonitorState> {
-  const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at, config_identity FROM monitor_state WHERE id = ?')
+  const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at, config_identity, last_incomplete_at, incomplete_count FROM monitor_state WHERE id = ?')
     .bind(id).first<MonitorState>();
   if (!state) throw new Error('Missing monitor state for ' + id);
   return state;
@@ -131,12 +131,17 @@ export async function saveScanCursor(
 }
 
 export async function completeFetch(
-  db: Database, id: string, token: string, now: number, intervalMinutes: number, scanStartedAt = now,
+  db: Database, id: string, token: string, now: number, intervalMinutes: number,
+  scanStartedAt = now, complete = true,
 ): Promise<void> {
   const result = await db.prepare(
     'UPDATE monitor_state SET initialized_at = COALESCE(initialized_at, ?), next_due_at = ?, ' +
-    'last_complete_at = ?, scan_cursor = NULL, scan_started_at = NULL WHERE id = ? AND lease_token = ?'
-  ).bind(scanStartedAt, now + intervalMinutes * 60_000, scanStartedAt, id, token).run();
+    'last_complete_at = CASE WHEN ? = 1 THEN ? ELSE last_complete_at END, ' +
+    'last_incomplete_at = CASE WHEN ? = 1 THEN last_incomplete_at ELSE ? END, ' +
+    'incomplete_count = incomplete_count + CASE WHEN ? = 1 THEN 0 ELSE 1 END, ' +
+    'scan_cursor = NULL, scan_started_at = NULL WHERE id = ? AND lease_token = ?'
+  ).bind(scanStartedAt, now + intervalMinutes * 60_000,
+    complete ? 1 : 0, scanStartedAt, complete ? 1 : 0, now, complete ? 1 : 0, id, token).run();
   if (result.meta.changes !== 1) throw new Error('Lost lease while saving fetch checkpoint');
 }
 export async function postponeFetch(db: Database, id: string, token: string, now: number, suggestedMs?: number | null): Promise<void> {
