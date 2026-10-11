@@ -20,6 +20,7 @@ function setup() {
   raw.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0003_catchup.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0004_monitor_identity.sql', import.meta.url), 'utf8'));
+  raw.exec(readFileSync(new URL('../migrations/0005_scan_coverage.sql', import.meta.url), 'utf8'));
 
   const db: Database = {
     prepare(sql) {
@@ -335,4 +336,38 @@ test('Qiita runner supplies previous complete scan time as a stable filtered win
   assert.equal(windows[1], now - 48 * 60 * 60_000);
   assert.equal(windows[2], windows[1]);
   assert.deepEqual(s.sent, ['qiita:new1', 'qiita:new2']);
+});
+
+test('truncated scan records coverage gap without advancing last successful full-scan time', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  // Initial baseline is silent but, when non-exhaustive, must not be called a complete scan.
+  await runTick(s.env, [qiita], now, { ...s.deps, fetchItems: async () => ({
+    items: [item('old', now - 1000)], potentiallyTruncated: true, nextCursor: null,
+  }) });
+  let state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(qiita.id);
+  assert.equal(state?.initialized_at, now);
+  assert.equal(state?.last_complete_at, null);
+  assert.equal(state?.last_incomplete_at, now);
+  assert.equal(state?.incomplete_count, 1);
+
+  const next = now + 60 * 60_000;
+  await runTick(s.env, [qiita], next, { ...s.deps, fetchItems: async () => ({
+    items: [item('fresh', now + 1000)], potentiallyTruncated: false, nextCursor: null,
+  }) });
+  state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(qiita.id);
+  assert.equal(state?.last_complete_at, next);
+  assert.equal(state?.incomplete_count, 1);
+  assert.deepEqual(s.sent, ['qiita:fresh']);
+
+  const overload = next + 60 * 60_000;
+  await runTick(s.env, [qiita], overload, { ...s.deps, fetchItems: async () => ({
+    items: [item('fresh2', next + 1000)], potentiallyTruncated: true, nextCursor: null,
+  }) });
+  state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(qiita.id);
+  assert.equal(state?.last_complete_at, next, 'full scan checkpoint must not advance on exhaustion');
+  assert.equal(state?.last_incomplete_at, overload);
+  assert.equal(state?.incomplete_count, 2);
+  assert.deepEqual(s.sent, ['qiita:fresh', 'qiita:fresh2']);
+  assert.equal(state?.scan_cursor, null, 'exhausted pagination is not resumable');
 });
