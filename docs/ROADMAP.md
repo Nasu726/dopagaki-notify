@@ -15,7 +15,7 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 1. Eliminate needless per-minute D1 writes and re-inserts of old/known articles. **Implemented; local regression-tested, Cloudflare CPU not yet measured.**
 2. Ensure a source outage does not starve already queued Discord notifications.
 3. Add fixture-based regression tests for feed order, malformed XML/JSON, overlap boundary, duplicate events and partial failures. **Partial: D1 bound-parameter regression and XML truncation guards added; full feed/XML conformance and real API fixtures remain open.**
-4. Examine unsafe scan-stop conditions and the catch-up lag on active Qiita searches; treat a page limit as **incomplete**, not a successful exhaustive scan. **Qiita creation-date lower-bound added; 100-page cap and result reordering remain risks.**
+4. Examine unsafe scan-stop conditions and the catch-up lag on active Qiita searches; treat a page limit as **incomplete**, not a successful exhaustive scan. **Qiita creation-date lower-bound added. Exhausted page limits are now persisted as incomplete scans, with full-scan watermarks preserved. 100-page cap and result reordering remain risks.**
 5. Verify that a change in a monitor's query/identity cannot silently carry over an unrelated seen-state baseline. **Implemented via fail-closed semantic ID pinning; Cloudflare staging not yet run.**
 6. Verify config/secret validation and prevent unintended pings, SSRF and arbitrary domain fetches.
 
@@ -23,7 +23,7 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 
 ## Stage B — constrained Cloudflare staging deployment
 
-**Requires owner action:** grant Cloudflare integration or configure Workers Builds; create D1, apply migrations `0001`–`0004`, set actual webhook Secrets **in Cloudflare only**, select safe test monitors. Do not paste any Webhook URL into GitHub or chat.
+**Requires owner action:** grant Cloudflare integration or configure Workers Builds; create D1, apply migrations `0001`–`0005`, set actual webhook Secrets **in Cloudflare only**, select safe test monitors. Do not paste any Webhook URL into GitHub or chat.
 
 1. Deploy with all monitors disabled and check the single Cron Trigger exists; HTTP handler stays 404.
 2. Enable only one low-traffic test monitor, verify silent initial baseline, subsequent delivery and duplicate suppression.
