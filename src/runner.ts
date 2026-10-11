@@ -46,7 +46,7 @@ export async function runTick(
     .map((id) => enabled.get(id)).find(Boolean);
   if (!runnable) return 'idle';
   const token = deps.randomId();
-  if (!await claim(env.DB, runnable.id, token, now)) return 'busy';
+  if (!await claim(env.DB, runnable.id, runnable.source, token, now)) return 'busy';
   try {
     const state = await getState(env.DB, runnable.id, runnable.source);
     await assertMonitorIdentity(env.DB, runnable.id, token, runnable.source,

@@ -93,14 +93,20 @@ export async function getRunnableIds(
     a.id.localeCompare(b.id));
   return [...missing.sort(), ...runnable.map((row) => row.id)];
 }
-export async function claim(db: Database, id: string, token: string, now: number): Promise<boolean> {
+export async function claim(
+  db: Database, id: string, source: SourceName, token: string, now: number,
+): Promise<boolean> {
+  // The due-fetch path is independent of Discord availability. Pending-only
+  // delivery must check the CURRENT source-wide Webhook state, not legacy
+  // monitor_state webhook columns retained by earlier migrations.
   const result = await db.prepare(
     "UPDATE monitor_state SET lease_token = ?, lease_until = ? WHERE id = ? " +
-    "AND (lease_until IS NULL OR lease_until <= ?) AND (next_due_at <= ? OR EXISTS " +
-    "(SELECT 1 FROM deliveries d WHERE d.monitor_id = monitor_state.id " +
+    "AND (lease_until IS NULL OR lease_until <= ?) AND (next_due_at <= ? OR (" +
+    "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = monitor_state.id " +
     "AND d.status = 'pending' AND d.next_attempt_at <= ?) " +
-    "AND webhook_cooldown_until <= ? AND webhook_blocked_status IS NULL)"
-  ).bind(token, now + LEASE_MS, id, now, now, now, now).run();
+    "AND NOT EXISTS (SELECT 1 FROM webhook_source_state w " +
+    "WHERE w.source = ? AND (w.cooldown_until > ? OR w.blocked_status IS NOT NULL))))"
+  ).bind(token, now + LEASE_MS, id, now, now, now, source, now).run();
   return result.meta.changes === 1;
 }
 export async function release(db: Database, id: string, token: string): Promise<void> {

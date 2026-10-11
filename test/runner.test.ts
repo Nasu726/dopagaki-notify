@@ -123,10 +123,10 @@ test('source error preserves uninitialized state and schedules a retry', async (
 test('lease excludes concurrent monitor claims', async () => {
   const s = setup();
   await ensureMonitor(s.env.DB, qiita.id);
-  assert.equal(await claim(s.env.DB, qiita.id, 'first', 1_000), true);
-  assert.equal(await claim(s.env.DB, qiita.id, 'second', 1_000), false);
+  assert.equal(await claim(s.env.DB, qiita.id, qiita.source, 'first', 1_000), true);
+  assert.equal(await claim(s.env.DB, qiita.id, qiita.source, 'second', 1_000), false);
   assert.deepEqual(await getRunnableIds(s.env.DB, 1_000, [qiita]), []);
-  assert.equal(await claim(s.env.DB, qiita.id, 'third', 122_000), true);
+  assert.equal(await claim(s.env.DB, qiita.id, qiita.source, 'third', 122_000), true);
 });
 
 test('Qiita uses original creation time and stable ID', () => {
@@ -463,4 +463,31 @@ test('more than 49 configured monitors are selected in D1-safe batches with glob
   assert.deepEqual(ids, expected, 'oldest deadline must take precedence across chunk boundaries');
   assert.equal(dueQueries, 2);
   assert.equal(maxParams, 82);
+});
+
+test('atomic lease claim follows shared webhook state, not legacy monitor flags', async () => {
+  const s = setup();
+  const now = 60_000;
+  await ensureMonitor(s.env.DB, qiita.id);
+  s.raw.prepare(
+    'UPDATE monitor_state SET next_due_at=?, webhook_cooldown_until=?, webhook_blocked_status=? WHERE id=?'
+  ).run(now + 60_000, now + 3_600_000, 404, qiita.id);
+  s.raw.prepare(
+    'INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at) ' +
+    "VALUES (?,?,'pending',?,?,?,?)"
+  ).run(qiita.id, 'qiita:new', 'New item', 'https://qiita.com/example/items/new', now, now);
+  s.raw.prepare("INSERT INTO webhook_source_state(source,cooldown_until) VALUES ('qiita',?)").run(now + 10_000);
+  assert.equal(await claim(s.env.DB, qiita.id, 'qiita', 'a', now), false,
+    'active source-level 429 must block pending-only claims');
+  s.raw.prepare("UPDATE webhook_source_state SET cooldown_until=0,blocked_status=404 WHERE source='qiita'").run();
+  assert.equal(await claim(s.env.DB, qiita.id, 'qiita', 'b', now), false,
+    'source-level invalid webhook must block pending-only claims');
+  s.raw.prepare("UPDATE webhook_source_state SET blocked_status=NULL WHERE source='qiita'").run();
+  assert.equal(await claim(s.env.DB, qiita.id, 'qiita', 'c', now), true,
+    'legacy monitor-level cooldown/block must not suppress recovered source state');
+  s.raw.prepare('UPDATE monitor_state SET lease_token=NULL,lease_until=NULL,next_due_at=0 WHERE id=?')
+    .run(qiita.id);
+  s.raw.prepare("UPDATE webhook_source_state SET blocked_status=404 WHERE source='qiita'").run();
+  assert.equal(await claim(s.env.DB, qiita.id, 'qiita', 'd', now), true,
+    'an ordinary due source fetch must still run while the Webhook is blocked');
 });
