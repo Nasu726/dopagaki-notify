@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fetchQiita } from '../src/sources/qiita.ts';
+import { fetchQiita, qiitaQueryWithWindow } from '../src/sources/qiita.ts';
 import { fetchWikipedia } from '../src/sources/wikipedia.ts';
 import { fetchArxiv } from '../src/sources/arxiv.ts';
 import type { Monitor } from '../src/types.ts';
@@ -83,4 +83,29 @@ test('arXiv uses submittedDate offset pages and rejects unbounded offsets', asyn
   assert.equal(second.nextCursor, null);
   assert.deepEqual(requestedOffsets, ['0', '20']);
   await assert.rejects(() => fetchArxiv(monitor, fetcher, '999999'), /Invalid arXiv offset/);
+});
+test('Qiita respects a creation-date window but never relies on result sorting', async () => {
+  const monitor = makeMonitor('qiita', 'tag:Rust');
+  const base = Date.parse('2026-10-10T10:00:00Z');
+  assert.equal(qiitaQueryWithWindow('tag:Rust', null), 'tag:Rust');
+  assert.equal(qiitaQueryWithWindow('tag:Rust', base), 'tag:Rust created:>=2026-10-09');
+  assert.equal(qiitaQueryWithWindow('', base), 'created:>=2026-10-09');
+  assert.throws(() => qiitaQueryWithWindow('tag:Rust', NaN), /Invalid Qiita creation/);
+  const requested: string[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    requested.push(url.searchParams.get('query') ?? '');
+    const page = url.searchParams.get('page');
+    const rows = Array.from({ length: page === '1' ? 20 : 1 }, (_, i) => ({
+      id: 'qiita_' + i, title: 'Post', url: 'https://qiita.com/example/items/abc',
+      created_at: '2026-10-10T00:00:00Z',
+    }));
+    return Response.json(rows);
+  };
+  const first = await fetchQiita(monitor, fetcher, null, base);
+  assert.equal(first.nextCursor, '2');
+  const second = await fetchQiita(monitor, fetcher, first.nextCursor, base);
+  assert.equal(second.nextCursor, null);
+  assert.deepEqual(requested, ['tag:Rust created:>=2026-10-09', 'tag:Rust created:>=2026-10-09'],
+    'all pages in a scan must share the same historical lower bound');
 });
