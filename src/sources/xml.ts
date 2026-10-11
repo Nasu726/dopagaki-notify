@@ -3,19 +3,26 @@ import { requireSuccess } from '../http.ts';
 // Minimal structural checks prevent an incomplete 200 OK response from advancing
 // the D1 scan cursor as if no new items existed. This is not a general XML validator.
 export function entries(xml: string, tag: 'entry' | 'item'): string[] {
-  // Avoid treating tag-like text in comments or CDATA as actual XML structure.
-  const withoutComments = xml.replace(/<!--[\s\S]*?-->/g, '');
-  const structure = withoutComments.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
+  // Mask markup-shaped text in comments and CDATA while preserving character
+  // positions. Parse entry boundaries in this structural view, then extract
+  // their original contents (including CDATA) by the same offsets.
+  const structure = xml.replace(
+    /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>/g,
+    (fragment) => ' '.repeat(fragment.length),
+  );
   const root = /<((?:[a-zA-Z_][\w.-]*:)?(?:feed|rss))(?=\s|>)/i.exec(structure);
   if (!root) throw new Error('Invalid XML feed root');
   const rootClosing = new RegExp('</' + root[1] + '\\s*>', 'i');
   if (!rootClosing.test(structure)) throw new Error('Truncated XML feed: missing closing root');
-  const pattern = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/' + tag + '\\s*>', 'gi');
-  const found = [...withoutComments.matchAll(pattern)].map((match) => match[1] ?? '');
-  const openingPattern = new RegExp('<' + tag + '(?=\\s|>)', 'gi');
-  const closingPattern = new RegExp('<\\/' + tag + '\\s*>', 'gi');
-  const opens = [...structure.matchAll(openingPattern)].length;
-  const closes = [...structure.matchAll(closingPattern)].length;
+
+  const pattern = new RegExp('(<'+tag+'(?:\\s[^>]*)?>)([\\s\\S]*?)(<\\/'+tag+'\\s*>)', 'gi');
+  const found: string[] = [];
+  for (const match of structure.matchAll(pattern)) {
+    const start = (match.index ?? 0) + (match[1] ?? '').length;
+    found.push(xml.slice(start, start + (match[2] ?? '').length));
+  }
+  const opens = [...structure.matchAll(new RegExp('<' + tag + '(?=\\s|>)', 'gi'))].length;
+  const closes = [...structure.matchAll(new RegExp('<\\/' + tag + '\\s*>', 'gi'))].length;
   if (opens !== closes || opens !== found.length) {
     throw new Error('Malformed or truncated XML feed entries');
   }
