@@ -1,3 +1,4 @@
+import { requireSuccess } from './http.ts';
 import type { ContentItem, Env, Monitor } from './types.ts';
 
 export function webhookFor(monitor: Monitor, env: Env): string {
@@ -34,5 +35,5 @@ export async function notifyDiscord(
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) throw new Error('Discord HTTP ' + response.status);
+  requireSuccess(response, 'Discord');
 }
