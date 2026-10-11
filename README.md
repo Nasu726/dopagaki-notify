@@ -59,10 +59,10 @@ One Discord server with separate channels works as intended. Create one incoming
 
 ## Recovering an invalid Discord webhook
 
-If a webhook was deleted, rotated, or loses permission, the source stores `blocked_status` and `blocked_at` in `webhook_source_state`. The Worker **continues detecting new items but does not send or discard the pending queue**. Replace the relevant Cloudflare Webhook Secret, then deliberately clear the block for that monitor using an authenticated D1 SQL console or Wrangler (substitute your monitor ID):
+If a webhook was deleted, rotated, or loses permission, the source stores `blocked_status` and `blocked_at` in `webhook_source_state`. The Worker **continues detecting new items but does not send or discard the pending queue**. Replace the relevant Cloudflare Webhook Secret, then deliberately clear the block for that source using an authenticated D1 SQL console or Wrangler (substitute your source name):
 
 ```sql
-UPDATE monitor_state
+UPDATE webhook_source_state
 SET blocked_status = NULL, blocked_at = NULL
 WHERE source = 'qiita';
 ```
