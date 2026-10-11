@@ -3,6 +3,12 @@ import type { Database, Delivery, MonitorState, ContentItem } from './types.ts';
 export const LEASE_MS = 120_000;
 const MIN_RETRY_MS = 5 * 60_000;
 const MAX_RETRY_MS = 60 * 60_000;
+const MAX_SERVER_RETRY_MS = 24 * 60 * 60_000;
+function retryDelay(defaultMs: number, suggestedMs?: number | null): number {
+  if (suggestedMs === null || suggestedMs === undefined || !Number.isFinite(suggestedMs) || suggestedMs < 0)
+    return defaultMs;
+  return Math.max(defaultMs, Math.min(MAX_SERVER_RETRY_MS, Math.ceil(suggestedMs)));
+}
 
 // One bounded D1 write for all enabled monitors, instead of a request for every ID.
 export async function ensureMonitors(db: Database, ids: readonly string[]): Promise<void> {
@@ -133,9 +139,9 @@ export async function completeFetch(
   ).bind(scanStartedAt, now + intervalMinutes * 60_000, scanStartedAt, id, token).run();
   if (result.meta.changes !== 1) throw new Error('Lost lease while saving fetch checkpoint');
 }
-export async function postponeFetch(db: Database, id: string, token: string, now: number): Promise<void> {
+export async function postponeFetch(db: Database, id: string, token: string, now: number, suggestedMs?: number | null): Promise<void> {
   await db.prepare('UPDATE monitor_state SET next_due_at = ? WHERE id = ? AND lease_token = ?')
-    .bind(now + MIN_RETRY_MS, id, token).run();
+    .bind(now + retryDelay(MIN_RETRY_MS, suggestedMs), id, token).run();
 }
 export async function getPending(db: Database, id: string, now: number, limit: number): Promise<Delivery[]> {
   const rows = await db.prepare(
@@ -150,8 +156,8 @@ export async function markSent(db: Database, id: string, itemId: string, now: nu
     "UPDATE deliveries SET status = 'sent', sent_at = ? WHERE monitor_id = ? AND item_id = ? AND status = 'pending'"
   ).bind(now, id, itemId).run();
 }
-export async function retryLater(db: Database, id: string, itemId: string, attempts: number, now: number): Promise<void> {
-  const backoff = Math.min(MAX_RETRY_MS, MIN_RETRY_MS * 2 ** Math.min(attempts, 5));
+export async function retryLater(db: Database, id: string, itemId: string, attempts: number, now: number, suggestedMs?: number | null): Promise<void> {
+  const backoff = retryDelay(Math.min(MAX_RETRY_MS, MIN_RETRY_MS * 2 ** Math.min(attempts, 5)), suggestedMs);
   await db.prepare(
     "UPDATE deliveries SET attempts = attempts + 1, next_attempt_at = ? " +
     "WHERE monitor_id = ? AND item_id = ? AND status = 'pending'"
