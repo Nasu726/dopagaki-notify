@@ -9,7 +9,7 @@ import { fetchYouTube } from './sources/youtube.ts';
 import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, getPending, getRunnableIds,
-  getState, markSent, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
+  getState, markSent, coolDownPending, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
 
@@ -87,7 +87,10 @@ export async function runTick(
         await retryLater(env.DB, runnable.id, item.item_id, item.attempts, now, suggestedRetryDelay(error));
         console.error('Discord delivery failed for ' + runnable.id + '/' + item.item_id + '; retry scheduled');
         // All items for this monitor share a webhook; a 429 must stop the burst.
-        if (isRateLimited(error)) break;
+        if (isRateLimited(error)) {
+          await coolDownPending(env.DB, runnable.id, now, suggestedRetryDelay(error));
+          break;
+        }
       }
     }
     if (fetchError !== undefined) throw fetchError;
