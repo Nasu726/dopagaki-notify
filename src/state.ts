@@ -1,4 +1,4 @@
-import type { Database, Delivery, MonitorState, ContentItem } from './types.ts';
+import type { Database, Delivery, MonitorState, ContentItem, SourceName } from './types.ts';
 
 export const LEASE_MS = 120_000;
 const MIN_RETRY_MS = 5 * 60_000;
@@ -22,9 +22,14 @@ export async function ensureMonitors(db: Database, ids: readonly string[]): Prom
 export async function ensureMonitor(db: Database, id: string): Promise<void> {
   await ensureMonitors(db, [id]);
 }
-export async function getState(db: Database, id: string): Promise<MonitorState> {
-  const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at, config_identity, last_incomplete_at, incomplete_count, webhook_cooldown_until, webhook_blocked_status, webhook_blocked_at FROM monitor_state WHERE id = ?')
-    .bind(id).first<MonitorState>();
+export async function getState(db: Database, id: string, source: SourceName): Promise<MonitorState> {
+  const state = await db.prepare(
+    'SELECT m.id, m.initialized_at, m.next_due_at, m.scan_cursor, m.scan_started_at, ' +
+    'm.last_complete_at, m.config_identity, m.last_incomplete_at, m.incomplete_count, ' +
+    'COALESCE(w.cooldown_until, 0) AS webhook_cooldown_until, ' +
+    'w.blocked_status AS webhook_blocked_status, w.blocked_at AS webhook_blocked_at ' +
+    'FROM monitor_state m LEFT JOIN webhook_source_state w ON w.source = ? WHERE m.id = ?'
+  ).bind(source, id).first<MonitorState>();
   if (!state) throw new Error('Missing monitor state for ' + id);
   return state;
 }
@@ -50,21 +55,22 @@ export async function assertMonitorIdentity(
   if (result.meta.changes !== 1) throw new Error('Monitor identity could not be pinned under the active lease');
 }
 export async function getRunnableIds(
-  db: Database, now: number, enabledIds: readonly string[],
+  db: Database, now: number, enabled: readonly { id: string; source: SourceName }[],
 ): Promise<string[]> {
-  if (!enabledIds.length) return [];
-  // The enabled roster is the driving table. Missing monitor rows are bootstrapped
-  // only once; otherwise a quiet Cron reads D1 without any initialization writes.
-  const inputs = enabledIds.map(() => '(?)').join(',');
+  if (!enabled.length) return [];
+  // All monitors of a source share one Cloudflare Webhook Secret.
+  const inputs = enabled.map(() => '(?,?)').join(',');
+  const params = enabled.flatMap((monitor) => [monitor.id, monitor.source]);
   const rows = await db.prepare(
-    'WITH enabled(id) AS (VALUES ' + inputs + ') ' +
+    'WITH enabled(id, source) AS (VALUES ' + inputs + ') ' +
     'SELECT e.id AS id, m.id AS existing_id, m.next_due_at, m.lease_until, ' +
-    "CASE WHEN COALESCE(m.webhook_cooldown_until, 0) <= ? AND m.webhook_blocked_status IS NULL THEN " +
+    'CASE WHEN COALESCE(w.cooldown_until, 0) <= ? AND w.blocked_status IS NULL THEN ' +
     "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = e.id AND d.status = 'pending' " +
     'AND d.next_attempt_at <= ?) ELSE 0 END AS pending_due ' +
     'FROM enabled e LEFT JOIN monitor_state m ON m.id = e.id ' +
+    'LEFT JOIN webhook_source_state w ON w.source = e.source ' +
     'ORDER BY m.next_due_at, e.id'
-  ).bind(...enabledIds, now, now).all<{
+  ).bind(...params, now, now).all<{
     id: string; existing_id: string | null; next_due_at: number | null;
     lease_until: number | null; pending_due: number;
   }>();
@@ -151,27 +157,23 @@ export async function postponeFetch(db: Database, id: string, token: string, now
     .bind(now + retryDelay(MIN_RETRY_MS, suggestedMs), id, token).run();
 }
 export async function coolDownPending(
-  db: Database, id: string, leaseToken: string, now: number, suggestedMs?: number | null,
+  db: Database, source: SourceName, now: number, suggestedMs?: number | null,
 ): Promise<void> {
-  const nextAllowedAt = now + retryDelay(MIN_RETRY_MS, suggestedMs);
-  // Gate future messages too: a later fetch may stage more items while the
-  // existing backlog is waiting out Discord's 429.
-  const result = await db.prepare(
-    'UPDATE monitor_state SET webhook_cooldown_until = MAX(webhook_cooldown_until, ?) ' +
-    'WHERE id = ? AND lease_token = ?'
-  ).bind(nextAllowedAt, id, leaseToken).run();
-  if (result.meta.changes !== 1) throw new Error('Lost lease while saving Discord cooldown');
+  const until = now + retryDelay(MIN_RETRY_MS, suggestedMs);
+  await db.prepare(
+    'INSERT INTO webhook_source_state (source, cooldown_until) VALUES (?,?) ' +
+    'ON CONFLICT(source) DO UPDATE SET cooldown_until = MAX(webhook_source_state.cooldown_until, excluded.cooldown_until)'
+  ).bind(source, until).run();
 }
-// Do not change delivery status: operators can restore the pending queue
-// after fixing/replacing the Cloudflare Secret and explicitly clearing the block.
+
 export async function blockWebhook(
-  db: Database, id: string, token: string, status: number, now: number,
+  db: Database, source: SourceName, status: number, now: number,
 ): Promise<void> {
-  const result = await db.prepare(
-    'UPDATE monitor_state SET webhook_blocked_status = ?, webhook_blocked_at = ? ' +
-    'WHERE id = ? AND lease_token = ? AND webhook_blocked_status IS NULL'
-  ).bind(status, now, id, token).run();
-  if (result.meta.changes !== 1) throw new Error('Lost lease while blocking invalid Discord webhook');
+  // A deleted or unauthorized webhook affects every monitor of that source.
+  await db.prepare(
+    'INSERT INTO webhook_source_state (source, blocked_status, blocked_at) VALUES (?,?,?) ' +
+    'ON CONFLICT(source) DO UPDATE SET blocked_status = excluded.blocked_status, blocked_at = excluded.blocked_at'
+  ).bind(source, status, now).run();
 }
 
 export async function getPending(db: Database, id: string, now: number, limit: number): Promise<Delivery[]> {
