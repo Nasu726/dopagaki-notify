@@ -15,14 +15,14 @@ import type { Env, Monitor, ContentItem } from './types.ts';
 const MAX_NOTIFICATIONS_PER_TICK = 3;
 const LOOKBACK_MS = 48 * 60 * 60_000;
 export interface Dependencies {
-  fetchItems(monitor: Monitor, env: Env, cursor?: string | null): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor?: string | null }>;
+  fetchItems(monitor: Monitor, env: Env, cursor?: string | null, windowStart?: number | null): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor?: string | null }>;
   send(webhook: string, source: string, item: ContentItem): Promise<void>;
   randomId(): string;
 }
 const defaults: Dependencies = {
-  fetchItems: (monitor, env, cursor) => {
+  fetchItems: (monitor, env, cursor, windowStart) => {
     switch (monitor.source) {
-      case 'qiita': return fetchQiita(monitor, fetch, cursor);
+      case 'qiita': return fetchQiita(monitor, fetch, cursor, windowStart);
       case 'wikipedia': return fetchWikipedia(monitor, fetch, cursor);
       case 'arxiv': return fetchArxiv(monitor, fetch, cursor);
       case 'zenn': return fetchZenn(monitor);
@@ -52,13 +52,14 @@ export async function runTick(
     if (state.next_due_at <= now) {
       webhookFor(runnable, env);
       try {
-        const result = await deps.fetchItems(runnable, env, state.scan_cursor);
+        const windowStart = state.last_complete_at === null ? null : state.last_complete_at - LOOKBACK_MS;
+        const result = await deps.fetchItems(runnable, env, state.scan_cursor, windowStart);
         if (result.potentiallyTruncated) {
           console.warn('monitor ' + runnable.id + ': source exhausted its paging limit; coverage incomplete');
         }
         await stage(env.DB, runnable.id, result.items, state.initialized_at, now);
-        // Never stop Qiita query searches merely because an ID or timestamp is familiar:
-        // relevance ordering is not guaranteed to be creation ordering.
+        // Qiita uses a documented created:>= query filter, but search may be relevance
+        // ordered. Do not stop at a known ID; continue paging the filtered window.
         const chronologicallyOrdered = runnable.source === 'arxiv' || runnable.source === 'wikipedia';
         const reachedOverlap = chronologicallyOrdered && state.last_complete_at !== null &&
           result.items.some((item) => item.publishedAt <= state.last_complete_at! - LOOKBACK_MS);
