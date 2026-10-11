@@ -19,6 +19,7 @@ function setup() {
   const raw = new DatabaseSync(':memory:');
   raw.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0003_catchup.sql', import.meta.url), 'utf8'));
+  raw.exec(readFileSync(new URL('../migrations/0004_monitor_identity.sql', import.meta.url), 'utf8'));
 
   const db: Database = {
     prepare(sql) {
@@ -282,4 +283,36 @@ test('quiet Cron performs no D1 initialization write; newly enabled monitor boot
   assert.equal(bootstrapStatements, 2, 'a newly added monitor bootstraps one time');
   assert.equal(await runTick(s.env, [qiita, second], now + 180_000, s.deps), 'idle');
   assert.equal(bootstrapStatements, 2);
+});
+
+test('changing a source or query with the same monitor ID fails closed; changing interval is allowed', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  s.setItems([item('old', now - 1000)]);
+  await runTick(s.env, [qiita], now, s.deps);
+  const initialIdentity = s.raw.prepare('SELECT config_identity FROM monitor_state WHERE id = ?')
+    .get(qiita.id)?.config_identity;
+  assert.equal(initialIdentity, JSON.stringify(['qiita', 'tag:Rust']));
+  const due = now + 60 * 60_000;
+  await assert.rejects(() => runTick(s.env, [{ ...qiita, query: 'tag:Python' }], due, s.deps),
+    /changed source\/query/);
+  assert.equal(s.raw.prepare('SELECT config_identity FROM monitor_state WHERE id = ?')
+    .get(qiita.id)?.config_identity, initialIdentity);
+  // A failed identity check must release its lease, allowing the original monitor to recover.
+  assert.equal(await runTick(s.env, [{ ...qiita, intervalMinutes: 7 }], due, s.deps), 'processed');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id = ?')
+    .get(qiita.id)?.next_due_at, due + 7 * 60_000);
+  // New semantic monitoring conditions get a separate silent baseline under a different ID.
+  assert.equal(await runTick(s.env, [{ ...qiita, id: 'python', query: 'tag:Python' }], due + 1000, s.deps), 'processed');
+  assert.equal(s.raw.prepare('SELECT config_identity FROM monitor_state WHERE id = ?')
+    .get('python')?.config_identity, JSON.stringify(['qiita', 'tag:Python']));
+});
+
+test('legacy initialized rows without a semantic identity cannot be silently claimed', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  s.raw.prepare('INSERT INTO monitor_state (id,initialized_at,next_due_at) VALUES (?,?,?)')
+    .run(qiita.id, now - 1000, 0);
+  await assert.rejects(() => runTick(s.env, [qiita], now, s.deps), /no stored source\/query identity/);
+  assert.equal(s.raw.prepare('SELECT lease_token FROM monitor_state WHERE id = ?').get(qiita.id)?.lease_token, null);
 });
