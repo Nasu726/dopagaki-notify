@@ -37,16 +37,27 @@ export interface FetchResult {
   nextCursor?: string | null;
 }
 
-// Initial newest-page fetch. Full catch-up/pagination remains future work.
+// Search window lower bound reduces old-page traversal without relying on result order.
+// An extra UTC day protects Qiita date-only queries from timezone boundary loss.
+export function qiitaQueryWithWindow(query: string, createdAfter?: number | null): string {
+  const base = query.trim();
+  if (createdAfter == null) return base;
+  if (!Number.isFinite(createdAfter)) throw new Error('Invalid Qiita creation-time window');
+  const date = new Date(createdAfter - 86_400_000).toISOString().slice(0, 10);
+  return (base + ' created:>=' + date).trim();
+}
+
+// Fetch just one API page; D1 checkpoints the cursor for later scheduled ticks.
 export async function fetchQiita(
-  monitor: Monitor, fetcher: typeof fetch = fetch, cursor?: string | null,
+  monitor: Monitor, fetcher: typeof fetch = fetch, cursor?: string | null, createdAfter?: number | null,
 ): Promise<FetchResult> {
   const page = cursor == null ? 1 : Number(cursor);
   if (!Number.isSafeInteger(page) || page < 1 || page > MAX_PAGE) throw new Error('Invalid Qiita page cursor');
   const url = new URL(ENDPOINT);
   url.searchParams.set('page', String(page));
   url.searchParams.set('per_page', String(PER_PAGE));
-  if (monitor.query.trim()) url.searchParams.set('query', monitor.query.trim());
+  const query = qiitaQueryWithWindow(monitor.query, createdAfter);
+  if (query) url.searchParams.set('query', query);
   const response = await fetcher(url, {
     headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000),
   });

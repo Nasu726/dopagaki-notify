@@ -316,3 +316,23 @@ test('legacy initialized rows without a semantic identity cannot be silently cla
   await assert.rejects(() => runTick(s.env, [qiita], now, s.deps), /no stored source\/query identity/);
   assert.equal(s.raw.prepare('SELECT lease_token FROM monitor_state WHERE id = ?').get(qiita.id)?.lease_token, null);
 });
+
+test('Qiita runner supplies previous complete scan time as a stable filtered window', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  const windows: Array<number | null | undefined> = [];
+  const fetch = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null, window?: number | null) => {
+    windows.push(window);
+    if (windows.length === 1) return { items: [], nextCursor: null, potentiallyTruncated: false };
+    if (windows.length === 2) return { items: [item('new1', now + 1)], nextCursor: '2', potentiallyTruncated: false };
+    assert.equal(cursor, '2');
+    return { items: [item('new2', now + 2)], nextCursor: null, potentiallyTruncated: false };
+  }};
+  await runTick(s.env, [qiita], now, fetch);
+  await runTick(s.env, [qiita], now + 60 * 60_000, fetch);
+  await runTick(s.env, [qiita], now + 61 * 60_000, fetch);
+  assert.equal(windows[0], null);
+  assert.equal(windows[1], now - 48 * 60 * 60_000);
+  assert.equal(windows[2], windows[1]);
+  assert.deepEqual(s.sent, ['qiita:new1', 'qiita:new2']);
+});
