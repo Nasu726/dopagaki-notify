@@ -187,10 +187,14 @@ test('pagination checkpoint survives the next Cron invocation and completes with
   assert.deepEqual(s.sent, ['qiita:new1']);
   assert.equal(await runTick(s.env, [qiita], now + 61 * 60_000, paging), 'processed');
   assert.deepEqual(seen, [null, '2']);
+  assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, '__verify_head__');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state').get()?.next_due_at, now + 62 * 60_000);
+  await runTick(s.env, [qiita], now + 62 * 60_000, paging);
+  assert.deepEqual(seen, [null, '2', null], 'verification must refetch page 1 exactly once');
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, null);
   assert.equal(s.raw.prepare('SELECT scan_started_at FROM monitor_state').get()?.scan_started_at, null);
   assert.equal(s.raw.prepare('SELECT last_complete_at FROM monitor_state').get()?.last_complete_at, now + 60 * 60_000);
-  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state').get()?.next_due_at, now + 121 * 60_000);
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state').get()?.next_due_at, now + 122 * 60_000);
   assert.deepEqual(s.sent, ['qiita:new1', 'qiita:new2']);
 });
 
@@ -372,4 +376,57 @@ test('truncated scan records coverage gap without advancing last successful full
   assert.equal(state?.incomplete_count, 2);
   assert.deepEqual(s.sent, ['qiita:fresh', 'qiita:fresh2']);
   assert.equal(state?.scan_cursor, null, 'exhausted pagination is not resumable');
+});
+
+test('head recheck recovers a new article inserted while offset pagination was in progress', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  await runTick(s.env, [qiita], now, s.deps);
+  const seen: Array<string | null | undefined> = [];
+  const fetcher = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null) => {
+    seen.push(cursor);
+    if (seen.length === 1) return {
+      items: [item('first', now + 100)], nextCursor: '2', potentiallyTruncated: false,
+    };
+    if (seen.length === 2) return {
+      // A newly inserted top article pushes first onto page 2; ordinary offset
+      // pagination would entirely miss it until a new scan begins.
+      items: [item('first', now + 100), item('old', now - 100)],
+      nextCursor: null, potentiallyTruncated: false,
+    };
+    return {
+      items: [item('late', now + 200), item('first', now + 100)],
+      nextCursor: '2', potentiallyTruncated: false,
+    };
+  } };
+  await runTick(s.env, [qiita], now + 60 * 60_000, fetcher);
+  await runTick(s.env, [qiita], now + 61 * 60_000, fetcher);
+  assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor,
+    '__verify_head__');
+  await runTick(s.env, [qiita], now + 62 * 60_000, fetcher);
+  assert.deepEqual(seen, [null, '2', null]);
+  assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, null);
+  assert.deepEqual(s.sent, ['qiita:first', 'qiita:late']);
+});
+
+test('failed head verification is retried from the head, not marked complete', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  await runTick(s.env, [qiita], now, s.deps);
+  let attempts = 0;
+  const fetcher = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null) => {
+    attempts++;
+    if (attempts === 1) return { items: [item('a', now + 1)], nextCursor: '2', potentiallyTruncated: false };
+    if (attempts === 2) return { items: [], nextCursor: null, potentiallyTruncated: false };
+    assert.equal(cursor, null);
+    if (attempts === 3) throw new Error('head request unavailable');
+    return { items: [item('b', now + 2)], nextCursor: null, potentiallyTruncated: false };
+  } };
+  await runTick(s.env, [qiita], now + 60 * 60_000, fetcher);
+  await runTick(s.env, [qiita], now + 61 * 60_000, fetcher);
+  await assert.rejects(() => runTick(s.env, [qiita], now + 62 * 60_000, fetcher), /head request/);
+  assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, '__verify_head__');
+  await runTick(s.env, [qiita], now + 67 * 60_000, fetcher);
+  assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, null);
+  assert.deepEqual(s.sent, ['qiita:a', 'qiita:b']);
 });
