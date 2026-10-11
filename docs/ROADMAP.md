@@ -23,7 +23,7 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 
 ## Stage B — constrained Cloudflare staging deployment
 
-**Requires owner action:** grant Cloudflare integration or configure Workers Builds; create D1, apply migrations `0001`–`0007`, set actual webhook Secrets **in Cloudflare only**, select safe test monitors. Do not paste any Webhook URL into GitHub or chat.
+**Requires owner action:** grant Cloudflare integration or configure Workers Builds; create D1, apply migrations `0001`–`0008`, set actual webhook Secrets **in Cloudflare only**, select safe test monitors. Do not paste any Webhook URL into GitHub or chat.
 
 1. Deploy with all monitors disabled and check the single Cron Trigger exists; HTTP handler stays 404.
 2. Enable only one low-traffic test monitor, verify silent initial baseline, subsequent delivery and duplicate suppression.
