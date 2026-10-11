@@ -1,3 +1,4 @@
+import { isRateLimited, suggestedRetryDelay } from './http.ts';
 import { validateMonitors } from './config.ts';
 import { notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
@@ -69,7 +70,7 @@ export async function runTick(
           await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes, state.scan_started_at ?? now);
         }
       } catch (error) {
-        await postponeFetch(env.DB, runnable.id, token, now);
+        await postponeFetch(env.DB, runnable.id, token, now, suggestedRetryDelay(error));
         // A source outage must not block already queued Discord notifications.
         fetchError = error;
       }
@@ -82,9 +83,11 @@ export async function runTick(
           id: item.item_id, title: item.title, url: item.url, publishedAt: item.published_at,
         });
         await markSent(env.DB, runnable.id, item.item_id, now);
-      } catch {
-        await retryLater(env.DB, runnable.id, item.item_id, item.attempts, now);
+      } catch (error) {
+        await retryLater(env.DB, runnable.id, item.item_id, item.attempts, now, suggestedRetryDelay(error));
         console.error('Discord delivery failed for ' + runnable.id + '/' + item.item_id + '; retry scheduled');
+        // All items for this monitor share a webhook; a 429 must stop the burst.
+        if (isRateLimited(error)) break;
       }
     }
     if (fetchError !== undefined) throw fetchError;
