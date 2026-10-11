@@ -1,8 +1,23 @@
 // Tiny, bounded Atom/RSS subset parser. It does not resolve external XML entities.
+// Minimal structural checks prevent an incomplete 200 OK response from advancing
+// the D1 scan cursor as if no new items existed. This is not a general XML validator.
 export function entries(xml: string, tag: 'entry' | 'item'): string[] {
-  if (!/<(?:\w+:)?(?:feed|rss)(?:\s|>)/i.test(xml)) throw new Error('Invalid XML feed root');
+  // Avoid treating tag-like text in comments or CDATA as actual XML structure.
+  const structure = xml.replace(/<!--[\s\S]*?-->/g, '').replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
+  const root = /<((?:[a-zA-Z_][\w.-]*:)?(?:feed|rss))(?=\s|>)/i.exec(structure);
+  if (!root) throw new Error('Invalid XML feed root');
+  const rootClosing = new RegExp('</' + root[1] + '\\s*>', 'i');
+  if (!rootClosing.test(structure)) throw new Error('Truncated XML feed: missing closing root');
   const pattern = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/' + tag + '\\s*>', 'gi');
-  return [...xml.matchAll(pattern)].map((match) => match[1] ?? '');
+  const found = [...xml.matchAll(pattern)].map((match) => match[1] ?? '');
+  const openingPattern = new RegExp('<' + tag + '(?=\\s|>)', 'gi');
+  const closingPattern = new RegExp('<\\/' + tag + '\\s*>', 'gi');
+  const opens = [...structure.matchAll(openingPattern)].length;
+  const closes = [...structure.matchAll(closingPattern)].length;
+  if (opens !== closes || opens !== found.length) {
+    throw new Error('Malformed or truncated XML feed entries');
+  }
+  return found;
 }
 
 function decodeEntities(text: string): string {
