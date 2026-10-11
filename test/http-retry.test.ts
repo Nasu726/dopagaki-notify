@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { HttpStatusError, requireSuccess, retryAfterMs } from '../src/http.ts';
+import { HttpStatusError, isWebhookInvalid, requireSuccess, retryAfterMs } from '../src/http.ts';
 import { notifyDiscord } from '../src/discord.ts';
 import { fetchQiita } from '../src/sources/qiita.ts';
 import { runTick } from '../src/runner.ts';
@@ -143,4 +143,48 @@ test('new items discovered while a webhook is cooling down never bypass its 429 
   await runTick(env, [fast], now + 25 * 60_000, deps);
   assert.deepEqual(sent, ['qiita:a', 'qiita:a', 'qiita:b', 'qiita:c']);
   assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status='sent'").get()?.n, 3);
+});
+
+test('invalid webhook status disables future delivery without dropping pending messages', async () => {
+  const { env, raw } = database();
+  const attempts: string[] = [];
+  let items: ContentItem[] = [];
+  let invalid = true;
+  const deps = {
+    fetchItems: async () => ({ items, potentiallyTruncated: false }),
+    send: async (_webhook: string, _source: string, item: ContentItem) => {
+      attempts.push(item.id);
+      if (invalid) throw new HttpStatusError('Discord', 404, null);
+    },
+    randomId: () => crypto.randomUUID(),
+  };
+  await runTick(env, [monitor], now, deps);
+  items = [make('a'), make('b', now + 2_000)];
+  await runTick(env, [monitor], now + 60 * 60_000, deps);
+  assert.deepEqual(attempts, ['qiita:a']);
+  assert.equal(raw.prepare('SELECT webhook_blocked_status FROM monitor_state').get()?.webhook_blocked_status, 404);
+  assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status = 'pending'").get()?.n, 2);
+  // Another due source scan should stage new items without attempting the dead webhook.
+  items = [make('c', now + 3_000), ...items];
+  await runTick(env, [monitor], now + 120 * 60_000, deps);
+  assert.deepEqual(attempts, ['qiita:a']);
+  assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status = 'pending'").get()?.n, 3);
+  assert.equal(await runTick(env, [monitor], now + 121 * 60_000, deps), 'idle',
+    'blocked-only pending backlog must not create an every-minute hot loop');
+  // Operator rotates secret and explicitly clears the blocked marker.
+  invalid = false;
+  raw.prepare('UPDATE monitor_state SET webhook_blocked_status = NULL, webhook_blocked_at = NULL').run();
+  await runTick(env, [monitor], now + 122 * 60_000, deps);
+  assert.deepEqual(attempts, ['qiita:a', 'qiita:a', 'qiita:b', 'qiita:c']);
+  assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status = 'sent'").get()?.n, 3);
+});
+
+test('only unusable Discord webhook statuses trigger permanent suspension', () => {
+  for (const status of [401, 403, 404, 410]) {
+    assert.equal(isWebhookInvalid(new HttpStatusError('Discord', status, null)), true);
+  }
+  for (const status of [400, 408, 429, 500, 502]) {
+    assert.equal(isWebhookInvalid(new HttpStatusError('Discord', status, null)), false);
+  }
+  assert.equal(isWebhookInvalid(new Error('network failure')), false);
 });
