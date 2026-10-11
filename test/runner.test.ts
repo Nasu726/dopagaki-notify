@@ -23,6 +23,7 @@ function setup() {
   raw.exec(readFileSync(new URL('../migrations/0005_scan_coverage.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0006_webhook_cooldown.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0007_webhook_disabled.sql', import.meta.url), 'utf8'));
+  raw.exec(readFileSync(new URL('../migrations/0008_source_webhook_state.sql', import.meta.url), 'utf8'));
 
   const db: Database = {
     prepare(sql) {
@@ -124,7 +125,7 @@ test('lease excludes concurrent monitor claims', async () => {
   await ensureMonitor(s.env.DB, qiita.id);
   assert.equal(await claim(s.env.DB, qiita.id, 'first', 1_000), true);
   assert.equal(await claim(s.env.DB, qiita.id, 'second', 1_000), false);
-  assert.deepEqual(await getRunnableIds(s.env.DB, 1_000, [qiita.id]), []);
+  assert.deepEqual(await getRunnableIds(s.env.DB, 1_000, [qiita]), []);
   assert.equal(await claim(s.env.DB, qiita.id, 'third', 122_000), true);
 });
 

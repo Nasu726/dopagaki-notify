@@ -16,7 +16,7 @@ const make = (id: string, publishedAt = now + 1_000): ContentItem => ({
 });
 function database() {
   const raw = new DatabaseSync(':memory:');
-  for (const n of ['0001_init', '0003_catchup', '0004_monitor_identity', '0005_scan_coverage', '0006_webhook_cooldown', '0007_webhook_disabled'])
+  for (const n of ['0001_init', '0003_catchup', '0004_monitor_identity', '0005_scan_coverage', '0006_webhook_cooldown', '0007_webhook_disabled', '0008_source_webhook_state'])
     raw.exec(readFileSync(new URL('../migrations/' + n + '.sql', import.meta.url), 'utf8'));
   const DB: Database = {
     prepare(sql) {
@@ -105,7 +105,7 @@ test('Discord 429 postpones every pending article; no second send is attempted i
     Array<{ item_id: string; attempts: number; next_attempt_at: number }>;
   assert.deepEqual(before.map((row) => row.attempts), [1, 0, 0]);
   assert.deepEqual(before.map((row) => row.next_attempt_at), [now + 80 * 60_000, 0, 0]);
-  assert.equal(raw.prepare('SELECT webhook_cooldown_until FROM monitor_state').get()?.webhook_cooldown_until,
+  assert.equal(raw.prepare("SELECT cooldown_until FROM webhook_source_state WHERE source='qiita'").get()?.cooldown_until,
     now + 80 * 60_000);
   assert.equal(await runTick(env, [monitor], now + 61 * 60_000, deps), 'idle');
   throttled = false;
@@ -162,7 +162,7 @@ test('invalid webhook status disables future delivery without dropping pending m
   items = [make('a'), make('b', now + 2_000)];
   await runTick(env, [monitor], now + 60 * 60_000, deps);
   assert.deepEqual(attempts, ['qiita:a']);
-  assert.equal(raw.prepare('SELECT webhook_blocked_status FROM monitor_state').get()?.webhook_blocked_status, 404);
+  assert.equal(raw.prepare("SELECT blocked_status FROM webhook_source_state WHERE source='qiita'").get()?.blocked_status, 404);
   assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status = 'pending'").get()?.n, 2);
   // Another due source scan should stage new items without attempting the dead webhook.
   items = [make('c', now + 3_000), ...items];
@@ -173,7 +173,7 @@ test('invalid webhook status disables future delivery without dropping pending m
     'blocked-only pending backlog must not create an every-minute hot loop');
   // Operator rotates secret and explicitly clears the blocked marker.
   invalid = false;
-  raw.prepare('UPDATE monitor_state SET webhook_blocked_status = NULL, webhook_blocked_at = NULL').run();
+  raw.prepare('UPDATE webhook_source_state SET blocked_status = NULL, blocked_at = NULL').run();
   await runTick(env, [monitor], now + 122 * 60_000, deps);
   assert.deepEqual(attempts, ['qiita:a', 'qiita:a', 'qiita:b', 'qiita:c']);
   assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status = 'sent'").get()?.n, 3);
@@ -187,4 +187,75 @@ test('only unusable Discord webhook statuses trigger permanent suspension', () =
     assert.equal(isWebhookInvalid(new HttpStatusError('Discord', status, null)), false);
   }
   assert.equal(isWebhookInvalid(new Error('network failure')), false);
+});
+
+test('same-source monitors share a Discord 429 cooldown; distinct channel source remains independent', async () => {
+  const { env, raw } = database();
+  env.DISCORD_WEBHOOK_ARXIV = 'https://discord.com/api/webhooks/987654321/another-token';
+  const second: Monitor = { ...monitor, id: 'qiita-second', query: 'tag:Python' };
+  const other: Monitor = { ...monitor, id: 'arxiv-monitor', source: 'arxiv', query: 'cat:cs.AI' };
+  const items = new Map<string, ContentItem[]>();
+  const sends: string[] = [];
+  let throttle = false;
+  const deps = {
+    fetchItems: async (m: Monitor) => ({ items: items.get(m.id) ?? [], potentiallyTruncated: false }),
+    send: async (_webhook: string, _source: string, item: ContentItem) => {
+      sends.push(item.id);
+      if (throttle && item.id === 'qiita:first') throw new HttpStatusError('Discord', 429, 20 * 60_000);
+    },
+    randomId: () => crypto.randomUUID(),
+  };
+  await runTick(env, [monitor], now, deps);
+  await runTick(env, [second], now + 60_000, deps);
+  await runTick(env, [other], now + 120_000, deps);
+  items.set(monitor.id, [make('first')]);
+  items.set(second.id, [make('second', now + 3 * 60_000)]);
+  items.set(other.id, [{ ...make('other', now + 3 * 60_000), id: 'arxiv:other' }]);
+  throttle = true;
+  await runTick(env, [monitor, second, other], now + 60 * 60_000, deps);
+  assert.deepEqual(sends, ['qiita:first']);
+  assert.equal(raw.prepare("SELECT cooldown_until FROM webhook_source_state WHERE source='qiita'").get()?.cooldown_until,
+    now + 80 * 60_000);
+  await runTick(env, [monitor, second, other], now + 61 * 60_000, deps);
+  assert.deepEqual(sends, ['qiita:first'], 'second Qiita monitor must not send while the shared webhook is throttled');
+  assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE monitor_id = 'qiita-second' AND status='pending'").get()?.n, 1);
+  assert.equal(await runTick(env, [monitor, second], now + 62 * 60_000, deps), 'idle');
+  throttle = false;
+  await runTick(env, [other], now + 63 * 60_000, deps);
+  assert.deepEqual(sends, ['qiita:first', 'arxiv:other'],
+    'a separate webhook in another channel/source remains operational');
+  await runTick(env, [monitor, second], now + 80 * 60_000, deps);
+  await runTick(env, [monitor, second], now + 81 * 60_000, deps);
+  assert.deepEqual(sends, ['qiita:first', 'arxiv:other', 'qiita:first', 'qiita:second']);
+});
+
+test('a deleted source webhook suspends all its monitors until source-level reset', async () => {
+  const { env, raw } = database();
+  const second: Monitor = { ...monitor, id: 'qiita-second', query: 'tag:Python' };
+  const items = new Map<string, ContentItem[]>();
+  let invalid = true;
+  const sent: string[] = [];
+  const deps = {
+    fetchItems: async (m: Monitor) => ({ items: items.get(m.id) ?? [], potentiallyTruncated: false }),
+    send: async (_webhook: string, _source: string, item: ContentItem) => {
+      sent.push(item.id);
+      if (invalid) throw new HttpStatusError('Discord', 404, null);
+    },
+    randomId: () => crypto.randomUUID(),
+  };
+  await runTick(env, [monitor], now, deps);
+  await runTick(env, [second], now + 60_000, deps);
+  items.set(monitor.id, [make('first')]);
+  items.set(second.id, [make('second', now + 3 * 60_000)]);
+  await runTick(env, [monitor, second], now + 60 * 60_000, deps);
+  assert.deepEqual(sent, ['qiita:first']);
+  await runTick(env, [monitor, second], now + 61 * 60_000, deps);
+  assert.deepEqual(sent, ['qiita:first']);
+  assert.equal(raw.prepare("SELECT blocked_status FROM webhook_source_state WHERE source='qiita'").get()?.blocked_status, 404);
+  assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status='pending'").get()?.n, 2);
+  invalid = false;
+  raw.prepare("UPDATE webhook_source_state SET blocked_status=NULL, blocked_at=NULL WHERE source='qiita'").run();
+  await runTick(env, [monitor, second], now + 62 * 60_000, deps);
+  await runTick(env, [monitor, second], now + 63 * 60_000, deps);
+  assert.deepEqual(sent, ['qiita:first', 'qiita:first', 'qiita:second']);
 });
