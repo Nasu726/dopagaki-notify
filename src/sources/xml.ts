@@ -1,3 +1,4 @@
+import { requireSuccess } from '../http.ts';
 // Tiny, bounded Atom/RSS subset parser. It does not resolve external XML entities.
 // Minimal structural checks prevent an incomplete 200 OK response from advancing
 // the D1 scan cursor as if no new items existed. This is not a general XML validator.
@@ -65,7 +66,7 @@ export async function fetchTextBounded(
     headers: { Accept: 'application/atom+xml, application/rss+xml, application/xml, text/xml, */*' },
     signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) throw new Error(source + ' HTTP ' + response.status);
+  requireSuccess(response, source);
   const length = Number(response.headers.get('content-length'));
   if (length > maxBytes) { await response.body?.cancel(); throw new Error(source + ' response too large'); }
   if (!response.body) throw new Error(source + ' empty response');

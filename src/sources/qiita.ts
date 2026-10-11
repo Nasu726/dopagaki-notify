@@ -1,3 +1,4 @@
+import { requireSuccess } from '../http.ts';
 import type { ContentItem, Monitor } from '../types.ts';
 
 const ENDPOINT = 'https://qiita.com/api/v2/items';
@@ -61,7 +62,7 @@ export async function fetchQiita(
   const response = await fetcher(url, {
     headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) throw new Error('Qiita HTTP ' + response.status);
+  requireSuccess(response, 'Qiita');
   const items = parseQiita(await response.json());
   return {
     items,

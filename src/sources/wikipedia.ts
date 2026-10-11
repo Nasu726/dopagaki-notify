@@ -1,3 +1,4 @@
+import { requireSuccess } from '../http.ts';
 import type { ContentItem, Monitor } from '../types.ts';
 
 interface RecentChange {
@@ -55,7 +56,7 @@ export async function fetchWikipedia(
   const response = await fetcher(url, {
     headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) throw new Error('MediaWiki HTTP ' + response.status);
+  requireSuccess(response, 'MediaWiki');
   const raw = await response.json() as { continue?: unknown };
   const items = parseNewPages(raw, language);
   const continuation = raw.continue as Record<string, unknown> | undefined;
