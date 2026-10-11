@@ -11,6 +11,7 @@ Requires Node.js 22+; the project is written in TypeScript.
 ```sh
 npm install
 npm run check
+npm run bundle:check # Wrangler compiles without deploying
 ```
 
 **Set monitoring intervals only in [config/intervals.json](config/intervals.json).** Each value is a **positive integer number of minutes**; add an entry for every monitor ID:
