@@ -23,6 +23,8 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 
 ## Stage B — constrained Cloudflare staging deployment
 
+**Preparation:** Staging runbook is in [DEPLOYMENT.md](DEPLOYMENT.md); source adapters and Wrangler bundle have passed CI, but real API/CPU measurements remain unverified.
+
 **Requires owner action:** grant Cloudflare integration or configure Workers Builds; create D1, apply migrations `0001`–`0008`, set actual webhook Secrets **in Cloudflare only**, select safe test monitors. Do not paste any Webhook URL into GitHub or chat.
 
 1. Deploy with all monitors disabled and check the single Cron Trigger exists; HTTP handler stays 404.
