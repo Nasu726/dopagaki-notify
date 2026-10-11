@@ -40,6 +40,7 @@ export interface MonitorState {
   config_identity: string | null;
   last_incomplete_at: number | null;
   incomplete_count: number;
+  webhook_cooldown_until: number;
 }
 export interface Delivery {
   item_id: string;
