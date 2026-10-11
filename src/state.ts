@@ -17,10 +17,31 @@ export async function ensureMonitor(db: Database, id: string): Promise<void> {
   await ensureMonitors(db, [id]);
 }
 export async function getState(db: Database, id: string): Promise<MonitorState> {
-  const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at FROM monitor_state WHERE id = ?')
+  const state = await db.prepare('SELECT id, initialized_at, next_due_at, scan_cursor, scan_started_at, last_complete_at, config_identity FROM monitor_state WHERE id = ?')
     .bind(id).first<MonitorState>();
   if (!state) throw new Error('Missing monitor state for ' + id);
   return state;
+}
+
+// Pin each persistent monitor ID to its source and canonical query, not its interval.
+// Silently reusing the old ID after changing its query would mix unrelated outbox histories.
+export async function assertMonitorIdentity(
+  db: Database, monitorId: string, leaseToken: string,
+  source: string, query: string, recorded: string | null, initializedAt: number | null,
+): Promise<void> {
+  const identity = JSON.stringify([source, query.trim()]);
+  if (recorded === identity) return;
+  if (recorded !== null) {
+    throw new Error('Monitor ' + monitorId + ' has a changed source/query. Use a new monitor ID to start a silent baseline.');
+  }
+  // Migration-safe: never silently approve an unknown historical source identity.
+  if (initializedAt !== null) {
+    throw new Error('Monitor ' + monitorId + ' has no stored source/query identity but is already initialized. Reset its state intentionally.');
+  }
+  const result = await db.prepare(
+    'UPDATE monitor_state SET config_identity = ? WHERE id = ? AND lease_token = ? AND config_identity IS NULL AND initialized_at IS NULL'
+  ).bind(identity, monitorId, leaseToken).run();
+  if (result.meta.changes !== 1) throw new Error('Monitor identity could not be pinned under the active lease');
 }
 export async function getRunnableIds(
   db: Database, now: number, enabledIds: readonly string[],
@@ -62,7 +83,8 @@ export async function release(db: Database, id: string, token: string): Promise<
   await db.prepare('UPDATE monitor_state SET lease_token = NULL, lease_until = NULL WHERE id = ? AND lease_token = ?')
     .bind(id, token).run();
 }
-const OUTBOX_INSERT_BATCH = 20;
+// D1 supports up to 100 bound parameters; each row binds 7 (12 * 7 = 84).
+const OUTBOX_INSERT_BATCH = 12;
 export async function stage(
   db: Database, monitorId: string, items: readonly ContentItem[], baselineAt: number | null, now: number,
 ): Promise<void> {
