@@ -16,7 +16,7 @@ const make = (id: string, publishedAt = now + 1_000): ContentItem => ({
 });
 function database() {
   const raw = new DatabaseSync(':memory:');
-  for (const n of ['0001_init', '0003_catchup', '0004_monitor_identity', '0005_scan_coverage', '0006_webhook_cooldown', '0007_webhook_disabled'])
+  for (const n of ['0001_init', '0003_catchup', '0004_monitor_identity', '0005_scan_coverage', '0006_webhook_cooldown', '0007_webhook_disabled', '0008_source_webhook_state'])
     raw.exec(readFileSync(new URL('../migrations/' + n + '.sql', import.meta.url), 'utf8'));
   const DB: Database = {
     prepare(sql) {
@@ -105,7 +105,7 @@ test('Discord 429 postpones every pending article; no second send is attempted i
     Array<{ item_id: string; attempts: number; next_attempt_at: number }>;
   assert.deepEqual(before.map((row) => row.attempts), [1, 0, 0]);
   assert.deepEqual(before.map((row) => row.next_attempt_at), [now + 80 * 60_000, 0, 0]);
-  assert.equal(raw.prepare('SELECT webhook_cooldown_until FROM monitor_state').get()?.webhook_cooldown_until,
+  assert.equal(raw.prepare('SELECT cooldown_until FROM webhook_source_state WHERE source='qiita'').get()?.cooldown_until,
     now + 80 * 60_000);
   assert.equal(await runTick(env, [monitor], now + 61 * 60_000, deps), 'idle');
   throttled = false;
@@ -162,7 +162,7 @@ test('invalid webhook status disables future delivery without dropping pending m
   items = [make('a'), make('b', now + 2_000)];
   await runTick(env, [monitor], now + 60 * 60_000, deps);
   assert.deepEqual(attempts, ['qiita:a']);
-  assert.equal(raw.prepare('SELECT webhook_blocked_status FROM monitor_state').get()?.webhook_blocked_status, 404);
+  assert.equal(raw.prepare('SELECT blocked_status FROM webhook_source_state WHERE source='qiita'').get()?.blocked_status, 404);
   assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status = 'pending'").get()?.n, 2);
   // Another due source scan should stage new items without attempting the dead webhook.
   items = [make('c', now + 3_000), ...items];
@@ -173,7 +173,7 @@ test('invalid webhook status disables future delivery without dropping pending m
     'blocked-only pending backlog must not create an every-minute hot loop');
   // Operator rotates secret and explicitly clears the blocked marker.
   invalid = false;
-  raw.prepare('UPDATE monitor_state SET webhook_blocked_status = NULL, webhook_blocked_at = NULL').run();
+  raw.prepare('UPDATE webhook_source_state SET blocked_status = NULL, blocked_at = NULL').run();
   await runTick(env, [monitor], now + 122 * 60_000, deps);
   assert.deepEqual(attempts, ['qiita:a', 'qiita:a', 'qiita:b', 'qiita:c']);
   assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status = 'sent'").get()?.n, 3);
