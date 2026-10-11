@@ -42,13 +42,13 @@ export async function runTick(
   validateMonitors(monitors);
   const enabled = new Map(monitors.filter((monitor) => monitor.enabled).map((monitor) => [monitor.id, monitor]));
   if (!enabled.size) return 'idle';
-  const runnable = (await getRunnableIds(env.DB, now, [...enabled.keys()]))
+  const runnable = (await getRunnableIds(env.DB, now, [...enabled.values()]))
     .map((id) => enabled.get(id)).find(Boolean);
   if (!runnable) return 'idle';
   const token = deps.randomId();
   if (!await claim(env.DB, runnable.id, token, now)) return 'busy';
   try {
-    const state = await getState(env.DB, runnable.id);
+    const state = await getState(env.DB, runnable.id, runnable.source);
     await assertMonitorIdentity(env.DB, runnable.id, token, runnable.source,
       runnable.query, state.config_identity, state.initialized_at);
     let fetchError: unknown;
@@ -97,16 +97,16 @@ export async function runTick(
         await markSent(env.DB, runnable.id, item.item_id, now);
       } catch (error) {
         if (isWebhookInvalid(error)) {
-          await blockWebhook(env.DB, runnable.id, token, error.status, now);
+          await blockWebhook(env.DB, runnable.source, error.status, now);
           console.error('Discord webhook disabled for monitor ' + runnable.id +
-            ' after HTTP ' + error.status + '; replace secret and explicitly reset D1 block');
+            ' after HTTP ' + error.status + '; replace secret and explicitly reset source-level D1 block');
           break;
         }
         await retryLater(env.DB, runnable.id, item.item_id, item.attempts, now, suggestedRetryDelay(error));
         console.error('Discord delivery failed for ' + runnable.id + '/' + item.item_id + '; retry scheduled');
         // All items for this monitor share a webhook; a 429 must stop the burst.
         if (isRateLimited(error)) {
-          await coolDownPending(env.DB, runnable.id, token, now, suggestedRetryDelay(error));
+          await coolDownPending(env.DB, runnable.source, now, suggestedRetryDelay(error));
           break;
         }
       }
