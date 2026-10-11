@@ -10,6 +10,7 @@ test('stage batches content into bounded multi-row D1 operations and deduplicate
   raw.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
   let inserts = 0;
   let existingLookups = 0;
+  let maxBinds = 0;
   const db: Database = {
     prepare(sql) {
       if (sql.startsWith('INSERT OR IGNORE INTO deliveries')) inserts++;
@@ -17,7 +18,7 @@ test('stage batches content into bounded multi-row D1 operations and deduplicate
       const statement = raw.prepare(sql);
       let values: unknown[] = [];
       const bindable = {
-        bind(...args: unknown[]) { values = args; return bindable; },
+        bind(...args: unknown[]) { values = args; maxBinds = Math.max(maxBinds, args.length); return bindable; },
         async run() { return { meta: { changes: Number(statement.run(...values as []).changes) } }; },
         async first<T>() { return (statement.get(...values as []) ?? null) as T | null; },
         async all<T>() { return { results: statement.all(...values as []) as T[] }; },
@@ -33,13 +34,14 @@ test('stage batches content into bounded multi-row D1 operations and deduplicate
     publishedAt: now + n * 1000,
   }));
   await stage(db, 'm', items, now, now + 60_000);
-  assert.equal(inserts, 3, '45 rows => exactly three database writes (20+20+5)');
+  assert.equal(inserts, 4, '44 eligible rows => four inserts with D1-safe 12-row batches');
+  assert.ok(maxBinds <= 100, 'D1 rejects more than 100 bound SQL parameters');
   assert.equal(raw.prepare("SELECT count(*) AS c FROM deliveries").get()?.c, 44);
   assert.equal(raw.prepare("SELECT count(*) AS c FROM deliveries WHERE status='pending'").get()?.c, 44);
   assert.equal(raw.prepare("SELECT count(*) AS c FROM deliveries WHERE status='ignored'").get()?.c, 0);
   await stage(db, 'm', items, now, now + 120_000);
-  assert.equal(inserts, 3, 'known IDs must not be written again');
-  assert.equal(existingLookups, 6, 'a bounded lookup replaces repeat writes');
+  assert.equal(inserts, 4, 'known IDs must not be written again');
+  assert.equal(existingLookups, 8, 'a bounded lookup replaces repeat writes');
   assert.equal(raw.prepare('SELECT count(*) AS c FROM deliveries').get()?.c, 44,
     'retry must not duplicate or change sent/ignored state');
 });

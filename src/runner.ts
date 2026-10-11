@@ -8,7 +8,7 @@ import { fetchYouTube } from './sources/youtube.ts';
 import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, getPending, getRunnableIds,
-  getState, markSent, postponeFetch, release, retryLater, stage, saveScanCursor,
+  getState, markSent, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
 
@@ -46,6 +46,8 @@ export async function runTick(
   if (!await claim(env.DB, runnable.id, token, now)) return 'busy';
   try {
     const state = await getState(env.DB, runnable.id);
+    await assertMonitorIdentity(env.DB, runnable.id, token, runnable.source,
+      runnable.query, state.config_identity, state.initialized_at);
     let fetchError: unknown;
     if (state.next_due_at <= now) {
       webhookFor(runnable, env);

@@ -14,16 +14,16 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 
 1. Eliminate needless per-minute D1 writes and re-inserts of old/known articles. **Implemented; local regression-tested, Cloudflare CPU not yet measured.**
 2. Ensure a source outage does not starve already queued Discord notifications.
-3. Add fixture-based regression tests for feed order, malformed XML/JSON, overlap boundary, duplicate events and partial failures.
+3. Add fixture-based regression tests for feed order, malformed XML/JSON, overlap boundary, duplicate events and partial failures. **Still open; D1 bound-parameter regression added.**
 4. Examine unsafe scan-stop conditions and the catch-up lag on active Qiita searches; treat a page limit as **incomplete**, not a successful exhaustive scan.
-5. Verify that a change in a monitor's query/identity cannot silently carry over an unrelated seen-state baseline.
+5. Verify that a change in a monitor's query/identity cannot silently carry over an unrelated seen-state baseline. **Implemented via fail-closed semantic ID pinning; Cloudflare staging not yet run.**
 6. Verify config/secret validation and prevent unintended pings, SSRF and arbitrary domain fetches.
 
 **Gate:** GitHub Actions CI passes; all five source adapters have realistic parser fixtures and failure cases; no known unhandled duplicate/loss scenarios within stated coverage guarantees.
 
 ## Stage B — constrained Cloudflare staging deployment
 
-**Requires owner action:** grant Cloudflare integration or configure Workers Builds; create D1, apply migrations `0001`–`0003`, set actual webhook Secrets **in Cloudflare only**, select safe test monitors. Do not paste any Webhook URL into GitHub or chat.
+**Requires owner action:** grant Cloudflare integration or configure Workers Builds; create D1, apply migrations `0001`–`0004`, set actual webhook Secrets **in Cloudflare only**, select safe test monitors. Do not paste any Webhook URL into GitHub or chat.
 
 1. Deploy with all monitors disabled and check the single Cron Trigger exists; HTTP handler stays 404.
 2. Enable only one low-traffic test monitor, verify silent initial baseline, subsequent delivery and duplicate suppression.
@@ -58,6 +58,8 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 - Update this roadmap only when milestone status or verified constraints change.
 
 ## Current risks and known limitations
+
+- D1 SQL bind parameters cap at 100 per statement; notification inserts now use at most 84 binds per query (12 rows × 7 fields).
 
 - **Workers Free CPU time is 10 ms/invocation** (Cloudflare's actual measurement is required).
 - A Cron tick processes **one monitor and at most one paginated API page**, so many concurrently due monitors can run late.

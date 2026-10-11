@@ -31,7 +31,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 ## GitHub / Cloudflare deployment (not yet performed)
 
-1. Create a D1 database named `dopagaki-notify`, put its real `database_id` in `wrangler.jsonc`, and apply **all** SQL migrations in the `migrations/` directory (including `0003_catchup.sql`) in filename order using Wrangler.
+1. Create a D1 database named `dopagaki-notify`, put its real `database_id` in `wrangler.jsonc`, and apply **all** SQL migrations in the `migrations/` directory (including `0004_monitor_identity.sql`) in filename order using Wrangler.
 2. Set the corresponding **Cloudflare Secrets** for the enabled sources: `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_WIKIPEDIA`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_YOUTUBE`. Never commit Webhook URLs to Git.
 3. Configure monitors in `src/config.ts` and integer-minute intervals in `config/intervals.json`.
 4. Connect GitHub to Cloudflare Workers Builds or deploy with Wrangler. Keep deployment disabled until D1/Secrets are configured.
@@ -43,7 +43,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 
 - Single Cron Trigger with per-monitor D1 deadlines, leases, independent identity, and resumable API scan checkpoints.
 - First run creates a **silent baseline**. Unknown older articles and edits are not notified.
-- D1 durable outbox with bounded 20-article insert batches, **no baseline/old-article inserts**, and known-ID read-before-write to skip repeated inserts when nothing is new. New monitors are batch-initialized only when first encountered; once initialized, a quiet Cron invocation makes **no D1 INSERT**. These are SQL-statement savings, not measured Cloudflare CPU results.
+- D1 durable outbox with bounded 12-article insert batches (84 SQL binds, below D1's 100-bind limit), **no baseline/old-article inserts**, and known-ID read-before-write to skip repeated inserts when nothing is new. New monitors are batch-initialized only when first encountered; once initialized, a quiet Cron invocation makes **no D1 INSERT**. These are SQL-statement savings, not measured Cloudflare CPU results.
 - Bounded Discord delivery and retry; queued deliveries can drain even during a source fetch outage; webhook host validation; no arbitrary mentions.
 - **Qiita** JSON API adapter: stable ID and `created_at`, not `updated_at`.
 - **Wikipedia** recent *page creations*, not random articles or edits.
@@ -63,7 +63,7 @@ The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irresp
 - Cloudflare Workers Free CPU budget is 10 ms per invocation; it has **not** been measured on actual Workers. API waiting time is excluded from CPU accounting.
 - Initial baseline and permanently ineligible pre-baseline items are excluded without storing `ignored` outbox rows; existing legacy rows remain compatible.
 - Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.
-- Changing a monitor ID creates a new independent first-run baseline. Changing its query with the same ID requires deliberate state migration.
+- Each persistent monitor ID is pinned to its source and trimmed query (not its interval). **To change a source or query, choose a new monitor ID and add the matching integer interval in `config/intervals.json`.** The new ID creates a separate silent baseline; an unchanged ID with a changed query now fails closed. Interval-only changes require no state migration. Legacy initialized D1 rows that lack identity information fail closed until intentionally migrated or reset.
 - The example monitors are **disabled by default**. No live notification or cloud deployment has taken place.
 
 ## Prior source code and API references
