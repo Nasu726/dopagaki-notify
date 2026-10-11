@@ -141,3 +141,10 @@ Tauri、GUI、ウィジェット、ローカルSQLite表示キャッシュ、常
 - 上流APIおよびDiscordから429/5xxが返されたとき、`Retry-After`(秒数またはHTTP日時)を読み、D1上で次回試行を延期する。Discordの`X-RateLimit-Reset-After`にも対応する。Worker内での長時間sleepや同一Cron内での即時リトライは行わない。
 - Discord Webhookが429を返した場合、同じ監視IDの通知待ち全体を延期し、続けて別記事を投げない。送信済み履歴とD1スキャンカーソルは維持する。
 - 公開のHTTPレスポンスは不正・欠損ヘッダーを返し得るため、既定のバックオフを設け、異常な延期期間には上限を設ける。Cloudflare本番負荷と実際のレート制限動作は未測定。
+
+
+## v0.12 不完全走査のD1記録 (2026-10-11)
+
+- ソースのページ上限や固定長RSSの件数上限に達して`potentiallyTruncated`となった場合、通知候補の保存・送信は継続する一方、`last_complete_at`を更新しない。
+- `migrations/0005_scan_coverage.sql`で`last_incomplete_at`と`incomplete_count`を記録し、取りこぼしリスクを永続的に可視化する。上限到達後のカーソルは再開できない場合があるため消去し、次回スキャンで再評価する。
+- 新着の無欠落は保証しない。取得元のページ数上限・結果の並べ替えによる境界変動は残り、Cloudflare運用時にはD1の診断値を確認する。
