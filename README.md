@@ -4,6 +4,8 @@
 
 See [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the Japanese product specification and deployment boundaries, and [docs/ROADMAP.md](docs/ROADMAP.md) for the engineering plan and validation gates.
 
+For the owner-assisted Cloudflare setup, see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. This is a staging runbook, not an assertion of production readiness.
+
 ## Quick setup
 
 Requires Node.js 22+; the project is written in TypeScript.
