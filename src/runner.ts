@@ -77,7 +77,8 @@ export async function runTick(
       }
     }
     const webhook = webhookFor(runnable, env);
-    const pending = await getPending(env.DB, runnable.id, now, MAX_NOTIFICATIONS_PER_TICK);
+    const pending = state.webhook_cooldown_until > now
+      ? [] : await getPending(env.DB, runnable.id, now, MAX_NOTIFICATIONS_PER_TICK);
     for (const item of pending) {
       try {
         await deps.send(webhook, runnable.source, {
@@ -89,7 +90,7 @@ export async function runTick(
         console.error('Discord delivery failed for ' + runnable.id + '/' + item.item_id + '; retry scheduled');
         // All items for this monitor share a webhook; a 429 must stop the burst.
         if (isRateLimited(error)) {
-          await coolDownPending(env.DB, runnable.id, now, suggestedRetryDelay(error));
+          await coolDownPending(env.DB, runnable.id, token, now, suggestedRetryDelay(error));
           break;
         }
       }

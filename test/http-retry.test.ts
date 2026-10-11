@@ -16,7 +16,7 @@ const make = (id: string, publishedAt = now + 1_000): ContentItem => ({
 });
 function database() {
   const raw = new DatabaseSync(':memory:');
-  for (const n of ['0001_init', '0003_catchup', '0004_monitor_identity', '0005_scan_coverage'])
+  for (const n of ['0001_init', '0003_catchup', '0004_monitor_identity', '0005_scan_coverage', '0006_webhook_cooldown'])
     raw.exec(readFileSync(new URL('../migrations/' + n + '.sql', import.meta.url), 'utf8'));
   const DB: Database = {
     prepare(sql) {
@@ -104,10 +104,43 @@ test('Discord 429 postpones every pending article; no second send is attempted i
   const before = raw.prepare("SELECT item_id, attempts, next_attempt_at FROM deliveries ORDER BY item_id").all() as
     Array<{ item_id: string; attempts: number; next_attempt_at: number }>;
   assert.deepEqual(before.map((row) => row.attempts), [1, 0, 0]);
-  assert.deepEqual(before.map((row) => row.next_attempt_at), Array(3).fill(now + 80 * 60_000));
+  assert.deepEqual(before.map((row) => row.next_attempt_at), [now + 80 * 60_000, 0, 0]);
+  assert.equal(raw.prepare('SELECT webhook_cooldown_until FROM monitor_state').get()?.webhook_cooldown_until,
+    now + 80 * 60_000);
   assert.equal(await runTick(env, [monitor], now + 61 * 60_000, deps), 'idle');
   throttled = false;
   await runTick(env, [monitor], now + 80 * 60_000, deps);
   assert.deepEqual(attempts, ['qiita:a', 'qiita:a', 'qiita:b', 'qiita:c']);
   assert.equal(raw.prepare("SELECT count(*) AS c FROM deliveries WHERE status='sent'").get()?.c, 3);
+});
+
+test('new items discovered while a webhook is cooling down never bypass its 429 barrier', async () => {
+  const { env, raw } = database();
+  const fast = { ...monitor, intervalMinutes: 5 };
+  let items: ContentItem[] = [];
+  let shouldLimit = false;
+  const sent: string[] = [];
+  const deps = {
+    fetchItems: async () => ({ items, potentiallyTruncated: false }),
+    send: async (_webhook: string, _source: string, item: ContentItem) => {
+      sent.push(item.id);
+      if (shouldLimit) throw new HttpStatusError('Discord', 429, 20 * 60_000);
+    },
+    randomId: () => crypto.randomUUID(),
+  };
+  await runTick(env, [fast], now, deps);
+  items = [make('a'), make('b', now + 2_000)];
+  shouldLimit = true;
+  await runTick(env, [fast], now + 5 * 60_000, deps);
+  assert.deepEqual(sent, ['qiita:a']);
+
+  items = [make('c', now + 3_000), ...items];
+  shouldLimit = false;
+  await runTick(env, [fast], now + 10 * 60_000, deps);
+  assert.deepEqual(sent, ['qiita:a'], 'new articles must not be sent before webhook cooldown ends');
+  assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status='pending'").get()?.n, 3);
+  assert.equal(await runTick(env, [fast], now + 11 * 60_000, deps), 'idle');
+  await runTick(env, [fast], now + 25 * 60_000, deps);
+  assert.deepEqual(sent, ['qiita:a', 'qiita:a', 'qiita:b', 'qiita:c']);
+  assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status='sent'").get()?.n, 3);
 });
