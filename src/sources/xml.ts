@@ -50,8 +50,15 @@ export function tagText(xml: string, tag: string): string | null {
   const pattern = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/' + tag + '\\s*>', 'i');
   const match = pattern.exec(xml);
   if (!match) return null;
-  const content = (match[1] ?? '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
-  return decodeEntities(content.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+  // Text inside CDATA is literal, including angle brackets and strings such
+  // as "&amp;". Entity decoding is applied only to ordinary XML text.
+  const content = match[1] ?? '';
+  const visible = content.split(/(<!\[CDATA\[[\s\S]*?\]\]>)/g).map((part) =>
+    part.startsWith('<![CDATA[') && part.endsWith(']]>')
+      ? part.slice(9, -3)
+      : decodeEntities(part.replace(/<[^>]*>/g, ''))
+  ).join('');
+  return visible.replace(/\s+/g, ' ').trim();
 }
 
 export function requiredText(xml: string, tag: string): string {
