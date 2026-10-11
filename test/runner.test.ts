@@ -431,3 +431,36 @@ test('failed head verification is retried from the head, not marked complete', a
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, null);
   assert.deepEqual(s.sent, ['qiita:a', 'qiita:b']);
 });
+
+test('more than 49 configured monitors are selected in D1-safe batches with global due ordering', async () => {
+  const s = setup();
+  const now = 100_000;
+  const monitors: Monitor[] = Array.from({ length: 75 }, (_, n) => ({
+    ...qiita, id: 'm-' + String(n).padStart(3, '0'),
+  }));
+  const insert = s.raw.prepare('INSERT INTO monitor_state (id, next_due_at) VALUES (?,?)');
+  for (let i = 0; i < monitors.length; i++) {
+    // Interleave idle and due monitors across both batches.
+    const deadline = i % 2 ? now - i * 100 : now + 100_000;
+    insert.run(monitors[i]!.id, deadline);
+  }
+  const original = s.env.DB.prepare.bind(s.env.DB);
+  let maxParams = 0, dueQueries = 0;
+  s.env.DB.prepare = (sql: string) => {
+    if (sql.startsWith('WITH enabled(id, source)')) dueQueries++;
+    const prepared = original(sql);
+    return {
+      ...prepared,
+      bind(...args: unknown[]) {
+        maxParams = Math.max(maxParams, args.length);
+        assert.ok(args.length <= 100, 'Cloudflare D1 SQL binding cap');
+        return prepared.bind(...args);
+      },
+    };
+  };
+  const ids = await getRunnableIds(s.env.DB, now, monitors);
+  const expected = monitors.filter((_, n) => n % 2 === 1).reverse().map((m) => m.id);
+  assert.deepEqual(ids, expected, 'oldest deadline must take precedence across chunk boundaries');
+  assert.equal(dueQueries, 2);
+  assert.equal(maxParams, 82);
+});
