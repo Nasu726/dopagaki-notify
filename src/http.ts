@@ -1,13 +1,15 @@
 // Shared HTTP failure handling: a scheduled Worker should never sleep to wait out 429s.
 // Store the server-advertised cooldown in D1 and retry on a later Cron invocation.
 export class HttpStatusError extends Error {
-  constructor(
-    readonly source: string,
-    readonly status: number,
-    readonly retryAfterMs: number | null,
-  ) {
+  readonly source: string;
+  readonly status: number;
+  readonly retryAfterMs: number | null;
+  constructor(source: string, status: number, retryAfterMs: number | null) {
     super(source + ' HTTP ' + status);
     this.name = 'HttpStatusError';
+    this.source = source;
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
