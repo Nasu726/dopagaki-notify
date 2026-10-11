@@ -15,6 +15,8 @@ import type { Env, Monitor, ContentItem } from './types.ts';
 
 const MAX_NOTIFICATIONS_PER_TICK = 3;
 const LOOKBACK_MS = 48 * 60 * 60_000;
+// Reserved scan checkpoint; never passed to a provider API.
+const VERIFY_HEAD_CURSOR = '__verify_head__';
 export interface Dependencies {
   fetchItems(monitor: Monitor, env: Env, cursor?: string | null, windowStart?: number | null): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor?: string | null }>;
   send(webhook: string, source: string, item: ContentItem): Promise<void>;
@@ -54,7 +56,9 @@ export async function runTick(
       webhookFor(runnable, env);
       try {
         const windowStart = state.last_complete_at === null ? null : state.last_complete_at - LOOKBACK_MS;
-        const result = await deps.fetchItems(runnable, env, state.scan_cursor, windowStart);
+        const verifyingHead = state.scan_cursor === VERIFY_HEAD_CURSOR;
+        const sourceCursor = verifyingHead ? null : state.scan_cursor;
+        const result = await deps.fetchItems(runnable, env, sourceCursor, windowStart);
         if (result.potentiallyTruncated) {
           console.warn('monitor ' + runnable.id + ': source exhausted its paging limit; coverage incomplete');
         }
@@ -64,8 +68,14 @@ export async function runTick(
         const chronologicallyOrdered = runnable.source === 'arxiv' || runnable.source === 'wikipedia';
         const reachedOverlap = chronologicallyOrdered && state.last_complete_at !== null &&
           result.items.some((item) => item.publishedAt <= state.last_complete_at! - LOOKBACK_MS);
-        if (state.initialized_at !== null && result.nextCursor && !reachedOverlap) {
+        if (state.initialized_at !== null && result.nextCursor && !reachedOverlap && !verifyingHead) {
           await saveScanCursor(env.DB, runnable.id, token, now, state.scan_started_at ?? now, result.nextCursor);
+        } else if (state.initialized_at !== null && state.scan_cursor !== null &&
+            !verifyingHead && !result.potentiallyTruncated) {
+          // Offset/search pages may shift as new items arrive during a multi-Cron scan.
+          // Check the newest page once more before saving the full-scan watermark.
+          await saveScanCursor(env.DB, runnable.id, token, now,
+            state.scan_started_at ?? now, VERIFY_HEAD_CURSOR);
         } else {
           await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes,
             state.scan_started_at ?? now, !result.potentiallyTruncated);
