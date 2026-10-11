@@ -143,6 +143,17 @@ export async function postponeFetch(db: Database, id: string, token: string, now
   await db.prepare('UPDATE monitor_state SET next_due_at = ? WHERE id = ? AND lease_token = ?')
     .bind(now + retryDelay(MIN_RETRY_MS, suggestedMs), id, token).run();
 }
+export async function coolDownPending(
+  db: Database, id: string, now: number, suggestedMs?: number | null,
+): Promise<void> {
+  const nextAllowedAt = now + retryDelay(MIN_RETRY_MS, suggestedMs);
+  // The entire monitor uses one webhook; do not immediately send a second
+  // pending item to the same webhook after Discord rejects the first with 429.
+  await db.prepare(
+    "UPDATE deliveries SET next_attempt_at = ? WHERE monitor_id = ? " +
+    "AND status = 'pending' AND next_attempt_at <= ?"
+  ).bind(nextAllowedAt, id, now).run();
+}
 export async function getPending(db: Database, id: string, now: number, limit: number): Promise<Delivery[]> {
   const rows = await db.prepare(
     "SELECT item_id, title, url, published_at, attempts FROM deliveries " +
