@@ -38,6 +38,8 @@ export interface MonitorState {
   scan_started_at: number | null;
   last_complete_at: number | null;
   config_identity: string | null;
+  last_incomplete_at: number | null;
+  incomplete_count: number;
 }
 export interface Delivery {
   item_id: string;
