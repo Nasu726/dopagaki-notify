@@ -209,8 +209,8 @@ test('same-source monitors share a Discord 429 cooldown; distinct channel source
   await runTick(env, [second], now + 60_000, deps);
   await runTick(env, [other], now + 120_000, deps);
   items.set(monitor.id, [make('first')]);
-  items.set(second.id, [make('second')]);
-  items.set(other.id, [{ ...make('other'), id: 'arxiv:other' }]);
+  items.set(second.id, [make('second', now + 3 * 60_000)]);
+  items.set(other.id, [{ ...make('other', now + 3 * 60_000), id: 'arxiv:other' }]);
   throttle = true;
   await runTick(env, [monitor, second, other], now + 60 * 60_000, deps);
   assert.deepEqual(sends, ['qiita:first']);
@@ -246,7 +246,7 @@ test('a deleted source webhook suspends all its monitors until source-level rese
   await runTick(env, [monitor], now, deps);
   await runTick(env, [second], now + 60_000, deps);
   items.set(monitor.id, [make('first')]);
-  items.set(second.id, [make('second')]);
+  items.set(second.id, [make('second', now + 3 * 60_000)]);
   await runTick(env, [monitor, second], now + 60 * 60_000, deps);
   assert.deepEqual(sent, ['qiita:first']);
   await runTick(env, [monitor, second], now + 61 * 60_000, deps);
