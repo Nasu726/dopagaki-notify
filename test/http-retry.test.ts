@@ -105,7 +105,7 @@ test('Discord 429 postpones every pending article; no second send is attempted i
     Array<{ item_id: string; attempts: number; next_attempt_at: number }>;
   assert.deepEqual(before.map((row) => row.attempts), [1, 0, 0]);
   assert.deepEqual(before.map((row) => row.next_attempt_at), [now + 80 * 60_000, 0, 0]);
-  assert.equal(raw.prepare('SELECT cooldown_until FROM webhook_source_state WHERE source='qiita'').get()?.cooldown_until,
+  assert.equal(raw.prepare("SELECT cooldown_until FROM webhook_source_state WHERE source='qiita'").get()?.cooldown_until,
     now + 80 * 60_000);
   assert.equal(await runTick(env, [monitor], now + 61 * 60_000, deps), 'idle');
   throttled = false;
@@ -162,7 +162,7 @@ test('invalid webhook status disables future delivery without dropping pending m
   items = [make('a'), make('b', now + 2_000)];
   await runTick(env, [monitor], now + 60 * 60_000, deps);
   assert.deepEqual(attempts, ['qiita:a']);
-  assert.equal(raw.prepare('SELECT blocked_status FROM webhook_source_state WHERE source='qiita'').get()?.blocked_status, 404);
+  assert.equal(raw.prepare("SELECT blocked_status FROM webhook_source_state WHERE source='qiita'").get()?.blocked_status, 404);
   assert.equal(raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status = 'pending'").get()?.n, 2);
   // Another due source scan should stage new items without attempting the dead webhook.
   items = [make('c', now + 3_000), ...items];
