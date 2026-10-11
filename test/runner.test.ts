@@ -22,6 +22,7 @@ function setup() {
   raw.exec(readFileSync(new URL('../migrations/0004_monitor_identity.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0005_scan_coverage.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0006_webhook_cooldown.sql', import.meta.url), 'utf8'));
+  raw.exec(readFileSync(new URL('../migrations/0007_webhook_disabled.sql', import.meta.url), 'utf8'));
 
   const db: Database = {
     prepare(sql) {

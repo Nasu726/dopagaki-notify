@@ -48,3 +48,8 @@ export function suggestedRetryDelay(error: unknown): number | null {
 export function isRateLimited(error: unknown): boolean {
   return error instanceof HttpStatusError && error.status === 429;
 }
+
+/** Discord 401/403/404/410 indicate an unusable Webhook, not a transient rate limit. */
+export function isWebhookInvalid(error: unknown): error is HttpStatusError {
+  return error instanceof HttpStatusError && [401, 403, 404, 410].includes(error.status);
+}
