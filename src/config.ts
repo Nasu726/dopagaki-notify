@@ -2,9 +2,10 @@ import intervals from '../config/intervals.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
 
 // Only interval minutes belong in config/intervals.json. Keep monitor definitions here.
-// Examples are disabled until matching Discord webhook Secrets are configured.
+// Staging smoke test: only Qiita is enabled after D1 migrations and Secrets setup.
+// Other sources remain disabled until their live behavior is verified.
 const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
-  { id: 'qiita-rust', source: 'qiita', query: 'tag:Rust', enabled: false },
+  { id: 'qiita-rust', source: 'qiita', query: 'tag:Rust', enabled: true },
   { id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: false },
   { id: 'arxiv-cs-ai', source: 'arxiv', query: 'cat:cs.AI', enabled: false },
   { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: false },

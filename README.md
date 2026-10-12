@@ -1,6 +1,6 @@
 # dopagaki-notify
 
-**Development starter — not production ready.** Cloudflare Workers + D1 sends alerts to Discord **only for newly published content**. No resident application, public GUI, or GitHub Actions cron. The code lives in GitHub; Cloudflare runs one Cron Trigger and handles per-monitor deadlines.
+**Staging smoke test — not production ready.** Cloudflare Workers + D1 sends alerts to Discord **only for newly published content**. No resident application, public GUI, or GitHub Actions cron. The code lives in GitHub; Cloudflare runs one Cron Trigger and handles per-monitor deadlines.
 
 See [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the Japanese product specification and deployment boundaries, and [docs/ROADMAP.md](docs/ROADMAP.md) for the engineering plan and validation gates.
 
@@ -28,7 +28,7 @@ npm run bundle:check # Wrangler compiles without deploying
 }
 ```
 
-The file intentionally holds **interval values only**. Sources, queries, IDs and enabled flags are in [src/config.ts](src/config.ts). To enable a monitor, set `enabled: true` there **after** its Cloudflare Discord webhook Secret has been configured.
+The file intentionally holds **interval values only**. Sources, queries, IDs and enabled flags are in [src/config.ts](src/config.ts). **Staging:** only `qiita-rust` is enabled for a live smoke test after the owner applied all eight remote D1 migrations and registered the five Secrets. Its existing interval remains **60 minutes**; the Cron runs every minute. Other sources are still disabled. Do not enable additional monitors until Qiita has passed live tests.
 
 The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irrespective of these settings. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
 
@@ -83,7 +83,7 @@ Do not clear the block before the Secret is corrected. Avoid publishing the Webh
 - Initial baseline and permanently ineligible pre-baseline items are excluded without storing `ignored` outbox rows; existing legacy rows remain compatible.
 - Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.
 - Each persistent monitor ID is pinned to its source and trimmed query (not its interval). **To change a source or query, choose a new monitor ID and add the matching integer interval in `config/intervals.json`.** The new ID creates a separate silent baseline; an unchanged ID with a changed query now fails closed. Interval-only changes require no state migration. Legacy initialized D1 rows that lack identity information fail closed until intentionally migrated or reset.
-- The example monitors are **disabled by default**. No live notification or cloud deployment has taken place.
+- A Cloudflare Worker has been deployed by the owner, and the eight remote D1 migrations and Discord Secrets have been configured by the owner. This change enables **only Qiita** for initial live validation; actual production notification, Cloudflare CPU time and live adapter compatibility are **not yet confirmed**.
 
 ## Prior source code and API references
 
