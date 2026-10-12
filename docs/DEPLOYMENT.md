@@ -1,18 +1,18 @@
 # Cloudflare staging deployment runbook
 
-Status: **ready for owner-assisted staging, not yet deployed** (2026-10-11).
+Status: **initial Cloudflare deployment and eight D1 remote migrations reported complete by the owner; Qiita-only smoke test being enabled** (2026-10-12).
 
 This Worker has no public UI, no HTTP API, and only one Cron Trigger (`* * * * *`).
 It uses D1 for checkpoints and outbox, and an independent Discord Webhook Secret for
-each **source**. All example monitors remain disabled until explicitly enabled.
+each **source**. Only the Qiita example monitor is now being enabled for the first smoke test; the other four remain disabled.
 
 ## Step 0 — prerequisites and safety
 
 - Ensure the Cloudflare account has a Workers Free plan and room for one
   account-wide Cron Trigger. No owned domain is necessary.
-- Keep this repository's `src/config.ts` example monitors **disabled** throughout
-  the initial deployment. The deployed scheduled handler should do no work
-  while every monitor is disabled.
+- The initial deploy was performed with all monitors disabled. The present staging
+  change enables only `qiita-rust`, whose Discord Secret the owner has registered.
+  Do not enable the four remaining monitors before smoke-test success.
 - Never paste Discord Webhook URLs, API tokens or Cloudflare credentials into
   GitHub commits, issues, CI logs, or ChatGPT.
 - Before setting up Workers Builds, verify that `main` is the intended deployment
@@ -123,6 +123,38 @@ Do not store these URLs in D1 or `.dev.vars` in a public repository.
 The Cron schedule is once per minute, but each monitor's effective interval
 is **best effort** and can be delayed by pagination or an overdue backlog.
 An API 429 schedules a later retry without sleeping.
+
+## Live smoke-test observation (Qiita)
+
+The monitor ID is `qiita-rust`, its search query is `tag:Rust`, and its
+configured interval is **60 minutes**. On the first successful Cron fetch,
+`initialized_at` is set and older articles are intentionally **not sent**.
+A real article newly published *after that baseline* is needed to verify delivery.
+Its arrival time is not predictable; the absence of a notification by itself is
+not a failure.
+
+After the Workers Builds deployment of this configuration succeeds, inspect
+Cloudflare **Workers & Pages → dopagaki-notify → Observability → Logs**,
+or tail the deployed Worker from an authenticated terminal:
+
+```sh
+npx wrangler tail dopagaki-notify --format pretty
+```
+
+Inspect the remote D1 state without modifying it:
+
+```sh
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id, initialized_at, next_due_at, last_complete_at, scan_cursor, incomplete_count FROM monitor_state WHERE id = 'qiita-rust';"
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT item_id, status, attempts, sent_at FROM deliveries WHERE monitor_id = 'qiita-rust' ORDER BY discovered_at DESC LIMIT 10;"
+```
+
+For a newly initialized monitor, `initialized_at` should be non-null and
+`deliveries` will normally be empty until a newly published matching article
+is discovered. An API error may leave `initialized_at` null with the retry
+deadline delayed. Never paste Discord Secret values or private logs into chat.
+
+**CPU gate:** inspect actual CPU time and Workers errors for idle/due ticks;
+a successful build is not proof of staying within Workers Free's CPU limit.
 
 ## Recovery / stop procedure
 
