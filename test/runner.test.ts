@@ -625,7 +625,7 @@ test('retention Cron deletes only 20 expired sent receipts per invocation', asyn
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='new-sent'").get()?.status,
     'sent');
   // No notification runner is involved in the dedicated maintenance schedule.
-  await Worker.scheduled({ cron: '*/5 * * * *' }, s.env);
+  await Worker.scheduled({ cron: '10 * * * *' }, s.env);
   assert.equal(s.sent.length, 0);
 });
 
@@ -645,4 +645,23 @@ test('a long fetch crossing 20:00 JST never initiates a Discord POST', async () 
     'pending');
   await runTick(s.env, [qiita], Date.parse('2026-10-13T00:00:00Z'), s.deps);
   assert.deepEqual(s.sent, ['qiita:crossing']);
+});
+
+test('only the configured hourly schedule prunes and it differs from the polling Cron', async () => {
+  const s = setup();
+  const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  assert.deepEqual(config.triggers.crons, ['* * * * *', '10 * * * *']);
+  const old = Date.now() - DELIVERY_RETENTION_MS - 60_000;
+  s.raw.prepare(
+    "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at,sent_at) " +
+    "VALUES ('qiita-rust','hourly-old','sent','old','https://example.com',?,?,?)"
+  ).run(old, old, old);
+  const hasOld = () => Number(s.raw.prepare(
+    "SELECT count(*) AS n FROM deliveries WHERE item_id='hourly-old'"
+  ).get()?.n);
+  // Historical five-minute trigger must not dispatch maintenance anymore.
+  await Worker.scheduled({ cron: '*/5 * * * *' }, s.env);
+  assert.equal(hasOld(), 1);
+  await Worker.scheduled({ cron: '10 * * * *' }, s.env);
+  assert.equal(hasOld(), 0, 'hourly trigger runs the bounded maintenance deletion');
 });
