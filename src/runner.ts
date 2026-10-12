@@ -1,4 +1,4 @@
-import { isJstNotificationTime } from './schedule.ts';
+import { isJstNotificationTime, nextWeeklyJstDue } from './schedule.ts';
 import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors } from './config.ts';
 import { notifyDiscord, webhookFor } from './discord.ts';
@@ -80,8 +80,10 @@ export async function runTick(
           await saveScanCursor(env.DB, runnable.id, token, now,
             state.scan_started_at ?? now, VERIFY_HEAD_CURSOR);
         } else {
+          const nextDueAt = runnable.weeklyJstDay === undefined ? undefined :
+            nextWeeklyJstDue(now, runnable.weeklyJstDay);
           await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes,
-            state.scan_started_at ?? now, !result.potentiallyTruncated);
+            state.scan_started_at ?? now, !result.potentiallyTruncated, nextDueAt);
           if (state.initialized_at === null && !result.potentiallyTruncated)
             console.log('monitor ' + runnable.id + ': silent baseline initialized');
         }
