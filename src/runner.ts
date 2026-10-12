@@ -22,6 +22,7 @@ export interface Dependencies {
   fetchItems(monitor: Monitor, env: Env, cursor?: string | null, windowStart?: number | null): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor?: string | null }>;
   send(webhook: string, source: string, item: ContentItem): Promise<void>;
   randomId(): string;
+  clock?(): number; // production: check actual time again before each Discord send
 }
 const defaults: Dependencies = {
   fetchItems: (monitor, env, cursor, windowStart) => {
@@ -35,6 +36,7 @@ const defaults: Dependencies = {
   },
   send: notifyDiscord,
   randomId: () => crypto.randomUUID(),
+  clock: () => Date.now(),
 };
 
 export async function runTick(
@@ -90,10 +92,14 @@ export async function runTick(
     const webhook = webhookFor(runnable, env);
     // Continue polling sources at night, but leave outgoing notifications
     // queued until the next 09:00-20:00 JST delivery window.
-    const pending = !isJstNotificationTime(now) || state.webhook_cooldown_until > now ||
+    const deliveryNow = deps.clock?.() ?? now;
+    const pending = !isJstNotificationTime(deliveryNow) || state.webhook_cooldown_until > now ||
       state.webhook_blocked_status !== null
       ? [] : await getPending(env.DB, runnable.id, now, MAX_NOTIFICATIONS_PER_TICK);
     for (const item of pending) {
+      // A slow upstream fetch may have crossed 20:00 JST since the tick began.
+      // Check again immediately before posting, not only at tick selection.
+      if (!isJstNotificationTime(deps.clock?.() ?? now)) break;
       try {
         await deps.send(webhook, runnable.source, {
           id: item.item_id, title: item.title, url: item.url, publishedAt: item.published_at,
