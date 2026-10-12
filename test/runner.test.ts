@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { runTick } from '../src/runner.ts';
+import { isJstNotificationTime } from '../src/schedule.ts';
+import { DELIVERY_RETENTION_MS, PRUNE_BATCH_SIZE, pruneSentDeliveries } from '../src/maintenance.ts';
+import Worker from '../src/index.ts';
 import { MONITORS, validateMonitors, withIntervals } from '../src/config.ts';
 import { claim, ensureMonitor, getRunnableIds } from '../src/state.ts';
 import { parseQiita } from '../src/sources/qiita.ts';
@@ -24,6 +27,7 @@ function setup() {
   raw.exec(readFileSync(new URL('../migrations/0006_webhook_cooldown.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0007_webhook_disabled.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0008_source_webhook_state.sql', import.meta.url), 'utf8'));
+  raw.exec(readFileSync(new URL('../migrations/0009_delivery_retention.sql', import.meta.url), 'utf8'));
 
   const db: Database = {
     prepare(sql) {
@@ -462,7 +466,7 @@ test('more than 49 configured monitors are selected in D1-safe batches with glob
   const expected = monitors.filter((_, n) => n % 2 === 1).reverse().map((m) => m.id);
   assert.deepEqual(ids, expected, 'oldest deadline must take precedence across chunk boundaries');
   assert.equal(dueQueries, 2);
-  assert.equal(maxParams, 82);
+  assert.equal(maxParams, 83);
 });
 
 test('atomic lease claim follows shared webhook state, not legacy monitor flags', async () => {
@@ -523,7 +527,7 @@ test('one-shot remote D1 smoke SQL requires an initialized monitor with matching
 
 test('the normal Cron sends the SQL-inserted probe and marks it sent without an API fetch', async () => {
   const s = setup();
-  const now = Date.now();
+  const now = Date.parse('2026-10-12T03:00:00Z'); // noon JST, inside delivery hours
   s.raw.prepare(
     'INSERT INTO monitor_state (id,initialized_at,next_due_at,config_identity) VALUES (?,?,?,?)'
   ).run('qiita-rust', now - 7_200_000, now + 3_600_000, '["qiita","tag:Rust"]');
@@ -550,4 +554,95 @@ test('the normal Cron sends the SQL-inserted probe and marks it sent without an 
   s.raw.exec(probe);
   assert.equal(await runTick(s.env, [qiita], now + 60_000, deps), 'idle');
   assert.equal(s.sent.length, 1, 'probe must not send again after ACK');
+});
+
+test('JST notification window is 09:00 inclusive and 20:00 exclusive', () => {
+  for (const [utc, allowed] of [
+    ['2026-10-12T23:59:59Z', false], // 08:59 JST
+    ['2026-10-13T00:00:00Z', true],  // 09:00 JST
+    ['2026-10-13T10:59:59Z', true],  // 19:59 JST
+    ['2026-10-13T11:00:00Z', false], // 20:00 JST
+  ] as const) {
+    assert.equal(isJstNotificationTime(Date.parse(utc)), allowed, utc);
+  }
+});
+
+test('night scans still enqueue new articles but do not post or spin; morning drains backlog', async () => {
+  const s = setup();
+  const day = Date.parse('2026-10-12T10:00:00Z'); // 19:00 JST
+  await runTick(s.env, [qiita], day, s.deps); // baseline
+  s.setItems([item('after-baseline', day + 30 * 60_000)]);
+  const night = day + 60 * 60_000; // 20:00 JST
+  assert.equal(await runTick(s.env, [qiita], night, s.deps), 'processed');
+  assert.deepEqual(s.sent, [], 'night-time API discoveries must remain queued');
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:after-baseline'").get()?.status,
+    'pending');
+  assert.deepEqual(await getRunnableIds(s.env.DB, night + 60_000, [qiita]), [],
+    'pending-only deliveries should not cause an every-minute night-time loop');
+  const morning = Date.parse('2026-10-13T00:00:00Z'); // 09:00 JST
+  assert.equal(await runTick(s.env, [qiita], morning, s.deps), 'processed');
+  assert.deepEqual(s.sent, ['qiita:after-baseline']);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:after-baseline'").get()?.status,
+    'sent');
+});
+
+test('deduplication horizon blocks rediscovery after old sent receipts are physically pruned', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-12T03:00:00Z');
+  const baseline = now - 30 * 24 * 60 * 60_000;
+  await (await import('../src/state.ts')).stage(s.env.DB, qiita.id,
+    [item('ancient', now - DELIVERY_RETENTION_MS - 1000),
+     item('recent', now - DELIVERY_RETENTION_MS + 1000)], baseline, now);
+  assert.equal(s.raw.prepare("SELECT COUNT(*) AS n FROM deliveries WHERE item_id='qiita:ancient'").get()?.n, 0);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:recent'").get()?.status,
+    'pending');
+});
+
+test('retention Cron deletes only 20 expired sent receipts per invocation', async () => {
+  const s = setup();
+  const now = Date.now();
+  for (let i = 0; i < PRUNE_BATCH_SIZE + 1; i++) {
+    s.raw.prepare(
+      "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at,sent_at) " +
+      "VALUES ('qiita-rust',?,'sent','old','https://example.com',?,?,?)"
+    ).run('old-' + i, now - DELIVERY_RETENTION_MS - 2000,
+      now - DELIVERY_RETENTION_MS - 2000, now - DELIVERY_RETENTION_MS - 1000);
+  }
+  s.raw.prepare(
+    "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at) " +
+    "VALUES ('qiita-rust','pending-old','pending','retry','https://example.com',?,?)"
+  ).run(now - DELIVERY_RETENTION_MS - 2000, now - DELIVERY_RETENTION_MS - 2000);
+  s.raw.prepare(
+    "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at,sent_at) " +
+    "VALUES ('qiita-rust','new-sent','sent','new','https://example.com',?,?,?)"
+  ).run(now, now, now);
+  assert.equal(await pruneSentDeliveries(s.env.DB, now), PRUNE_BATCH_SIZE);
+  assert.equal(s.raw.prepare("SELECT COUNT(*) AS n FROM deliveries WHERE item_id LIKE 'old-%'").get()?.n, 1);
+  assert.equal(await pruneSentDeliveries(s.env.DB, now), 1);
+  assert.equal(await pruneSentDeliveries(s.env.DB, now), 0);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='pending-old'").get()?.status,
+    'pending');
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='new-sent'").get()?.status,
+    'sent');
+  // No notification runner is involved in the dedicated maintenance schedule.
+  await Worker.scheduled({ cron: '*/5 * * * *' }, s.env);
+  assert.equal(s.sent.length, 0);
+});
+
+test('a long fetch crossing 20:00 JST never initiates a Discord POST', async () => {
+  const s = setup();
+  const baseline = Date.parse('2026-10-12T09:59:00Z'); // 18:59 JST
+  await runTick(s.env, [qiita], baseline, s.deps);
+  s.setItems([item('crossing', baseline + 60_000)]);
+  const tick = baseline + 60 * 60_000; // 19:59 JST
+  const afterWindow = Date.parse('2026-10-12T11:00:01Z'); // 20:00 JST
+  assert.equal(await runTick(s.env, [qiita], tick, {
+    ...s.deps,
+    clock: () => afterWindow,
+  }), 'processed');
+  assert.deepEqual(s.sent, []);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:crossing'").get()?.status,
+    'pending');
+  await runTick(s.env, [qiita], Date.parse('2026-10-13T00:00:00Z'), s.deps);
+  assert.deepEqual(s.sent, ['qiita:crossing']);
 });

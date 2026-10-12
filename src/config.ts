@@ -1,16 +1,31 @@
 import intervals from '../config/intervals.json' with { type: 'json' };
+import targets from '../config/targets.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
 
 // Only interval minutes belong in config/intervals.json. Keep monitor definitions here.
-// Staging: Qiita's D1 -> Discord -> D1 delivery probe passed in production.
-// Enable Japanese Wikipedia as the second source; arXiv/Zenn/YouTube remain disabled.
-// Wikipedia's initial scan is a silent baseline, not a replay of prior new pages.
+// Public target selection lives in config/targets.json. Add a stable monitor
+// id and an interval in config/intervals.json when adding another source target.
+// Keep arXiv and YouTube disabled until the owner selects actual targets.
+export function arxivCategoryQuery(categories: readonly string[]): string {
+  if (!categories.length || categories.length > 12 ||
+      categories.some((category) => !/^[a-z][a-zA-Z0-9.-]{0,31}$/.test(category))) {
+    throw new Error('Invalid arXiv categories: use e.g. cs.AI, cs.LG, math.CO');
+  }
+  return categories.map((category) => 'cat:' + category).join(' OR ');
+}
+
 const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
   { id: 'qiita-rust', source: 'qiita', query: 'tag:Rust', enabled: true },
   { id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: true },
-  { id: 'arxiv-cs-ai', source: 'arxiv', query: 'cat:cs.AI', enabled: false },
+  ...targets.arxiv.map((target) => ({
+    id: target.id, source: 'arxiv' as const,
+    query: arxivCategoryQuery(target.categories), enabled: false,
+  })),
   { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: false },
-  { id: 'youtube-example', source: 'youtube', query: '@example', enabled: false },
+  ...targets.youtube.map((target) => ({
+    id: target.id, source: 'youtube' as const,
+    query: target.channel.trim(), enabled: false,
+  })),
 ];
 
 export function withIntervals(
@@ -40,6 +55,8 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     if (!Number.isSafeInteger(monitor.intervalMinutes) || monitor.intervalMinutes < 1)
       throw new Error('Monitor ' + monitor.id + ': intervalMinutes must be a positive integer');
     if (monitor.query.length > 512) throw new Error('Monitor ' + monitor.id + ': query too long');
+    if (monitor.enabled && !monitor.query.trim())
+      throw new Error('Enabled monitor ' + monitor.id + ' requires a configured query/target');
     ids.add(monitor.id);
   }
 }
