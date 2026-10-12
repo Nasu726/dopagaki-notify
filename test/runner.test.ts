@@ -651,7 +651,7 @@ test('a long fetch crossing 20:00 JST never initiates a Discord POST', async () 
 test('only the configured hourly schedule prunes and it differs from the polling Cron', async () => {
   const s = setup();
   const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.deepEqual(config.triggers.crons, ['* * * * *', '10 * * * *']);
+  assert.deepEqual(config.triggers.crons, ['*/5 * * * *', '10 * * * *']);
   const old = Date.now() - DELIVERY_RETENTION_MS - 60_000;
   s.raw.prepare(
     "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at,sent_at) " +
@@ -671,6 +671,7 @@ test('MediaWiki 403 holds its API retry for at least an hour without clearing ba
   const s = setup();
   const now = Date.parse('2026-10-12T00:00:00Z');
   const wiki: Monitor = { ...qiita, id: 'wikipedia-ja', query: 'ja', source: 'wikipedia' };
+  s.env.DISCORD_WEBHOOK_WIKIPEDIA = webhook;
   await assert.rejects(() => runTick(s.env, [wiki], now, {
     ...s.deps,
     fetchItems: async () => { throw new HttpStatusError('MediaWiki', 403, null); },
