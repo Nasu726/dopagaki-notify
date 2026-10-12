@@ -10,7 +10,9 @@
   "youtube": [
     {
       "id": "youtube-example",
-      "channel": ""
+      "channel": "",
+      "intervalMinutes": 10080,
+      "enabled": false
     }
   ]
 }
