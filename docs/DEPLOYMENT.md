@@ -1,18 +1,19 @@
 # Cloudflare staging deployment runbook
 
-Status: **initial Cloudflare deployment and eight D1 remote migrations reported complete by the owner; Qiita-only smoke test being enabled** (2026-10-12).
+Status: **live Cloudflare staging; Qiita D1 outbox → Discord → D1 ACK confirmed by owner; enabling Japanese Wikipedia as second source** (2026-10-12).
 
 This Worker has no public UI, no HTTP API, and only one Cron Trigger (`* * * * *`).
 It uses D1 for checkpoints and outbox, and an independent Discord Webhook Secret for
-each **source**. Only the Qiita example monitor is now being enabled for the first smoke test; the other four remain disabled.
+each **source**. Qiita and Japanese Wikipedia are enabled for staged validation. arXiv, Zenn, and YouTube remain disabled.
 
 ## Step 0 — prerequisites and safety
 
 - Ensure the Cloudflare account has a Workers Free plan and room for one
   account-wide Cron Trigger. No owned domain is necessary.
-- The initial deploy was performed with all monitors disabled. The present staging
-  change enables only `qiita-rust`, whose Discord Secret the owner has registered.
-  Do not enable the four remaining monitors before smoke-test success.
+- The initial deploy was performed with all monitors disabled. Qiita's synthetic
+  notification successfully reached Discord and was recorded as sent in D1.
+  This stage enables `wikipedia-ja` in addition to `qiita-rust`.
+  Do not enable arXiv, Zenn or YouTube until their respective checks are planned.
 - Never paste Discord Webhook URLs, API tokens or Cloudflare credentials into
   GitHub commits, issues, CI logs, or ChatGPT.
 - Before setting up Workers Builds, verify that `main` is the intended deployment
@@ -155,6 +156,26 @@ deadline delayed. Never paste Discord Secret values or private logs into chat.
 
 **CPU gate:** inspect actual CPU time and Workers errors for idle/due ticks;
 a successful build is not proof of staying within Workers Free's CPU limit.
+
+## Second-source smoke test (Japanese Wikipedia)
+
+After deployment of the two-source staging configuration, check Wikipedia's
+initial **silent baseline** without sending any historical Wikipedia articles.
+The monitor is `wikipedia-ja`, query `ja`, interval **60 minutes**; its
+source webhook Secret must be `DISCORD_WEBHOOK_WIKIPEDIA`.
+
+```powershell
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialized_at,last_complete_at,next_due_at,scan_cursor,incomplete_count FROM monitor_state WHERE id='wikipedia-ja';"
+```
+
+A row with non-null `initialized_at` and `last_complete_at` confirms that
+the first-page silent baseline was recorded. Initial observation intentionally
+does not paginate historical entries. Later scans can checkpoint continuation
+cursors across multiple Cron ticks; watch Logs for API errors and capped scans.
+Do **not** infer a successful live Discord send until a new article genuinely
+arrives; the existing Qiita smoke SQL must not be reused for Wikipedia.
+While checking, watch the Workers CPU time distribution, since occasional
+p99 peaks near 19 ms were observed with Qiita alone.
 
 ## One-time Discord delivery probe (no new Worker code, no new migration)
 

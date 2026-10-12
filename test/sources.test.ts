@@ -107,8 +107,9 @@ test('all five monitors have individual minute intervals and separate webhook se
   assert.deepEqual(new Set(MONITORS.map((m) => m.source)),
     new Set(['qiita', 'wikipedia', 'arxiv', 'zenn', 'youtube']));
   assert.ok(MONITORS.every((m) => Number.isInteger(m.intervalMinutes)));
-  assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id), ['qiita-rust'],
-    'staging gate: only the Qiita smoke-test monitor may be enabled');
+  assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id),
+    ['qiita-rust', 'wikipedia-ja'],
+    'staging gate: only Qiita and Wikipedia are active; other sources await live validation');
   for (const source of ['arxiv', 'zenn', 'youtube'] as const) {
     const key = 'DISCORD_WEBHOOK_' + source.toUpperCase();
     const env = { [key]: 'https://discord.com/api/webhooks/1234/token' } as Env;

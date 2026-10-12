@@ -2,11 +2,12 @@ import intervals from '../config/intervals.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
 
 // Only interval minutes belong in config/intervals.json. Keep monitor definitions here.
-// Staging smoke test: only Qiita is enabled after D1 migrations and Secrets setup.
-// Other sources remain disabled until their live behavior is verified.
+// Staging: Qiita's D1 -> Discord -> D1 delivery probe passed in production.
+// Enable Japanese Wikipedia as the second source; arXiv/Zenn/YouTube remain disabled.
+// Wikipedia's initial scan is a silent baseline, not a replay of prior new pages.
 const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
   { id: 'qiita-rust', source: 'qiita', query: 'tag:Rust', enabled: true },
-  { id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: false },
+  { id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: true },
   { id: 'arxiv-cs-ai', source: 'arxiv', query: 'cat:cs.AI', enabled: false },
   { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: false },
   { id: 'youtube-example', source: 'youtube', query: '@example', enabled: false },
