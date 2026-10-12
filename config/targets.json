@@ -1,0 +1,16 @@
+{
+  "arxiv": [
+    {
+      "id": "arxiv-cs-ai",
+      "categories": [
+        "cs.AI"
+      ]
+    }
+  ],
+  "youtube": [
+    {
+      "id": "youtube-example",
+      "channel": ""
+    }
+  ]
+}
