@@ -720,7 +720,7 @@ test('selected JST weekday is checked hourly across midnight and year boundaries
   ] as const;
   for (const [now, day, expected] of examples) {
     const timestamp = Date.parse(now);
-    assert.equal(new Date(nextHourlyJstWeekdayDue(timestamp, day)).toISOString(), expected, now);
+    assert.equal(nextHourlyJstWeekdayDue(timestamp, day), Date.parse(expected), now);
   }
   assert.equal(isJstWeekday(Date.parse('2026-10-12T15:00:00Z'), 'tuesday'), true);
   assert.equal(isJstWeekday(Date.parse('2026-10-13T15:00:00Z'), 'tuesday'), false);
