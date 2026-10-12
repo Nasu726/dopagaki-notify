@@ -1,11 +1,12 @@
 import intervals from '../config/intervals.json' with { type: 'json' };
 import targets from '../config/targets.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
+import { normalizeChannelReference } from './sources/youtube.ts';
 
-// Only interval minutes belong in config/intervals.json. Keep monitor definitions here.
-// Public target selection lives in config/targets.json. Add a stable monitor
-// id and an interval in config/intervals.json when adding another source target.
-// Keep arXiv and YouTube disabled until the owner selects actual targets.
+// All per-monitor intervals remain in config/intervals.json.
+// Configure arXiv category groups and any number of YouTube channels, including
+// their enabled flags, in config/targets.json; no TypeScript edits are needed.
+// The owner must intentionally select real targets before enabling them.
 export function arxivCategoryQuery(categories: readonly string[]): string {
   if (!categories.length || categories.length > 12 ||
       categories.some((category) => !/^[a-z][a-zA-Z0-9.-]{0,31}$/.test(category))) {
@@ -14,18 +15,30 @@ export function arxivCategoryQuery(categories: readonly string[]): string {
   return categories.map((category) => 'cat:' + category).join(' OR ');
 }
 
+export interface YouTubeTarget {
+  readonly id: string;
+  readonly channel: string;
+  readonly enabled: boolean;
+}
+
+export function youtubeMonitorsFromTargets(
+  configured: readonly YouTubeTarget[],
+): readonly Omit<Monitor, 'intervalMinutes'>[] {
+  return configured.map((target) => ({
+    id: target.id, source: 'youtube' as const,
+    query: target.channel.trim(), enabled: target.enabled,
+  }));
+}
+
 const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
   { id: 'qiita-rust', source: 'qiita', query: 'tag:Rust', enabled: true },
   { id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: true },
   ...targets.arxiv.map((target) => ({
     id: target.id, source: 'arxiv' as const,
-    query: arxivCategoryQuery(target.categories), enabled: false,
+    query: arxivCategoryQuery(target.categories), enabled: target.enabled,
   })),
   { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: false },
-  ...targets.youtube.map((target) => ({
-    id: target.id, source: 'youtube' as const,
-    query: target.channel.trim(), enabled: false,
-  })),
+  ...youtubeMonitorsFromTargets(targets.youtube),
 ];
 
 export function withIntervals(
@@ -55,8 +68,14 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     if (!Number.isSafeInteger(monitor.intervalMinutes) || monitor.intervalMinutes < 1)
       throw new Error('Monitor ' + monitor.id + ': intervalMinutes must be a positive integer');
     if (monitor.query.length > 512) throw new Error('Monitor ' + monitor.id + ': query too long');
+    if (typeof monitor.enabled !== 'boolean')
+      throw new Error('Monitor ' + monitor.id + ': enabled must be a boolean');
     if (monitor.enabled && !monitor.query.trim())
       throw new Error('Enabled monitor ' + monitor.id + ' requires a configured query/target');
+    if (monitor.enabled && monitor.source === 'youtube') {
+      try { normalizeChannelReference(monitor.query); }
+      catch { throw new Error('Enabled YouTube monitor ' + monitor.id + ': invalid channel reference'); }
+    }
     ids.add(monitor.id);
   }
 }
