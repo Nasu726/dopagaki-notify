@@ -24,25 +24,25 @@ npm run bundle:check # Wrangler compiles without deploying
   "wikipedia-ja": 60,
   "arxiv-cs-ai": 120,
   "zenn-topic-typescript": 60,
-  "youtube-yurugengo": 10080,
-  "youtube-yurucom": 10080,
-  "youtube-3blue1brown-japan": 10080
+  "youtube-yurugengo": 60,
+  "youtube-yurucom": 60,
+  "youtube-3blue1brown-japan": 60
 }
 ```
 
-The file intentionally holds **interval values only**. arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; the fixed Qiita/Wikipedia/Zenn enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the three explicitly selected YouTube channels are also enabled for weekly JST weekday checks; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv and Zenn remain disabled. All YouTube checks and real deliveries are **unverified** in Cloudflare until their first live baselines succeed.
+The file intentionally holds **interval values only**. arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; the fixed Qiita/Wikipedia/Zenn enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the three explicitly selected YouTube channels are also enabled for hourly checks on their selected JST weekdays; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv and Zenn remain disabled. All YouTube checks and real deliveries are **unverified** in Cloudflare until their first live baselines succeed.
 
 The monitoring Cron Trigger in `wrangler.jsonc` runs every **five minutes** (`*/5 * * * *`), irrespective of these settings. It checks D1 deadlines; it does **not** fetch every API every five minutes. A **second independent Cron** (`10 * * * *`, every hour at minute 10 UTC/JST) deletes at most 20 acknowledged messages per invocation (24 invocations/day; up to 480 sent receipts/day). The previous five-minute cadence was unnecessary overhead. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
 
-## arXiv categories and YouTube channels with weekly JST weekdays
+## arXiv categories and YouTube channels with hourly JST weekday schedules
 
 Three user-selected YouTube channels are configured and **enabled**:
 
 | Monitor ID | Channel | Check time (JST) | Interval |
 | --- | --- | --- | --- |
-| `youtube-yurugengo` | [ゆる言語学ラジオ](https://www.youtube.com/@yurugengo) | Tuesday 09:00 | 10,080 minutes (weekly) |
-| `youtube-yurucom` | [ゆるコンピュータ科学ラジオ](https://www.youtube.com/@yurucom) | Sunday 09:00 | 10,080 minutes (weekly) |
-| `youtube-3blue1brown-japan` | [3Blue1BrownJapan](https://www.youtube.com/@3Blue1BrownJapan) | Sunday 09:00 | 10,080 minutes (weekly) |
+| `youtube-yurugengo` | [ゆる言語学ラジオ](https://www.youtube.com/@yurugengo) | Tuesday, every hour (00:00–23:00) | 60 minutes |
+| `youtube-yurucom` | [ゆるコンピュータ科学ラジオ](https://www.youtube.com/@yurucom) | Sunday, every hour (00:00–23:00) | 60 minutes |
+| `youtube-3blue1brown-japan` | [3Blue1BrownJapan](https://www.youtube.com/@3Blue1BrownJapan) | Sunday, every hour (00:00–23:00) | 60 minutes |
 
 Each channel has its **own** D1 identity, first-run baseline, due timestamp and delivery history, and all three share the single `DISCORD_WEBHOOK_YOUTUBE` Secret. Real YouTube fetching, handle resolution and notifications **have not yet been verified in Cloudflare**.
 
@@ -58,13 +58,13 @@ The checked-in `config/targets.json` contains these definitions:
 }
 ```
 
-The actual file also includes the independently configured arXiv category list, which is still disabled. All three corresponding keys in `config/intervals.json` have the value `10080`; **minute intervals have a single source of truth in that file**.
+The actual file also includes the independently configured arXiv category list, which is still disabled. All three corresponding keys in `config/intervals.json` have the value `60`; **minute intervals have a single source of truth in that file**.
 
-To add or change channels, edit `config/targets.json` (`id`, `channel`, `enabled`, optional `weekdayJst`) and `config/intervals.json` (matching ID → positive integer minutes). With `weekdayJst` set, only a **weekly interval of 10080 minutes** is accepted, and the next successful check is aligned to that weekday at **09:00 JST** (not simply seven days from the previous check). For other intervals, omit `weekdayJst` and checks remain relative to their previous completion time. The five-minute dispatcher can add a small delay. Retried failures may fetch outside the nominated day, then return to the nominated day after success.
+To add or change channels, edit `config/targets.json` (`id`, `channel`, `enabled`, optional `weekdayJst`) and `config/intervals.json` (matching ID → positive integer minutes). With `weekdayJst` set, only an **hourly interval of 60 minutes** is accepted. Checks happen **only on the named JST weekday, at each hour from 00:00 through 23:00**. Outside that weekday, no YouTube upstream fetch is made; the next D1 due timestamp is advanced to the next selected weekday. Other monitors without `weekdayJst` continue using elapsed-minute intervals. The five-minute dispatcher can add a small delay. A failed on-day fetch may be retried later on that day; if its retry becomes due after midnight, fetching is deferred until the next selected weekday.
 
-**Initial activation is intentionally different:** newly added monitors take one immediate *silent baseline* on the next eligible dispatcher invocation so existing videos are not sent; subsequent checks follow the assigned weekday. A query/channel change must use a **new monitor ID** rather than reusing an initialized ID. Avoid changing IDs just to change their weekday or interval.
+**Initial activation is intentionally different:** newly added monitors perform their first *silent baseline* on the first eligible dispatcher invocation **on their selected weekday**; existing videos are not sent, and subsequent checks follow hourly slots on the same day. A query/channel change must use a **new monitor ID** rather than reusing an initialized ID. Avoid changing IDs just to change their weekday or interval.
 
-The YouTube Atom feed includes only a bounded set of recent uploads (typically about 15). With weekly polling, channels posting heavily can lose old feed entries before the next read; choose shorter intervals and omit `weekdayJst` when needed. Resolving `@handles` from YouTube public channel pages may be blocked in some execution environments; if a live Worker fails, prefer a direct `UC...` channel ID instead, with a new monitor ID if already initialized.
+The YouTube Atom feed includes only a bounded set of recent uploads (typically about 15). Because this schedule skips the other six days, it can still miss older entries when more than approximately 15 uploads accumulate before the next selected day; choose more frequent days or omit `weekdayJst` when coverage matters. Resolving `@handles` from YouTube public channel pages may be blocked in some execution environments; if a live Worker fails, prefer a direct `UC...` channel ID instead, with a new monitor ID if already initialized.
 
 ## Notification hours, retention and privacy
 
