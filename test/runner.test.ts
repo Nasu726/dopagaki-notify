@@ -491,3 +491,63 @@ test('atomic lease claim follows shared webhook state, not legacy monitor flags'
   assert.equal(await claim(s.env.DB, qiita.id, 'qiita', 'd', now), true,
     'an ordinary due source fetch must still run while the Webhook is blocked');
 });
+
+test('one-shot remote D1 smoke SQL requires an initialized monitor with matching identity', () => {
+  const s = setup();
+  const probe = readFileSync(new URL('../ops/qiita-one-shot-smoke.sql', import.meta.url), 'utf8');
+  const rowCount = () => Number(s.raw.prepare(
+    "SELECT COUNT(*) AS n FROM deliveries WHERE item_id='smoke:qiita:discord-outbox:2026-10-12'"
+  ).get()?.n);
+  s.raw.exec(probe);
+  assert.equal(rowCount(), 0, 'must never create a phantom monitor or queue entry');
+  s.raw.prepare('INSERT INTO monitor_state (id, config_identity) VALUES (?,?)')
+    .run('qiita-rust', '["qiita","tag:Rust"]');
+  s.raw.exec(probe);
+  assert.equal(rowCount(), 0, 'no live notification without a completed silent baseline');
+  s.raw.prepare('UPDATE monitor_state SET initialized_at=1,config_identity=? WHERE id=?')
+    .run('["qiita","tag:Python"]', 'qiita-rust');
+  s.raw.exec(probe);
+  assert.equal(rowCount(), 0, 'no injection into a monitor whose query changed');
+  s.raw.prepare('UPDATE monitor_state SET config_identity=? WHERE id=?')
+    .run('["qiita","tag:Rust"]', 'qiita-rust');
+  s.raw.exec(probe);
+  s.raw.exec(probe);
+  assert.equal(rowCount(), 1, 're-running the SQL must be idempotent');
+  const row = s.raw.prepare("SELECT * FROM deliveries WHERE item_id='smoke:qiita:discord-outbox:2026-10-12'").get();
+  assert.equal(row?.status, 'pending');
+  assert.equal(row?.monitor_id, 'qiita-rust');
+  assert.match(String(row?.title), /\\[TEST\\]/);
+  assert.equal(s.raw.prepare('SELECT initialized_at FROM monitor_state WHERE id=?')
+    .get('qiita-rust')?.initialized_at, 1);
+});
+
+test('the normal Cron sends the SQL-inserted probe and marks it sent without an API fetch', async () => {
+  const s = setup();
+  const now = Date.now();
+  s.raw.prepare(
+    'INSERT INTO monitor_state (id,initialized_at,next_due_at,config_identity) VALUES (?,?,?,?)'
+  ).run('qiita-rust', now - 7_200_000, now + 3_600_000, '["qiita","tag:Rust"]');
+  const original = s.raw.prepare('SELECT initialized_at,next_due_at FROM monitor_state WHERE id=?')
+    .get('qiita-rust');
+  const probe = readFileSync(new URL('../ops/qiita-one-shot-smoke.sql', import.meta.url), 'utf8');
+  s.raw.exec(probe);
+  let upstreamFetches = 0;
+  const deps = {
+    ...s.deps,
+    fetchItems: async () => { upstreamFetches++; throw new Error('not due'); },
+  };
+  assert.equal(await runTick(s.env, [qiita], now, deps), 'processed');
+  assert.equal(upstreamFetches, 0);
+  assert.deepEqual(s.sent, ['smoke:qiita:discord-outbox:2026-10-12']);
+  const row = s.raw.prepare(
+    "SELECT status,sent_at,attempts FROM deliveries WHERE item_id='smoke:qiita:discord-outbox:2026-10-12'"
+  ).get();
+  assert.equal(row?.status, 'sent');
+  assert.equal(row?.sent_at, now);
+  assert.equal(row?.attempts, 0);
+  assert.deepEqual(s.raw.prepare('SELECT initialized_at,next_due_at FROM monitor_state WHERE id=?')
+    .get('qiita-rust'), original, 'outbox-only sending must not alter fetch checkpoints');
+  s.raw.exec(probe);
+  assert.equal(await runTick(s.env, [qiita], now + 60_000, deps), 'idle');
+  assert.equal(s.sent.length, 1, 'probe must not send again after ACK');
+});
