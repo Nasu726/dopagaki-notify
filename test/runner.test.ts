@@ -628,3 +628,21 @@ test('retention Cron deletes only 20 expired sent receipts per invocation', asyn
   await Worker.scheduled({ cron: '*/5 * * * *' }, s.env);
   assert.equal(s.sent.length, 0);
 });
+
+test('a long fetch crossing 20:00 JST never initiates a Discord POST', async () => {
+  const s = setup();
+  const baseline = Date.parse('2026-10-12T09:59:00Z'); // 18:59 JST
+  await runTick(s.env, [qiita], baseline, s.deps);
+  s.setItems([item('crossing', baseline + 60_000)]);
+  const tick = baseline + 60 * 60_000; // 19:59 JST
+  const afterWindow = Date.parse('2026-10-12T11:00:01Z'); // 20:00 JST
+  assert.equal(await runTick(s.env, [qiita], tick, {
+    ...s.deps,
+    clock: () => afterWindow,
+  }), 'processed');
+  assert.deepEqual(s.sent, []);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:crossing'").get()?.status,
+    'pending');
+  await runTick(s.env, [qiita], Date.parse('2026-10-13T00:00:00Z'), s.deps);
+  assert.deepEqual(s.sent, ['qiita:crossing']);
+});
