@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { runTick } from '../src/runner.ts';
 import { HttpStatusError } from '../src/http.ts';
-import { isJstNotificationTime, nextWeeklyJstDue } from '../src/schedule.ts';
+import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue } from '../src/schedule.ts';
 import { DELIVERY_RETENTION_MS, PRUNE_BATCH_SIZE, pruneSentDeliveries } from '../src/maintenance.ts';
 import Worker from '../src/index.ts';
 import { MONITORS, validateMonitors, withIntervals } from '../src/config.ts';
@@ -682,14 +682,14 @@ test('MediaWiki 403 holds its API retry for at least an hour without clearing ba
   assert.equal(state?.next_due_at, now + 60 * 60_000);
 });
 
-test('five-minute global tick is independent of per-monitor weekly/60-minute intervals', async () => {
+test('five-minute global tick is independent of per-monitor hourly source intervals', async () => {
   const s = setup();
   const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
   assert.deepEqual(config.triggers.crons, ['*/5 * * * *', '10 * * * *']);
   const minute = 60_000;
   const now = Date.now();
   for (const monitor of MONITORS.filter((m) => m.source === 'youtube')) {
-    assert.equal(monitor.intervalMinutes, 10_080);
+    assert.equal(monitor.intervalMinutes, 60);
     assert.equal(monitor.enabled, true);
   }
   // Prepare every enabled monitor as already initialized and next due in an hour.
@@ -705,48 +705,83 @@ test('five-minute global tick is independent of per-monitor weekly/60-minute int
   assert.deepEqual(s.sent, [], 'five-minute scheduler does not fetch before individual deadline');
 });
 
-test('weekly JST recurrence is pinned to Tuesday/Sunday at 09:00, across UTC and month boundaries', () => {
+
+test('selected JST weekday is checked hourly across midnight and year boundaries', () => {
   const examples = [
-    ['2026-10-12T14:59:59Z', 'tuesday', '2026-10-13T00:00:00Z'], // Mon 23:59 JST -> Tue 09:00
-    ['2026-10-12T15:01:00Z', 'tuesday', '2026-10-13T00:00:00Z'], // Tue 00:01 JST -> Tue 09:00
-    ['2026-10-13T00:00:00Z', 'tuesday', '2026-10-20T00:00:00Z'], // Tue 09:00 -> next week
-    ['2026-10-14T04:00:00Z', 'sunday', '2026-10-18T00:00:00Z'], // Wed 13:00 -> Sun 09:00
+    ['2026-10-12T14:59:59Z', 'tuesday', '2026-10-12T15:00:00Z'], // Mon 23:59 JST -> Tue 00:00
+    ['2026-10-12T15:01:00Z', 'tuesday', '2026-10-12T16:00:00Z'], // Tue 00:01 JST -> Tue 01:00
+    ['2026-10-13T00:00:00Z', 'tuesday', '2026-10-13T01:00:00Z'], // Tue 09:00 -> Tue 10:00
+    ['2026-10-13T14:00:00Z', 'tuesday', '2026-10-19T15:00:00Z'], // Tue 23:00 -> next Tue 00:00
+    ['2026-10-14T04:00:00Z', 'sunday', '2026-10-17T15:00:00Z'], // Wed 13:00 -> Sun 00:00
     ['2026-10-17T23:59:59Z', 'sunday', '2026-10-18T00:00:00Z'], // Sun 08:59 -> 09:00
-    ['2026-10-18T00:00:00Z', 'sunday', '2026-10-25T00:00:00Z'], // Sun 09:00 -> next week
-    ['2026-12-31T14:00:00Z', 'sunday', '2027-01-03T00:00:00Z'], // year boundary
+    ['2026-10-18T00:00:00Z', 'sunday', '2026-10-18T01:00:00Z'], // Sun 09:00 -> 10:00
+    ['2026-10-18T14:00:00Z', 'sunday', '2026-10-24T15:00:00Z'], // Sun 23:00 -> next Sun 00:00
+    ['2026-12-31T14:00:00Z', 'sunday', '2027-01-02T15:00:00Z'], // next-year Sun 00:00
   ] as const;
   for (const [now, day, expected] of examples) {
-    assert.equal(new Date(nextWeeklyJstDue(Date.parse(now), day)).toISOString(), expected, now);
+    const timestamp = Date.parse(now);
+    assert.equal(new Date(nextHourlyJstWeekdayDue(timestamp, day)).toISOString(), expected, now);
   }
-  assert.throws(() => nextWeeklyJstDue(Date.now(), 'noday'), /Invalid weekly JST schedule/);
+  assert.equal(isJstWeekday(Date.parse('2026-10-12T15:00:00Z'), 'tuesday'), true);
+  assert.equal(isJstWeekday(Date.parse('2026-10-13T15:00:00Z'), 'tuesday'), false);
+  assert.throws(() => nextHourlyJstWeekdayDue(Date.now(), 'noday'), /Invalid weekly JST schedule/);
 });
 
-test('new YouTube channels bootstrap silently, then obey their independent fixed weekdays', async () => {
-  const s = setup();
-  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
-  const monitors = MONITORS.filter((m) => m.source === 'youtube');
-  const starting = Date.parse('2026-10-13T03:00:00Z'); // Tuesday noon JST
-  for (let offset = 0; offset < monitors.length; offset++) {
-    const monitor = monitors[offset]!;
-    const now = starting + offset * 5 * 60_000;
-    const result = await runTick(s.env, [monitor], now, s.deps);
-    assert.equal(result, 'processed');
-    const state = s.raw.prepare(
-      'SELECT initialized_at, next_due_at, config_identity FROM monitor_state WHERE id=?'
-    ).get(monitor.id);
-    assert.equal(state?.initialized_at, now, 'first scan is a silent baseline');
-    assert.equal(state?.config_identity, JSON.stringify(['youtube', monitor.query.trim()]));
-    assert.equal(state?.next_due_at, nextWeeklyJstDue(now, monitor.weeklyJstDay!));
-    assert.equal(s.sent.length, 0);
-    assert.equal(await runTick(s.env, [monitor], now + 24 * 60 * 60_000, s.deps), 'idle');
-  }
-});
-
-test('a weekly YouTube retry can happen midweek, then realign the next due date', async () => {
+test('off-day YouTube initialization is deferred until specified day, with no upstream fetch', async () => {
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
   const monitor = MONITORS.find((m) => m.id === 'youtube-yurucom')!;
-  const sunday = Date.parse('2026-10-18T00:00:00Z');
+  const tuesday = Date.parse('2026-10-13T03:00:00Z'); // Tue 12:00 JST, not Sunday's slot
+  let fetches = 0;
+  const deps = {
+    ...s.deps,
+    fetchItems: async () => { fetches++; return { items: [], potentiallyTruncated: false }; },
+  };
+  assert.equal(await runTick(s.env, [monitor], tuesday, deps), 'processed');
+  assert.equal(fetches, 0);
+  let state = s.raw.prepare(
+    'SELECT initialized_at, next_due_at, config_identity FROM monitor_state WHERE id=?'
+  ).get(monitor.id);
+  assert.equal(state?.initialized_at, null);
+  assert.equal(state?.config_identity, JSON.stringify(['youtube', monitor.query.trim()]));
+  const sunday = Date.parse('2026-10-17T15:00:00Z'); // Sun 00:00 JST
+  assert.equal(state?.next_due_at, sunday);
+  assert.equal(await runTick(s.env, [monitor], sunday - 5 * 60_000, deps), 'idle');
+  assert.equal(await runTick(s.env, [monitor], sunday, deps), 'processed');
+  assert.equal(fetches, 1);
+  state = s.raw.prepare('SELECT initialized_at,next_due_at FROM monitor_state WHERE id=?').get(monitor.id);
+  assert.equal(state?.initialized_at, sunday);
+  assert.equal(state?.next_due_at, sunday + 60 * 60_000);
+});
+
+test('all three YouTube monitors use independent Tuesday/Sunday hourly schedules', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitors = MONITORS.filter((m) => m.source === 'youtube');
+  for (const monitor of monitors) {
+    const base = monitor.weeklyJstDay === 'tuesday'
+      ? Date.parse('2026-10-13T03:00:00Z')
+      : Date.parse('2026-10-18T03:00:00Z'); // each selected day at noon JST
+    assert.equal(await runTick(s.env, [monitor], base, s.deps), 'processed');
+    const state = s.raw.prepare(
+      'SELECT initialized_at, next_due_at, config_identity FROM monitor_state WHERE id=?'
+    ).get(monitor.id);
+    assert.equal(state?.initialized_at, base, 'first on-day scan is a silent baseline');
+    assert.equal(state?.config_identity, JSON.stringify(['youtube', monitor.query.trim()]));
+    assert.equal(state?.next_due_at, base + 60 * 60_000);
+    assert.equal(s.sent.length, 0);
+    assert.equal(await runTick(s.env, [monitor], base + 60 * 60_000, s.deps), 'processed');
+    assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
+      .get(monitor.id)?.next_due_at, base + 120 * 60_000);
+    assert.equal(await runTick(s.env, [monitor], base + 24 * 60 * 60_000, s.deps), 'idle');
+  }
+});
+
+test('Sunday YouTube API failure retries on Sunday then resumes hourly; off-day retries defer', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitor = MONITORS.find((m) => m.id === 'youtube-yurucom')!;
+  const sunday = Date.parse('2026-10-17T15:00:00Z'); // Sun 00:00 JST
   let denied = true;
   const deps = {
     ...s.deps,
@@ -762,5 +797,28 @@ test('a weekly YouTube retry can happen midweek, then realign the next due date'
   const retry = sunday + 5 * 60_000;
   assert.equal(await runTick(s.env, [monitor], retry, deps), 'processed');
   due = s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?').get(monitor.id)?.next_due_at;
-  assert.equal(due, Date.parse('2026-10-25T00:00:00Z'));
+  assert.equal(due, sunday + 60 * 60_000);
+  assert.equal(await runTick(s.env, [monitor], Date.parse('2026-10-18T15:00:00Z'), deps), 'idle');
+});
+
+test('pending YouTube notifications can be sent next morning even outside fetch weekday', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitor = MONITORS.find((m) => m.id === 'youtube-yurugengo')!;
+  const tuesday = Date.parse('2026-10-13T10:00:00Z'); // Tue 19:00 JST
+  await runTick(s.env, [monitor], tuesday, s.deps); // silent baseline
+  s.setItems([{ id: 'youtube:AbCdEf12345', title: 'New upload',
+    url: 'https://www.youtube.com/watch?v=AbCdEf12345',
+    publishedAt: tuesday + 20 * 60_000 }]);
+  const night = tuesday + 60 * 60_000; // Tue 20:00 JST
+  assert.equal(await runTick(s.env, [monitor], night, s.deps), 'processed');
+  assert.deepEqual(s.sent, []);
+  assert.equal(s.raw.prepare(
+    "SELECT status FROM deliveries WHERE item_id='youtube:AbCdEf12345'"
+  ).get()?.status, 'pending');
+  const morning = Date.parse('2026-10-14T00:00:00Z'); // Wed 09:00 JST
+  assert.equal(await runTick(s.env, [monitor], morning, s.deps), 'processed');
+  assert.deepEqual(s.sent, ['youtube:AbCdEf12345']);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='youtube:AbCdEf12345'")
+    .get()?.status, 'sent');
 });
