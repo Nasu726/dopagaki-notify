@@ -4,7 +4,7 @@ Status: **live Cloudflare staging; Qiita D1 outbox → Discord → D1 ACK confir
 
 This Worker has no public UI or HTTP API. It has a five-minute monitoring Cron (`*/5 * * * *`) and a separate hourly bounded retention Cron (`10 * * * *`).
 It uses D1 for checkpoints and outbox, and an independent Discord Webhook Secret for
-each **source**. Qiita and Japanese Wikipedia are enabled for staged validation. arXiv, Zenn, and YouTube remain disabled.
+each **source**. Qiita, Japanese Wikipedia, and the three requested YouTube channels are enabled for staged validation; arXiv and Zenn remain disabled.
 
 ## Step 0 — prerequisites and safety
 
@@ -13,7 +13,7 @@ each **source**. Qiita and Japanese Wikipedia are enabled for staged validation.
 - The initial deploy was performed with all monitors disabled. Qiita's synthetic
   notification successfully reached Discord and was recorded as sent in D1.
   This stage enables `wikipedia-ja` in addition to `qiita-rust`.
-  Do not enable arXiv, Zenn or YouTube until their respective checks are planned.
+  YouTube is now enabled for the three explicitly authorized channels. Do not enable arXiv or Zenn before their respective checks are planned.
 - Never paste Discord Webhook URLs, API tokens or Cloudflare credentials into
   GitHub commits, issues, CI logs, or ChatGPT.
 - Before setting up Workers Builds, verify that `main` is the intended deployment
@@ -176,9 +176,7 @@ masquerade as a browser, or bypass an upstream denial.
 
 The monitoring Cron is now `*/5 * * * *` (288 invocations/day),
 with per-monitor API polling intervals still in `config/intervals.json`.
-The hourly retention Cron stays `10 * * * *`. YouTube's inactive example
-interval is now `10080` minutes (= 7 days); set its actual channel in
-`config/targets.json` before enabling it. Shorter intervals may be
+The hourly retention Cron stays `10 * * * *`. The three selected YouTube channels are configured in `config/targets.json` with Tuesday or Sunday JST weekday restrictions; each corresponding interval in `config/intervals.json` is 60 minutes. Shorter intervals may be
 needed for channels posting over 15 videos between reads.
 
 ## Second-source smoke test (Japanese Wikipedia)
@@ -280,8 +278,7 @@ The source choices are now in `config/targets.json`:
 - `arxiv[].categories`: e.g. `["cs.AI", "cs.LG"]`, producing an OR-category API query.
 - `youtube[].channel`: an actual `UC...` channel ID, `@handle` or channel URL.
 - Every added target ID also needs a positive interval in `config/intervals.json`.
-- Keep arXiv/YouTube disabled in `src/config.ts` until target selections are
-  reviewed and a staging baseline is explicitly authorized.
+- Keep arXiv disabled until a target is selected and its staging baseline is authorized. YouTube's selected targets are enabled in `config/targets.json`.
 - **Changing an initialized monitor's target requires a new monitor ID.**
 
 ### Wikipedia troubleshooting
@@ -302,30 +299,46 @@ to make the baseline appear complete. No additional sources are enabled.
 
 ## Multiple YouTube channels and Wikipedia failure policy
 
-Add every intended YouTube channel as a **separate monitor** in
-`config/targets.json`, using the fields `id` (stable), `channel`
-(`UC...`, `@handle` or supported YouTube channel URL), and
-`enabled` (`true`/`false`). Give each ID an independent interval
-in minutes in `config/intervals.json`, e.g. `60` for an active
-channel and `10080` for a weekly one. No TypeScript edits are needed
-for adding/activating YouTube channels. Do not change the query behind
-an initialized ID; create a new ID and a new silent baseline.
+The three owner-approved YouTube channels are **enabled**:
 
-The repository keeps YouTube targets **disabled** until the operator
-supplies real channels. All active channels of source `youtube` share
-`DISCORD_WEBHOOK_YOUTUBE` and its cooldown/block state, but not
-their monitor state or polling intervals.
+| Monitor ID | Channel | Check schedule (JST) |
+| --- | --- | --- |
+| `youtube-yurugengo` | `@yurugengo` | Tuesday each hour 00:00–23:00 |
+| `youtube-yurucom` | `@yurucom` | Sunday each hour 00:00–23:00 |
+| `youtube-3blue1brown-japan` | `@3Blue1BrownJapan` | Sunday each hour 00:00–23:00 |
+
+All three use `intervalMinutes=60` in `config/intervals.json`
+and `weekdayJst` in `config/targets.json`. Checks run **only on the
+specified JST day**. Initial checks on that day silently establish baselines.
+Subsequent checks use the top of each JST hour. Actual Cron timing can lag
+by up to one dispatcher interval. When an API fetch fails near midnight, an
+off-day retry is skipped until the next selected weekday. This choice favors
+the explicit day restriction over retrying every five minutes all week.
+
+Discord delivery is still restricted to **09:00–20:00 JST**. A video
+discovered during an overnight Tuesday/Sunday scan remains queued and can
+be delivered at 09:00, including on a different weekday if necessary.
+Videos with updated titles/descriptions do not count as newly published
+content. The feed contains only about 15 recent videos; checking only
+one day per week may miss uploads that fall out of the feed in between.
+
+Verify after deployment:
+```powershell
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialized_at,last_complete_at,next_due_at FROM monitor_state WHERE id LIKE 'youtube-%' ORDER BY id;"
+```
+
+A Sunday monitor's `initialized_at = NULL` before Sunday is expected;
+the first successful on-day fetch sets it. Real YouTube `@handle`
+resolution and RSS compatibility in Workers are **not yet live-verified**.
+All active YouTube monitors share `DISCORD_WEBHOOK_YOUTUBE`, while
+maintaining independent polling deadlines and delivery histories.
+No additional D1 migration is needed.
 
 The most recent Wikipedia D1 check still showed
-`initialized_at = NULL`. Its stored retry deadline was
-2026-10-12 23:44:16 JST; no definitive post-fix API success or
-repeat 403 had been observed at that time. When a successful silent
-baseline is committed, the Worker now logs
-`monitor wikipedia-ja: silent baseline initialized`.
-If MediaWiki 403 **recurs after the identifying User-Agent release**,
-disable `wikipedia-ja` in `src/config.ts` (it is nonessential);
-do not attempt to bypass Wikimedia's denial. The operator can report
-the 403 for a small follow-up PR; no D1 deletion is needed.
+`initialized_at = NULL`. If MediaWiki 403 **recurs after the
+identifying User-Agent release**, disable `wikipedia-ja` in
+`src/config.ts` (the user explicitly permits stopping this
+nonessential source). No D1 deletion is needed; do not bypass the denial.
 
 ## Recovery / stop procedure
 
