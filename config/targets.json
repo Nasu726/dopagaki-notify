@@ -4,13 +4,15 @@
       "id": "arxiv-cs-ai",
       "categories": [
         "cs.AI"
-      ]
+      ],
+      "enabled": false
     }
   ],
   "youtube": [
     {
       "id": "youtube-example",
-      "channel": ""
+      "channel": "",
+      "enabled": false
     }
   ]
 }
