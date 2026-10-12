@@ -702,3 +702,29 @@ test('five-minute global tick is independent of per-monitor weekly/60-minute int
   await Worker.scheduled({ cron: '*/5 * * * *' }, s.env);
   assert.deepEqual(s.sent, [], 'five-minute scheduler does not fetch before individual deadline');
 });
+
+test('two enabled YouTube channels preserve independent next-due times in the same D1', async () => {
+  const x = setup();
+  x.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const now = Date.parse('2026-10-12T03:00:00Z'); // 12:00 JST
+  const monitors: Monitor[] = [
+    { id: 'youtube-hourly', source: 'youtube', query: '@hourly', intervalMinutes: 60, enabled: true },
+    { id: 'youtube-weekly', source: 'youtube', query: '@weekly', intervalMinutes: 10_080, enabled: true },
+  ];
+  const observations: string[] = [];
+  const deps = { ...x.deps, fetchItems: async (monitor: Monitor) => {
+    observations.push(monitor.id);
+    return { items: [], potentiallyTruncated: false };
+  }};
+  assert.equal(await runTick(x.env, monitors, now, deps), 'processed');
+  assert.deepEqual(observations, ['youtube-hourly']);
+  assert.equal(await runTick(x.env, monitors, now + 5 * 60_000, deps), 'processed');
+  assert.deepEqual(observations, ['youtube-hourly', 'youtube-weekly']);
+  assert.equal(x.raw.prepare("SELECT next_due_at FROM monitor_state WHERE id='youtube-hourly'").get()?.next_due_at,
+    now + 60 * 60_000);
+  assert.equal(x.raw.prepare("SELECT next_due_at FROM monitor_state WHERE id='youtube-weekly'").get()?.next_due_at,
+    now + (5 + 10_080) * 60_000);
+  assert.equal(await runTick(x.env, monitors, now + 10 * 60_000, deps), 'idle');
+  assert.equal(await runTick(x.env, monitors, now + 60 * 60_000, deps), 'processed');
+  assert.deepEqual(observations, ['youtube-hourly', 'youtube-weekly', 'youtube-hourly']);
+});
