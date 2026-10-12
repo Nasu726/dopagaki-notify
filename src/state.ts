@@ -1,4 +1,6 @@
 import type { Database, Delivery, MonitorState, ContentItem, SourceName } from './types.ts';
+import { isJstNotificationTime } from './schedule.ts';
+import { DELIVERY_RETENTION_MS } from './maintenance.ts';
 
 export const LEASE_MS = 120_000;
 const MIN_RETRY_MS = 5 * 60_000;
@@ -65,6 +67,7 @@ export async function getRunnableIds(
     id: string; existing_id: string | null; next_due_at: number | null;
     lease_until: number | null; pending_due: number;
   };
+  const deliveryAllowed = isJstNotificationTime(now);
   const all: Row[] = [];
   for (let offset = 0; offset < enabled.length; offset += MONITOR_SELECT_BATCH) {
     const batch = enabled.slice(offset, offset + MONITOR_SELECT_BATCH);
@@ -73,12 +76,12 @@ export async function getRunnableIds(
     const rows = await db.prepare(
       'WITH enabled(id, source) AS (VALUES ' + inputs + ') ' +
       'SELECT e.id AS id, m.id AS existing_id, m.next_due_at, m.lease_until, ' +
-      'CASE WHEN COALESCE(w.cooldown_until, 0) <= ? AND w.blocked_status IS NULL THEN ' +
+      'CASE WHEN ? = 1 AND COALESCE(w.cooldown_until, 0) <= ? AND w.blocked_status IS NULL THEN ' +
       "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = e.id AND d.status = 'pending' " +
       'AND d.next_attempt_at <= ?) ELSE 0 END AS pending_due ' +
       'FROM enabled e LEFT JOIN monitor_state m ON m.id = e.id ' +
       'LEFT JOIN webhook_source_state w ON w.source = e.source'
-    ).bind(...params, now, now).all<Row>();
+    ).bind(...params, deliveryAllowed ? 1 : 0, now, now).all<Row>();
     all.push(...rows.results);
   }
   const missing = all.filter((row) => row.existing_id === null).map((row) => row.id);
@@ -121,7 +124,10 @@ export async function stage(
   // The initial observation is a silent time-based baseline; there is no reason to
   // persist legacy content IDs. Older backfilled items are likewise never eligible.
   if (baselineAt === null) return;
-  const eligible = items.filter((item) => item.publishedAt > baselineAt);
+  // Sent receipts expire after ten days. Exclude older publications so
+  // clearing a receipt cannot later requeue the same stale feed item.
+  const eligibleAfter = Math.max(baselineAt, now - DELIVERY_RETENTION_MS);
+  const eligible = items.filter((item) => item.publishedAt > eligibleAfter);
   for (let offset = 0; offset < eligible.length; offset += OUTBOX_INSERT_BATCH) {
     const chunk = eligible.slice(offset, offset + OUTBOX_INSERT_BATCH);
     // Read-before-write avoids D1 writes during the common "no new article" scan.
