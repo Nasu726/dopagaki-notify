@@ -4,7 +4,7 @@ import { parseArxiv, stableArxivId, fetchArxiv } from '../src/sources/arxiv.ts';
 import { parseZenn, zennFeedUrl, fetchZenn } from '../src/sources/zenn.ts';
 import { parseYouTube, normalizeChannelReference, extractChannelId, fetchYouTube } from '../src/sources/youtube.ts';
 import { entries, fetchTextBounded, tagText } from '../src/sources/xml.ts';
-import { MONITORS, arxivCategoryQuery } from '../src/config.ts';
+import { MONITORS, arxivCategoryQuery, youtubeMonitorsFromTargets, withIntervals, validateMonitors } from '../src/config.ts';
 import { webhookFor } from '../src/discord.ts';
 import type { Env, Monitor } from '../src/types.ts';
 
@@ -162,4 +162,33 @@ test('arXiv category query config and dormant YouTube reference are explicit', (
     assert.throws(() => arxivCategoryQuery(invalid));
   }
   assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.query, '');
+});
+
+test('multiple YouTube channels have independently configured intervals and flags', () => {
+  const definitions = youtubeMonitorsFromTargets([
+    { id: 'youtube-fast', channel: '@fast', enabled: true },
+    { id: 'youtube-weekly', channel: 'UC1234567890123456789012', enabled: true },
+    { id: 'youtube-paused', channel: '', enabled: false },
+  ]);
+  const monitors = withIntervals(definitions, {
+    'youtube-fast': 60,
+    'youtube-weekly': 10080,
+    'youtube-paused': 720,
+  });
+  assert.doesNotThrow(() => validateMonitors(monitors));
+  assert.deepEqual(monitors.map(({id, query, intervalMinutes, enabled}) =>
+    ({id, query, intervalMinutes, enabled})), [
+      { id: 'youtube-fast', query: '@fast', intervalMinutes: 60, enabled: true },
+      { id: 'youtube-weekly', query: 'UC1234567890123456789012', intervalMinutes: 10080, enabled: true },
+      { id: 'youtube-paused', query: '', intervalMinutes: 720, enabled: false },
+    ]);
+  assert.throws(() => withIntervals(definitions, {
+    'youtube-fast': 60, 'youtube-weekly': 10080,
+  }), /interval must be a positive integer/);
+  assert.throws(() => validateMonitors(withIntervals([
+    ...definitions, definitions[0]!,
+  ], {'youtube-fast': 60, 'youtube-weekly': 10080, 'youtube-paused': 720})), /Duplicate monitor id/);
+  assert.throws(() => validateMonitors(withIntervals(youtubeMonitorsFromTargets([
+    { id: 'youtube-invalid', channel: 'https://evil.example/x', enabled: true },
+  ]), { 'youtube-invalid': 60 })), /invalid channel reference/);
 });
