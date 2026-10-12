@@ -168,9 +168,10 @@ source webhook Secret must be `DISCORD_WEBHOOK_WIKIPEDIA`.
 npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialized_at,last_complete_at,next_due_at,scan_cursor,incomplete_count FROM monitor_state WHERE id='wikipedia-ja';"
 ```
 
-A row with non-null `initialized_at` and `last_complete_at` confirms a
-completed baseline scan. The first API page may require follow-up Cron ticks
-if it yields a continuation cursor; watch Logs for API errors and capped scans.
+A row with non-null `initialized_at` and `last_complete_at` confirms that
+the first-page silent baseline was recorded. Initial observation intentionally
+does not paginate historical entries. Later scans can checkpoint continuation
+cursors across multiple Cron ticks; watch Logs for API errors and capped scans.
 Do **not** infer a successful live Discord send until a new article genuinely
 arrives; the existing Qiita smoke SQL must not be reused for Wikipedia.
 While checking, watch the Workers CPU time distribution, since occasional
