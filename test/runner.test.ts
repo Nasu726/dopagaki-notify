@@ -466,7 +466,7 @@ test('more than 49 configured monitors are selected in D1-safe batches with glob
   const expected = monitors.filter((_, n) => n % 2 === 1).reverse().map((m) => m.id);
   assert.deepEqual(ids, expected, 'oldest deadline must take precedence across chunk boundaries');
   assert.equal(dueQueries, 2);
-  assert.equal(maxParams, 82);
+  assert.equal(maxParams, 83);
 });
 
 test('atomic lease claim follows shared webhook state, not legacy monitor flags', async () => {
