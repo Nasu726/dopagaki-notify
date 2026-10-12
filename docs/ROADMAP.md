@@ -4,11 +4,11 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 
 ## Product scope / frozen choices
 
-- Cloudflare Workers Cron every minute for monitors, separate five-minute Cron for bounded retention; per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
+- Cloudflare Workers Cron every minute for monitors, separate hourly Cron for bounded retention; per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
 - Independent source monitor definitions in `src/config.ts`; public arXiv category and YouTube channel targets in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
 - Five source adapters: arXiv, Qiita, Zenn, YouTube RSS, Wikipedia new-page events.
 - No GUI, long-running server, user authentication, public HTTP API, or paid infrastructure dependency for the initial version.
-- Remote D1 migrations `0001`–`0008` and source Secrets were configured; migration `0009` is **pending owner application** for indexed retention. Qiita outbound webhook delivery was verified with an idempotent D1 smoke record. Only Qiita and Wikipedia are enabled.
+- Remote D1 migrations `0001`–`0009` and source Secrets have been configured according to the owner; no new migration is required to adjust the maintenance schedule. Qiita outbound webhook delivery was verified with an idempotent D1 smoke record. Only Qiita and Wikipedia are enabled.
 
 ## Stage A — complete local correctness and resource hygiene (current)
 
@@ -48,7 +48,7 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 ## Stage D — measure-driven optimization and maintenance
 
 - Only after Stage B measurements: consider eliminating remaining idle-tick SQL, streaming/partial RSS parsing, reducing Qiita payload CPU, and changing page sizes. Compare before/after CPU p50/p95, rows read/written, request counts and missed/delayed items.
-- **Implemented for staging**: separate five-minute Cron prunes up to 20 `sent` deliveries per invocation once ten days old. Publication-time eligibility is bounded to the same ten-day horizon to avoid resurrection after deletion. Pending retries and scan state remain durable; validate D1 quota/CPU and retention throughput in Cloudflare.
+- **Implemented for staging**: separate hourly Cron prunes up to 20 `sent` deliveries per invocation once ten days old. Publication-time eligibility is bounded to the same ten-day horizon to avoid resurrection after deletion. Pending retries and scan state remain durable; validate D1 quota/CPU and retention throughput in Cloudflare.
 - Add an actionable failure or stale-scan alert channel if operational evidence shows one is needed.
 - Keep source APIs and Cloudflare limits current.
 
@@ -77,5 +77,12 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 
 - Wikipedia's real D1 row was observed with `initialized_at = NULL`, `last_complete_at = NULL`, and a nonzero future `next_due_at`: the initial MediaWiki fetch has **not yet completed**. Inspect the actual Worker error logs and Retry-After status before calling this source healthy; do not infer the specific root cause from that one row.
 - **JST notification window**: 09:00 inclusive, 20:00 exclusive. Source polling and outbox insertion continue overnight. Pending-only wakeups are suppressed until morning.
-- **Retention**: separate `*/5 * * * *` maintenance Cron, 20 expired `sent` receipts maximum per invocation, ten-day cutoff and partial `sent_at` index. Pending rows are never pruned automatically. This is not yet measured against Workers Free CPU limits.
+- **Retention**: separate `10 * * * *` maintenance Cron (hourly, minute 10), 20 expired `sent` receipts maximum per invocation, ten-day cutoff and partial `sent_at` index. Pending rows are never pruned automatically. This is not yet measured against Workers Free CPU limits.
 - **Editable target lists**: `config/targets.json` contains arXiv category sets and YouTube channel references (empty placeholder). Changing the query of an initialized monitor requires a new ID to preserve the fail-closed semantic history invariant.
+
+### Maintenance schedule adjustment (2026-10-12)
+
+- Previous `*/5 * * * *` = 288 maintenance invocations/day, regardless of pending cleanup; changed to `10 * * * *` = 24/day, minute 10 (UTC and JST share the same minutes). One indexed `DELETE` still removes at most 20 expired `sent` receipts per invocation; up to 480/day.
+- The per-invocation Workers Free CPU limit (10 ms) is **not** an unlimited daily invocation allowance: the account also has an aggregate Workers Free allowance of 100,000 requests/day, plus D1 row read/write quotas. The old cadence was unnecessary resource usage even though both cadences are well below the account's request quota.
+- A once-daily Cron with an unchanged 20-row cap would only remove 20 expired deliveries per day and could accumulate history if >20 notifications/day are sent. Hourly is a conservative bounded compromise; reduce further only after verifying delivery volume and maintenance CPU.
+- No schema or retention-window change. Cloudflare's updated triggers may take several minutes to propagate; verify both Cron entries after deployment.
