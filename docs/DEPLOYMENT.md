@@ -2,7 +2,7 @@
 
 Status: **live Cloudflare staging; Qiita D1 outbox → Discord → D1 ACK confirmed by owner; enabling Japanese Wikipedia as second source** (2026-10-12).
 
-This Worker has no public UI or HTTP API. It has a per-minute monitoring Cron (`* * * * *`) and a separate five-minute bounded retention Cron (`*/5 * * * *`).
+This Worker has no public UI or HTTP API. It has a per-minute monitoring Cron (`* * * * *`) and a separate hourly bounded retention Cron (`10 * * * *`).
 It uses D1 for checkpoints and outbox, and an independent Discord Webhook Secret for
 each **source**. Qiita and Japanese Wikipedia are enabled for staged validation. arXiv, Zenn, and YouTube remain disabled.
 
@@ -231,10 +231,9 @@ This tests the delivery path; it **does not** prove that a newly published
 Qiita article can be discovered by the API adapter. That still needs a
 separate live event.
 
-## New release: JST delivery window and bounded D1 retention
+## JST delivery window and bounded D1 retention
 
-Before relying on maintenance, apply the **new** remote D1 migration from the
-latest `main`. It adds a partial index for efficient expired-sent lookups;
+The owner has already applied migration `0009_delivery_retention.sql` to remote D1. No additional schema change is needed for the hourly Cron adjustment. For a new deployment, apply all pending remote migrations from the latest `main`. It adds a partial index for efficient expired-sent lookups;
 it neither deletes old rows nor modifies the monitor state.
 
 ```powershell
@@ -243,10 +242,10 @@ npx wrangler d1 migrations apply dopagaki-notify --remote
 npx wrangler d1 migrations list dopagaki-notify --remote
 ```
 
-Expected: `0009_delivery_retention.sql` applied and no pending migrations.
-The production configuration adds a separate five-minute maintenance Cron.
-Each maintenance invocation executes at most one indexed DELETE of **20 sent**
-receipts older than **ten days** (`sent_at` criterion). All pending retries
+Expected: `0009_delivery_retention.sql` applied and no pending migrations. The separate maintenance Cron should appear in Cloudflare's trigger configuration as `10 * * * *`.
+The production configuration adds a separate hourly maintenance Cron.
+Each hourly maintenance invocation executes at most one indexed DELETE of **20 sent**
+receipts older than **ten days** (up to 480/day) (`sent_at` criterion). All pending retries
 survive. A fresh outbox item with an old publication date (over 10 days ago)
 is no longer eligible, preventing re-alerts after receipts are pruned.
 
