@@ -4,7 +4,7 @@ import { parseArxiv, stableArxivId, fetchArxiv } from '../src/sources/arxiv.ts';
 import { parseZenn, zennFeedUrl, fetchZenn } from '../src/sources/zenn.ts';
 import { parseYouTube, normalizeChannelReference, extractChannelId, fetchYouTube } from '../src/sources/youtube.ts';
 import { entries, fetchTextBounded, tagText } from '../src/sources/xml.ts';
-import { MONITORS } from '../src/config.ts';
+import { MONITORS, arxivCategoryQuery } from '../src/config.ts';
 import { webhookFor } from '../src/discord.ts';
 import type { Env, Monitor } from '../src/types.ts';
 
@@ -153,4 +153,13 @@ test('mixed XML entities and CDATA are decoded only outside CDATA', () => {
   const source = '<title>Head &amp; <![CDATA[A &amp; <entry>]]> tail &lt;end&gt;</title>';
   assert.equal(tagText(source, 'title'), 'Head & A &amp; <entry> tail <end>');
   assert.equal(entries('<feed><!-- <entry><id>fake</id></entry> --></feed>', 'entry').length, 0);
+});
+
+test('arXiv category query config and dormant YouTube reference are explicit', () => {
+  assert.equal(arxivCategoryQuery(['cs.AI']), 'cat:cs.AI');
+  assert.equal(arxivCategoryQuery(['cs.AI', 'math.CO']), 'cat:cs.AI OR cat:math.CO');
+  for (const invalid of [[], ['cat:cs.AI'], ['cs.AI OR cat:evil'], ['../oops']]) {
+    assert.throws(() => arxivCategoryQuery(invalid));
+  }
+  assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.query, '');
 });
