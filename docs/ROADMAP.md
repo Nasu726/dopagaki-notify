@@ -1,6 +1,6 @@
 # Development roadmap
 
-Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare deployment**.
+Updated: 2026-10-10. Current stage: **Cloudflare Qiita-only smoke test after owner deployment, D1 migration and Secrets setup**.
 
 ## Product scope / frozen choices
 
@@ -25,9 +25,9 @@ Updated: 2026-10-10. Current stage: **local hardening, before any Cloudflare dep
 
 **Preparation:** Staging runbook is in [DEPLOYMENT.md](DEPLOYMENT.md); source adapters and Wrangler bundle have passed CI, but real API/CPU measurements remain unverified.
 
-**Requires owner action:** grant Cloudflare integration or configure Workers Builds; create D1, apply migrations `0001`–`0008`, set actual webhook Secrets **in Cloudflare only**, select safe test monitors. Do not paste any Webhook URL into GitHub or chat.
+**Owner reports complete:** Cloudflare Worker deployment, remote D1 migrations `0001`–`0008`, and five source-specific Secrets. **Current gate:** GitHub Workers Builds must deploy the Qiita-only staging config successfully; Cloudflare CPU/D1 and real Discord notifications still require live verification. Never paste Webhook URLs into GitHub or chat.
 
-1. Deploy with all monitors disabled and check the single Cron Trigger exists; HTTP handler stays 404.
+1. Initial deployment was performed with all monitors disabled; next verify the Cron Trigger and that the HTTP handler stays 404.
 2. Enable only one low-traffic test monitor, verify silent initial baseline, subsequent delivery and duplicate suppression.
 3. Verify D1 checkpoint replay across runs, notification retry after 429/5xx, lease expiry and recovery. **Retry-After and persistent monitor-level Discord cooldown implemented and unit-tested; live 429s not yet observed.**
 4. Capture **Cloudflare's actual invocation CPU time** (not wall time), D1 rows read/written, Worker errors and outgoing request count. Distinguish normal empty/no-due ticks from busiest page+Discord ticks.
