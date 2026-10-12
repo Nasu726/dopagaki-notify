@@ -20,7 +20,7 @@ npm run bundle:check # Wrangler compiles without deploying
 
 ```json
 {
-  "qiita-rust": 7,
+  "qiita-rust": 60,
   "wikipedia-ja": 60,
   "arxiv-cs-ai": 120,
   "zenn-topic-typescript": 60,
@@ -28,26 +28,45 @@ npm run bundle:check # Wrangler compiles without deploying
 }
 ```
 
-The file intentionally holds **interval values only**. arXiv categories and YouTube channels are editable in **[config/targets.json](config/targets.json)**; the enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv, Zenn and YouTube remain disabled pending subsequent live validation.
+The file intentionally holds **interval values only**. arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; the fixed Qiita/Wikipedia/Zenn enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv, Zenn and YouTube remain disabled pending subsequent live validation.
 
 The monitoring Cron Trigger in `wrangler.jsonc` runs every **five minutes** (`*/5 * * * *`), irrespective of these settings. It checks D1 deadlines; it does **not** fetch every API every five minutes. A **second independent Cron** (`10 * * * *`, every hour at minute 10 UTC/JST) deletes at most 20 acknowledged messages per invocation (24 invocations/day; up to 480 sent receipts/day). The previous five-minute cadence was unnecessary overhead. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
 
-## arXiv categories and YouTube channels
+## arXiv categories and multiple YouTube channels
 
-Update **`config/targets.json`** without touching the source adapters:
+No TypeScript changes are needed to **add or activate YouTube channels**. Edit two JSON files; keep the intervals in their single designated file.
 
+1. In **`config/targets.json`**, add one entry per channel with a stable unique ID, a real channel reference (`UC...`, `@handle`, or YouTube channel URL), and `enabled: true`.
+2. In **`config/intervals.json`**, give each of those IDs its own positive integer interval in **minutes**.
+
+Example (replace the illustrative handles with real channels before enabling):
+
+`config/targets.json`
 ```json
 {
   "arxiv": [
-    { "id": "arxiv-cs-ai", "categories": ["cs.AI", "cs.LG"] }
+    { "id": "arxiv-cs-ai", "categories": ["cs.AI"], "enabled": false }
   ],
   "youtube": [
-    { "id": "youtube-example", "channel": "UCxxxxxxxxxxxxxxxxxxxxxx" }
+    { "id": "youtube-fast", "channel": "@replace-with-fast-channel", "enabled": true },
+    { "id": "youtube-weekly", "channel": "@replace-with-weekly-channel", "enabled": true }
   ]
 }
 ```
 
-Replace the example channel ID with a **real** `UC...` channel ID, `@handle`, or YouTube channel URL. The repository currently keeps the YouTube `channel` value **empty** and the arXiv categories at `["cs.AI"]` until the owner supplies the desired targets. The example above is syntax guidance, **not** the live configuration. The default interval for the dormant YouTube monitor is **10080 minutes (7 days)**; change that value in `config/intervals.json` whenever the target's upload frequency calls for shorter polling. Note that YouTube RSS exposes only a finite recent-video window, so a weekly scan can miss videos if a channel posts many times during a week. Additional entries require distinct stable IDs plus an interval in `config/intervals.json`. Source monitors stay **disabled** until explicitly enabled in `src/config.ts`. Never reuse a previously initialized monitor ID when changing its query/categories/channel: use a new ID to establish a silent baseline.
+`config/intervals.json` (add these alongside the existing Qiita, Wikipedia, arXiv, and Zenn entries):
+```json
+{
+  "youtube-fast": 60,
+  "youtube-weekly": 10080
+}
+```
+
+Each channel has an independent D1 monitor ID, due date, silent first-run baseline and deduplicated delivery history. The YouTube monitors share the **one YouTube Discord webhook**, but can be enabled/disabled and polled independently. Existing IDs with historical state cannot be reassigned to another channel; use a new ID for a different target. Removing an ID also requires removing its old entry from the interval file. Do not copy only the abbreviated `intervals.json` example over the complete configuration.
+
+The **actual repository** retains an empty, disabled `youtube-example` monitor by default. Nothing starts polling YouTube until real channel references are supplied and explicitly enabled.
+
+The YouTube Atom feed contains only a finite number of recent uploads (approximately 15 items). Choose an interval short enough that the channel is unlikely to publish more than that between scans. For a slow weekly uploader, `10080` minutes (7 days) is reasonable, with the tradeoff that delayed or missed scheduled checks may allow older uploads to fall out of the feed. arXiv category lists and their enabled flags also live in `config/targets.json`.
 
 ## Notification hours, retention and privacy
 
