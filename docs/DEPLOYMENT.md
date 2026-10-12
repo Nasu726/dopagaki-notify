@@ -233,8 +233,7 @@ separate live event.
 
 ## JST delivery window and bounded D1 retention
 
-The owner has already applied migration `0009_delivery_retention.sql` to remote D1. No additional schema change is needed for the hourly Cron adjustment. For a new deployment, apply all pending remote migrations from the latest `main`. It adds a partial index for efficient expired-sent lookups;
-it neither deletes old rows nor modifies the monitor state.
+The owner has already applied migration `0009_delivery_retention.sql` to remote D1. No additional schema change is needed for the hourly Cron adjustment. Migration `0009` adds a partial index for efficient expired-sent lookups; it neither deletes old rows nor modifies monitor state. For a new deployment, apply all pending remote migrations from the latest `main`.
 
 ```powershell
 git pull
@@ -243,7 +242,6 @@ npx wrangler d1 migrations list dopagaki-notify --remote
 ```
 
 Expected: `0009_delivery_retention.sql` applied and no pending migrations. The separate maintenance Cron should appear in Cloudflare's trigger configuration as `10 * * * *`.
-The production configuration adds a separate hourly maintenance Cron.
 Each hourly maintenance invocation executes at most one indexed DELETE of **20 sent**
 receipts older than **ten days** (up to 480/day) (`sent_at` criterion). All pending retries
 survive. A fresh outbox item with an old publication date (over 10 days ago)
