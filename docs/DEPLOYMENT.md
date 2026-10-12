@@ -2,7 +2,7 @@
 
 Status: **live Cloudflare staging; Qiita D1 outbox → Discord → D1 ACK confirmed by owner; enabling Japanese Wikipedia as second source** (2026-10-12).
 
-This Worker has no public UI, no HTTP API, and only one Cron Trigger (`* * * * *`).
+This Worker has no public UI or HTTP API. It has a per-minute monitoring Cron (`* * * * *`) and a separate five-minute bounded retention Cron (`*/5 * * * *`).
 It uses D1 for checkpoints and outbox, and an independent Discord Webhook Secret for
 each **source**. Qiita and Japanese Wikipedia are enabled for staged validation. arXiv, Zenn, and YouTube remain disabled.
 
@@ -56,7 +56,7 @@ npx wrangler d1 migrations apply dopagaki-notify --remote
 ```
 
 The migration set currently runs from `0001_init.sql` through
-`0008_source_webhook_state.sql`. Verify successful completion. Do **not**
+`0009_delivery_retention.sql` (0001–0008 were already applied by the owner; **0009 is new**). Verify successful completion. Do **not**
 substitute `--local` for `--remote` when preparing the deployed Worker.
 
 ## Step 3 — deploy with monitors disabled
@@ -74,7 +74,7 @@ Use Wrangler to deploy rather than GitHub Actions cron. Build settings
 may vary in the Cloudflare dashboard.
 
 **Do not enable a monitor before its matching Discord Secret exists.**
-Confirm the Worker is created and the one Cron Trigger is registered.
+Confirm the Worker is created and the two Cron Triggers are registered.
 Cron Trigger changes may take up to 15 minutes to propagate. The Worker
 intentionally returns HTTP 404 and does not require `workers.dev` or a domain.
 
@@ -230,6 +230,54 @@ No special cleanup of the test row is needed; retaining it prevents replay.
 This tests the delivery path; it **does not** prove that a newly published
 Qiita article can be discovered by the API adapter. That still needs a
 separate live event.
+
+## New release: JST delivery window and bounded D1 retention
+
+Before relying on maintenance, apply the **new** remote D1 migration from the
+latest `main`. It adds a partial index for efficient expired-sent lookups;
+it neither deletes old rows nor modifies the monitor state.
+
+```powershell
+git pull
+npx wrangler d1 migrations apply dopagaki-notify --remote
+npx wrangler d1 migrations list dopagaki-notify --remote
+```
+
+Expected: `0009_delivery_retention.sql` applied and no pending migrations.
+The production configuration adds a separate five-minute maintenance Cron.
+Each maintenance invocation executes at most one indexed DELETE of **20 sent**
+receipts older than **ten days** (`sent_at` criterion). All pending retries
+survive. A fresh outbox item with an old publication date (over 10 days ago)
+is no longer eligible, preventing re-alerts after receipts are pruned.
+
+The polling Cron still runs overnight, but **Discord notifications are held
+outside 09:00 inclusive through 20:00 exclusive JST**. They are automatically
+sent starting with the next eligible 09:00 Cron. This is a send-start window,
+not a guarantee of Discord receipt before 20:00:00.
+
+The source choices are now in `config/targets.json`:
+- `arxiv[].categories`: e.g. `["cs.AI", "cs.LG"]`, producing an OR-category API query.
+- `youtube[].channel`: an actual `UC...` channel ID, `@handle` or channel URL.
+- Every added target ID also needs a positive interval in `config/intervals.json`.
+- Keep arXiv/YouTube disabled in `src/config.ts` until target selections are
+  reviewed and a staging baseline is explicitly authorized.
+- **Changing an initialized monitor's target requires a new monitor ID.**
+
+### Wikipedia troubleshooting
+
+The owner observed `wikipedia-ja` with null `initialized_at` and
+`last_complete_at` and a future `next_due_at`. This means its initial API
+fetch has not completed, and the future deadline suggests a retry postponement.
+The exact cause is **unknown** until Cloudflare's exception log is checked.
+Use:
+
+```powershell
+npx wrangler tail dopagaki-notify --format pretty
+```
+
+Review the next Wiki attempt. The error may report HTTP status, a timeout or
+an API parsing issue. Do not replace the monitor ID or erase the state just
+to make the baseline appear complete. No additional sources are enabled.
 
 ## Recovery / stop procedure
 
