@@ -2,6 +2,7 @@ import intervals from '../config/intervals.json' with { type: 'json' };
 import targets from '../config/targets.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
 import { normalizeChannelReference } from './sources/youtube.ts';
+import { isWeeklyJstDay } from './schedule.ts';
 
 // All per-monitor intervals remain in config/intervals.json.
 // Configure arXiv category groups and any number of YouTube channels, including
@@ -19,6 +20,7 @@ export interface YouTubeTarget {
   readonly id: string;
   readonly channel: string;
   readonly enabled: boolean;
+  readonly weekdayJst?: string;
 }
 
 export function youtubeMonitorsFromTargets(
@@ -27,6 +29,7 @@ export function youtubeMonitorsFromTargets(
   return configured.map((target) => ({
     id: target.id, source: 'youtube' as const,
     query: target.channel.trim(), enabled: target.enabled,
+    ...(target.weekdayJst !== undefined ? { weeklyJstDay: target.weekdayJst } : {}),
   }));
 }
 
@@ -70,6 +73,12 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     if (monitor.query.length > 512) throw new Error('Monitor ' + monitor.id + ': query too long');
     if (typeof monitor.enabled !== 'boolean')
       throw new Error('Monitor ' + monitor.id + ': enabled must be a boolean');
+    if (monitor.weeklyJstDay !== undefined &&
+        (monitor.source !== 'youtube' || monitor.intervalMinutes !== 60 ||
+         !isWeeklyJstDay(monitor.weeklyJstDay))) {
+      throw new Error('Monitor ' + monitor.id +
+        ': weeklyJstDay requires a YouTube monitor with interval 60 and a valid weekday');
+    }
     if (monitor.enabled && !monitor.query.trim())
       throw new Error('Enabled monitor ' + monitor.id + ' requires a configured query/target');
     if (monitor.enabled && monitor.source === 'youtube') {

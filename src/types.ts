@@ -12,6 +12,7 @@ export interface Monitor {
   query: string;
   intervalMinutes: number;
   enabled: boolean;
+  weeklyJstDay?: string; // optional fixed weekday for weekly YouTube polling
 }
 export interface D1Prepared {
   bind(...parameters: unknown[]): D1Prepared;

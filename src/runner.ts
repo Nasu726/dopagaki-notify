@@ -1,4 +1,4 @@
-import { isJstNotificationTime } from './schedule.ts';
+import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue } from './schedule.ts';
 import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors } from './config.ts';
 import { notifyDiscord, webhookFor } from './discord.ts';
@@ -9,7 +9,7 @@ import { fetchZenn } from './sources/zenn.ts';
 import { fetchYouTube } from './sources/youtube.ts';
 import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
-  claim, completeFetch, getPending, getRunnableIds,
+  claim, completeFetch, deferFetchUntil, getPending, getRunnableIds,
   getState, markSent, coolDownPending, blockWebhook, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
@@ -55,7 +55,16 @@ export async function runTick(
     await assertMonitorIdentity(env.DB, runnable.id, token, runnable.source,
       runnable.query, state.config_identity, state.initialized_at);
     let fetchError: unknown;
-    if (state.next_due_at <= now) {
+    const due = state.next_due_at <= now;
+    const onSelectedDay = runnable.weeklyJstDay === undefined ||
+      isJstWeekday(now, runnable.weeklyJstDay);
+    if (due && !onSelectedDay && runnable.weeklyJstDay !== undefined) {
+      // A newly enabled monitor (or a retry interrupted across midnight)
+      // must not fetch outside its specified JST weekday.
+      await deferFetchUntil(env.DB, runnable.id, token,
+        nextHourlyJstWeekdayDue(now, runnable.weeklyJstDay));
+    }
+    if (due && onSelectedDay) {
       webhookFor(runnable, env);
       try {
         const windowStart = state.last_complete_at === null ? null : state.last_complete_at - LOOKBACK_MS;
@@ -80,8 +89,10 @@ export async function runTick(
           await saveScanCursor(env.DB, runnable.id, token, now,
             state.scan_started_at ?? now, VERIFY_HEAD_CURSOR);
         } else {
+          const nextDueAt = runnable.weeklyJstDay === undefined ? undefined :
+            nextHourlyJstWeekdayDue(now, runnable.weeklyJstDay);
           await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes,
-            state.scan_started_at ?? now, !result.potentiallyTruncated);
+            state.scan_started_at ?? now, !result.potentiallyTruncated, nextDueAt);
           if (state.initialized_at === null && !result.potentiallyTruncated)
             console.log('monitor ' + runnable.id + ': silent baseline initialized');
         }

@@ -10,9 +10,22 @@
   ],
   "youtube": [
     {
-      "id": "youtube-example",
-      "channel": "",
-      "enabled": false
+      "id": "youtube-yurugengo",
+      "channel": "@yurugengo",
+      "enabled": true,
+      "weekdayJst": "tuesday"
+    },
+    {
+      "id": "youtube-yurucom",
+      "channel": "@yurucom",
+      "enabled": true,
+      "weekdayJst": "sunday"
+    },
+    {
+      "id": "youtube-3blue1brown-japan",
+      "channel": "@3Blue1BrownJapan",
+      "enabled": true,
+      "weekdayJst": "sunday"
     }
   ]
 }
