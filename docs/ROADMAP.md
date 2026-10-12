@@ -4,8 +4,8 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 
 ## Product scope / frozen choices
 
-- Cloudflare Workers Cron every five minutes for monitors, separate hourly Cron for bounded retention; per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
-- Independent source monitor definitions in `src/config.ts`; public arXiv category and YouTube channel targets in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
+- Cloudflare Workers Cron every five minutes for monitors, separate hourly Cron for bounded retention; per-monitor positive **integer minute intervals** configured in `config/intervals.json` (non-YouTube) or in each YouTube entry in `config/targets.json`.
+- Independent source monitor definitions in `src/config.ts`; public arXiv categories and independent YouTube channel+interval+enabled settings in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
 - Five source adapters: arXiv, Qiita, Zenn, YouTube RSS, Wikipedia new-page events.
 - No GUI, long-running server, user authentication, public HTTP API, or paid infrastructure dependency for the initial version.
 - Remote D1 migrations `0001`–`0009` and source Secrets have been configured according to the owner; no new migration is required to adjust the maintenance schedule. Qiita outbound webhook delivery was verified with an idempotent D1 smoke record. Only Qiita and Wikipedia are enabled.
@@ -90,5 +90,13 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 ### MediaWiki 403 and dispatcher resource adjustment (2026-10-12)
 
 - The owner's Worker logs confirmed `MediaWiki HTTP 403`, corresponding to `wikipedia-ja` having a NULL baseline. The adapter previously omitted User-Agent. Following Wikimedia's bot identification policy, both `User-Agent` and `Api-User-Agent` now identify `dopagaki-notify/0.1` and its public GitHub contact. This is a **hypothesis-based fix** until confirmed live. Persistent 403s are spaced at least one hour apart.
-- The monitor dispatcher Cron is reduced from `* * * * *` (1,440 runs/day) to `*/5 * * * *` (288 runs/day), separate from the existing `10 * * * *` hourly retention Cron. Source polling intervals remain 60m Qiita/Wikipedia, 120m default arXiv, 60m Zenn, and dormant 10,080m/7d YouTube; all are individually editable in `config/intervals.json`. Multiple overdue sources, pagination checkpoints and pending Discord deliveries motivate retaining sub-hour scheduler granularity.
+- The monitor dispatcher Cron is reduced from `* * * * *` (1,440 runs/day) to `*/5 * * * *` (288 runs/day), separate from the existing `10 * * * *` hourly retention Cron. Source polling intervals remain 60m Qiita/Wikipedia, 120m default arXiv, 60m Zenn; the dormant 10,080m/7d YouTube sample is configured in `config/targets.json`, with its own interval beside its channel. Multiple overdue sources, pagination checkpoints and pending Discord deliveries motivate retaining sub-hour scheduler granularity.
 - Keep at most one fetched API page and three Discord sends per invocation; **never drop excess valid events just to hit 10ms CPU**. Queue and resume them instead; unverified Free CPU p99 peaks near 19ms remain an operational measurement gate.
+
+## Configured YouTube channels (2026-10-12)
+
+- Multiple YouTube channels are configured as independent objects in **one file**: `config/targets.json`. Each object has `id` (stable and globally unique), `channel` (`UC...`, `@handle` or valid channel URL), `intervalMinutes` (positive integer; e.g. 60, 1440, 10080) and `enabled` (boolean).
+- Remove the YouTube ID from `config/intervals.json`: there is no second source of truth or corresponding `src/config.ts` edit for each added channel. ArXiv categories stay in `config/targets.json`; non-YouTube intervals stay in `config/intervals.json`.
+- Each YouTube channel has an independent D1 state, baseline, query identity and next fetch deadline; the YouTube source Webhook remains shared. A channel change must use a new ID, not overwrite the D1 identity of an existing one.
+- Unit/integration regressions cover multiple intervals, invalid/duplicate channel references, one-monitor-per-Cron execution and separate due times. All actual YouTube examples remain disabled until the operator names real channels.
+- Wikimedia 403 is still pending external verification; eight minutes of successful idle Cron logs does **not** verify an API fetch. If another 403 is confirmed, disable `wikipedia-ja` in a dedicated PR rather than changing its D1 identity or repeatedly retrying a denied API.
