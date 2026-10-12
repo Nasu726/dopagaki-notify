@@ -174,6 +174,16 @@ export async function completeFetch(
     complete ? 1 : 0, scanStartedAt, complete ? 1 : 0, now, complete ? 1 : 0, id, token).run();
   if (result.meta.changes !== 1) throw new Error('Lost lease while saving fetch checkpoint');
 }
+// Defer an overdue calendar-restricted monitor until its next allowed day.
+// This intentionally does not affect pending Discord deliveries or baselines.
+export async function deferFetchUntil(
+  db: Database, id: string, token: string, nextDueAt: number,
+): Promise<void> {
+  const result = await db.prepare(
+    'UPDATE monitor_state SET next_due_at = ? WHERE id = ? AND lease_token = ?'
+  ).bind(nextDueAt, id, token).run();
+  if (result.meta.changes !== 1) throw new Error('Lost lease while deferring weekday fetch');
+}
 export async function postponeFetch(db: Database, id: string, token: string, now: number, suggestedMs?: number | null): Promise<void> {
   await db.prepare('UPDATE monitor_state SET next_due_at = ? WHERE id = ? AND lease_token = ?')
     .bind(now + retryDelay(MIN_RETRY_MS, suggestedMs), id, token).run();
