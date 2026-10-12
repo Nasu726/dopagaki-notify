@@ -1,5 +1,5 @@
 import { isJstNotificationTime } from './schedule.ts';
-import { isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
+import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors } from './config.ts';
 import { notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
@@ -84,7 +84,13 @@ export async function runTick(
             state.scan_started_at ?? now, !result.potentiallyTruncated);
         }
       } catch (error) {
-        await postponeFetch(env.DB, runnable.id, token, now, suggestedRetryDelay(error));
+        // A MediaWiki 403 may indicate upstream bot-policy rejection. Avoid
+        // retrying a denied client every five minutes while the operator
+        // investigates; a source outage must still preserve queued deliveries.
+        const serverDelay = suggestedRetryDelay(error);
+        const delay = error instanceof HttpStatusError && error.source === 'MediaWiki' &&
+          error.status === 403 ? Math.max(60 * 60_000, serverDelay ?? 0) : serverDelay;
+        await postponeFetch(env.DB, runnable.id, token, now, delay);
         // A source outage must not block already queued Discord notifications.
         fetchError = error;
       }
