@@ -28,7 +28,7 @@ npm run bundle:check # Wrangler compiles without deploying
 }
 ```
 
-The file intentionally holds **interval values only**. Sources, queries, IDs and enabled flags are in [src/config.ts](src/config.ts). **Staging:** only `qiita-rust` is enabled for a live smoke test after the owner applied all eight remote D1 migrations and registered the five Secrets. Its existing interval remains **60 minutes**; the Cron runs every minute. Other sources are still disabled. Do not enable additional monitors until Qiita has passed live tests.
+The file intentionally holds **interval values only**. Sources, queries, IDs and enabled flags are in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the Cron runs every minute and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv, Zenn and YouTube remain disabled pending subsequent live validation.
 
 The one Cron Trigger in `wrangler.jsonc` runs every minute (`* * * * *`), irrespective of these settings. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
 
@@ -83,7 +83,7 @@ Do not clear the block before the Secret is corrected. Avoid publishing the Webh
 - Initial baseline and permanently ineligible pre-baseline items are excluded without storing `ignored` outbox rows; existing legacy rows remain compatible.
 - Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.
 - Each persistent monitor ID is pinned to its source and trimmed query (not its interval). **To change a source or query, choose a new monitor ID and add the matching integer interval in `config/intervals.json`.** The new ID creates a separate silent baseline; an unchanged ID with a changed query now fails closed. Interval-only changes require no state migration. Legacy initialized D1 rows that lack identity information fail closed until intentionally migrated or reset.
-- A Cloudflare Worker has been deployed by the owner, and the eight remote D1 migrations and Discord Secrets have been configured by the owner. This change enables **only Qiita** for initial live validation; actual production notification, Cloudflare CPU time and live adapter compatibility are **not yet confirmed**.
+- A Cloudflare Worker has been deployed by the owner, and the eight remote D1 migrations and Discord Secrets have been configured by the owner. The Qiita outbound delivery path was confirmed by the owner with a synthetic test item. The configured second staging monitor is Wikipedia new pages; first-run and real upstream ingestion still need inspection. CPU p50 around 1.17 ms and p99 around 2.07 ms were reported, with occasional p99 peaks near 19 ms and zero reported errors. This is **not** proof that all invocations remain within the 10 ms Workers Free CPU limit.
 
 ## Prior source code and API references
 
