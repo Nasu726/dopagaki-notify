@@ -2,7 +2,7 @@
 
 Status: **live Cloudflare staging; Qiita D1 outbox → Discord → D1 ACK confirmed by owner; enabling Japanese Wikipedia as second source** (2026-10-12).
 
-This Worker has no public UI or HTTP API. It has a per-minute monitoring Cron (`* * * * *`) and a separate hourly bounded retention Cron (`10 * * * *`).
+This Worker has no public UI or HTTP API. It has a five-minute monitoring Cron (`*/5 * * * *`) and a separate hourly bounded retention Cron (`10 * * * *`).
 It uses D1 for checkpoints and outbox, and an independent Discord Webhook Secret for
 each **source**. Qiita and Japanese Wikipedia are enabled for staged validation. arXiv, Zenn, and YouTube remain disabled.
 
@@ -121,7 +121,7 @@ Do not store these URLs in D1 or `.dev.vars` in a public repository.
 7. Enable remaining monitors one by one, only after the preceding smoke test
    passes. Watch `incomplete_count` / `last_incomplete_at` for capped feeds.
 
-The Cron schedule is once per minute, but each monitor's effective interval
+The dispatcher Cron schedule is once every five minutes, but each monitor's effective interval
 is **best effort** and can be delayed by pagination or an overdue backlog.
 An API 429 schedules a later retry without sleeping.
 
@@ -156,6 +156,30 @@ deadline delayed. Never paste Discord Secret values or private logs into chat.
 
 **CPU gate:** inspect actual CPU time and Workers errors for idle/due ticks;
 a successful build is not proof of staying within Workers Free's CPU limit.
+
+## Wikimedia HTTP 403 diagnosis and remediation (2026-10-12)
+
+Cloudflare logs showed `HttpStatusError: MediaWiki HTTP 403`, and the
+`wikipedia-ja` baseline remained NULL. Wikimedia requires descriptive
+automated-client identification; the original adapter sent only an
+`Accept` header. The updated adapter sends `User-Agent` and
+`Api-User-Agent` as `dopagaki-notify/0.1` plus this repository's URL
+as a contact. A continuing MediaWiki 403 is postponed for at least
+**one hour** to avoid excessive requests; it still produces an
+observable error rather than silently declaring a successful baseline.
+
+After GitHub Workers Builds deploys the updated `main`, confirm
+`wikipedia-ja` eventually sets `initialized_at`. If it remains NULL,
+check the Cloudflare Logs/Tail again for a status and consult Wikimedia
+bot access policy. Do **not** remove the identification header,
+masquerade as a browser, or bypass an upstream denial.
+
+The monitoring Cron is now `*/5 * * * *` (288 invocations/day),
+with per-monitor API polling intervals still in `config/intervals.json`.
+The hourly retention Cron stays `10 * * * *`. YouTube's inactive example
+interval is now `10080` minutes (= 7 days); set its actual channel in
+`config/targets.json` before enabling it. Shorter intervals may be
+needed for channels posting over 15 videos between reads.
 
 ## Second-source smoke test (Japanese Wikipedia)
 
