@@ -516,7 +516,7 @@ test('one-shot remote D1 smoke SQL requires an initialized monitor with matching
   const row = s.raw.prepare("SELECT * FROM deliveries WHERE item_id='smoke:qiita:discord-outbox:2026-10-12'").get();
   assert.equal(row?.status, 'pending');
   assert.equal(row?.monitor_id, 'qiita-rust');
-  assert.match(String(row?.title), /\\[TEST\\]/);
+  assert.match(String(row?.title), /\[TEST\]/);
   assert.equal(s.raw.prepare('SELECT initialized_at FROM monitor_state WHERE id=?')
     .get('qiita-rust')?.initialized_at, 1);
 });
