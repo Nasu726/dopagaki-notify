@@ -156,6 +156,60 @@ deadline delayed. Never paste Discord Secret values or private logs into chat.
 **CPU gate:** inspect actual CPU time and Workers errors for idle/due ticks;
 a successful build is not proof of staying within Workers Free's CPU limit.
 
+## One-time Discord delivery probe (no new Worker code, no new migration)
+
+For the first real Discord send, use the existing production outbox rather than
+opening an HTTP endpoint or modifying the monitor's baseline. The standalone
+SQL file is **not** in `migrations/` and is not run automatically by CI,
+Workers Builds or `d1 migrations apply`. The owner runs it explicitly once.
+
+Preconditions: the latest `main` is deployed, `qiita-rust` remains enabled,
+its `monitor_state.initialized_at` is non-null, remote D1 migrations are
+complete, and the Qiita channel Secret is configured. The file checks
+the stored `config_identity` equals `["qiita","tag:Rust"]`.
+
+From the repository root, using an authenticated Wrangler session:
+
+```powershell
+git pull
+npx wrangler d1 execute dopagaki-notify --remote --file=ops/qiita-one-shot-smoke.sql
+```
+
+This inserts at most one artificial delivery with immutable ID
+`smoke:qiita:discord-outbox:2026-10-12`, title beginning `[TEST]`, and a
+GitHub project URL (not an actual Qiita article). It will be sent to the
+source-specific **Qiita** Discord channel by the next eligible Cron invocation.
+The operation **does not** change `initialized_at`, the scan cursor,
+`next_due_at`, or any real Qiita item. The `deliveries` primary key and
+`INSERT OR IGNORE` make repeated invocation idempotent.
+
+Check remote D1:
+
+```powershell
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT item_id,status,attempts,sent_at FROM deliveries WHERE monitor_id='qiita-rust' AND item_id='smoke:qiita:discord-outbox:2026-10-12';"
+```
+
+- No row: SQL inserted nothing, typically because the monitor is not yet
+  initialized, was renamed, or has an unexpected source/query identity.
+  Confirm prerequisites; do **not** remove the guard.
+- `pending`: item is queued. Inspect the Cron logs if still pending after
+  a scheduled invocation; retry deadlines or a source-wide webhook cooldown
+  may postpone the send.
+- `sent` with non-null `sent_at`: Discord HTTP accepted the POST and D1
+  saved the acknowledgement. Check the Qiita Discord channel for the
+  visible `[TEST]` embed as independent confirmation.
+
+If delivery is blocked, check the source-wide state (read-only):
+
+```powershell
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT source,cooldown_until,blocked_status,blocked_at FROM webhook_source_state WHERE source='qiita';"
+```
+
+No special cleanup of the test row is needed; retaining it prevents replay.
+This tests the delivery path; it **does not** prove that a newly published
+Qiita article can be discovered by the API adapter. That still needs a
+separate live event.
+
 ## Recovery / stop procedure
 
 - To stop sending alerts immediately, set all monitors `enabled: false`
