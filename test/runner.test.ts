@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { runTick } from '../src/runner.ts';
 import { HttpStatusError } from '../src/http.ts';
-import { isJstNotificationTime } from '../src/schedule.ts';
+import { isJstNotificationTime, nextWeeklyJstDue } from '../src/schedule.ts';
 import { DELIVERY_RETENTION_MS, PRUNE_BATCH_SIZE, pruneSentDeliveries } from '../src/maintenance.ts';
 import Worker from '../src/index.ts';
 import { MONITORS, validateMonitors, withIntervals } from '../src/config.ts';
@@ -688,8 +688,10 @@ test('five-minute global tick is independent of per-monitor weekly/60-minute int
   assert.deepEqual(config.triggers.crons, ['*/5 * * * *', '10 * * * *']);
   const minute = 60_000;
   const now = Date.now();
-  assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.intervalMinutes, 10_080);
-  assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.enabled, false);
+  for (const monitor of MONITORS.filter((m) => m.source === 'youtube')) {
+    assert.equal(monitor.intervalMinutes, 10_080);
+    assert.equal(monitor.enabled, true);
+  }
   // Prepare every enabled monitor as already initialized and next due in an hour.
   for (const monitor of MONITORS.filter((m) => m.enabled)) {
     s.raw.prepare(
@@ -701,4 +703,64 @@ test('five-minute global tick is independent of per-monitor weekly/60-minute int
   assert.deepEqual(s.sent, [], 'old per-minute Cron must not process monitors');
   await Worker.scheduled({ cron: '*/5 * * * *' }, s.env);
   assert.deepEqual(s.sent, [], 'five-minute scheduler does not fetch before individual deadline');
+});
+
+test('weekly JST recurrence is pinned to Tuesday/Sunday at 09:00, across UTC and month boundaries', () => {
+  const examples = [
+    ['2026-10-12T14:59:59Z', 'tuesday', '2026-10-13T00:00:00Z'], // Mon 23:59 JST -> Tue 09:00
+    ['2026-10-12T15:01:00Z', 'tuesday', '2026-10-13T00:00:00Z'], // Tue 00:01 JST -> Tue 09:00
+    ['2026-10-13T00:00:00Z', 'tuesday', '2026-10-20T00:00:00Z'], // Tue 09:00 -> next week
+    ['2026-10-14T04:00:00Z', 'sunday', '2026-10-18T00:00:00Z'], // Wed 13:00 -> Sun 09:00
+    ['2026-10-17T23:59:59Z', 'sunday', '2026-10-18T00:00:00Z'], // Sun 08:59 -> 09:00
+    ['2026-10-18T00:00:00Z', 'sunday', '2026-10-25T00:00:00Z'], // Sun 09:00 -> next week
+    ['2026-12-31T14:00:00Z', 'sunday', '2027-01-03T00:00:00Z'], // year boundary
+  ] as const;
+  for (const [now, day, expected] of examples) {
+    assert.equal(new Date(nextWeeklyJstDue(Date.parse(now), day)).toISOString(), expected, now);
+  }
+  assert.throws(() => nextWeeklyJstDue(Date.now(), 'noday'), /Invalid weekly JST schedule/);
+});
+
+test('new YouTube channels bootstrap silently, then obey their independent fixed weekdays', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitors = MONITORS.filter((m) => m.source === 'youtube');
+  const starting = Date.parse('2026-10-13T03:00:00Z'); // Tuesday noon JST
+  for (let offset = 0; offset < monitors.length; offset++) {
+    const monitor = monitors[offset]!;
+    const now = starting + offset * 5 * 60_000;
+    const result = await runTick(s.env, [monitor], now, s.deps);
+    assert.equal(result, 'processed');
+    const state = s.raw.prepare(
+      'SELECT initialized_at, next_due_at, config_identity FROM monitor_state WHERE id=?'
+    ).get(monitor.id);
+    assert.equal(state?.initialized_at, now, 'first scan is a silent baseline');
+    assert.equal(state?.config_identity, JSON.stringify(['youtube', monitor.query.trim()]));
+    assert.equal(state?.next_due_at, nextWeeklyJstDue(now, monitor.weeklyJstDay!));
+    assert.equal(s.sent.length, 0);
+    assert.equal(await runTick(s.env, [monitor], now + 24 * 60 * 60_000, s.deps), 'idle');
+  }
+});
+
+test('a weekly YouTube retry can happen midweek, then realign the next due date', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitor = MONITORS.find((m) => m.id === 'youtube-yurucom')!;
+  const sunday = Date.parse('2026-10-18T00:00:00Z');
+  let denied = true;
+  const deps = {
+    ...s.deps,
+    fetchItems: async () => {
+      if (denied) throw new Error('temporary outage');
+      return { items: [], potentiallyTruncated: false };
+    },
+  };
+  await assert.rejects(() => runTick(s.env, [monitor], sunday, deps), /temporary outage/);
+  let due = s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?').get(monitor.id)?.next_due_at;
+  assert.equal(due, sunday + 5 * 60_000);
+  denied = false;
+  const retry = sunday + 5 * 60_000;
+  assert.equal(await runTick(s.env, [monitor], retry, deps), 'processed');
+  due = s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?').get(monitor.id)?.next_due_at;
+  assert.equal(due, Date.parse('2026-10-25T00:00:00Z'));
 });
