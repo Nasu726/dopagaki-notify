@@ -176,9 +176,8 @@ masquerade as a browser, or bypass an upstream denial.
 
 The monitoring Cron is now `*/5 * * * *` (288 invocations/day),
 with per-monitor API polling intervals still in `config/intervals.json`.
-The hourly retention Cron stays `10 * * * *`. YouTube's inactive example
-interval is now `10080` minutes (= 7 days); set its actual channel in
-`config/targets.json` before enabling it. Shorter intervals may be
+The hourly retention Cron stays `10 * * * *`. YouTube's inactive example has `intervalMinutes:10080` (= 7 days) inside
+`config/targets.json`; set its actual channel and `enabled:true` in that same file before it can begin polling. Shorter intervals may be
 needed for channels posting over 15 videos between reads.
 
 ## Second-source smoke test (Japanese Wikipedia)
@@ -279,9 +278,8 @@ not a guarantee of Discord receipt before 20:00:00.
 The source choices are now in `config/targets.json`:
 - `arxiv[].categories`: e.g. `["cs.AI", "cs.LG"]`, producing an OR-category API query.
 - `youtube[].channel`: an actual `UC...` channel ID, `@handle` or channel URL.
-- Every added target ID also needs a positive interval in `config/intervals.json`.
-- Keep arXiv/YouTube disabled in `src/config.ts` until target selections are
-  reviewed and a staging baseline is explicitly authorized.
+- Each YouTube channel defines its own positive `intervalMinutes` and `enabled` in the same `config/targets.json` entry. Only non-YouTube targets require an interval in `config/intervals.json`.
+- Keep arXiv disabled in `src/config.ts` and YouTube entries `enabled:false` in `config/targets.json` until targets are reviewed and a staging baseline is explicitly authorized.
 - **Changing an initialized monitor's target requires a new monitor ID.**
 
 ### Wikipedia troubleshooting
@@ -299,6 +297,46 @@ npx wrangler tail dopagaki-notify --format pretty
 Review the next Wiki attempt. The error may report HTTP status, a timeout or
 an API parsing issue. Do not replace the monitor ID or erase the state just
 to make the baseline appear complete. No additional sources are enabled.
+
+## Configuring multiple YouTube channels
+
+Edit **`config/targets.json`**. Each YouTube channel is a self-contained
+monitor and can choose a different polling interval without updating a second
+file or a source-code registry:
+
+```json
+{
+  "youtube": [
+    {
+      "id": "youtube-example-daily",
+      "channel": "@replace-this-handle",
+      "intervalMinutes": 1440,
+      "enabled": false
+    },
+    {
+      "id": "youtube-example-weekly",
+      "channel": "UCxxxxxxxxxxxxxxxxxxxxxx",
+      "intervalMinutes": 10080,
+      "enabled": false
+    }
+  ]
+}
+```
+
+These are **nonfunctional placeholders**; the real configuration retains
+one disabled empty-channel sample. Use real `UC...` channel IDs where
+possible to avoid an extra handle-resolution request. Set each `enabled`
+flag to `true` only after its target is reviewed. Each `id` must be unique
+and persistent; changing a monitored channel requires a *new ID* so its
+D1 baseline is not mixed with another source. All YouTube channels share
+the one `DISCORD_WEBHOOK_YOUTUBE` Secret and source-level rate-limit state.
+`intervalMinutes:10080` polls no more frequently than weekly (subject
+to scheduler delays). As RSS shows a finite number of most recent videos,
+use shorter intervals for frequent posters.
+
+No new D1 migration is needed for multiple YouTube monitors. Before
+enabling them, inspect Workers CPU usage and test the channel parser
+against actual YouTube RSS.
 
 ## Recovery / stop procedure
 
