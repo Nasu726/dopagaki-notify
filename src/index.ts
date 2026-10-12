@@ -16,7 +16,7 @@ export default {
       if (deleted) console.log('retention: pruned ' + deleted + ' sent delivery receipts');
       return;
     }
-    if (event.cron !== '* * * * *') return;
+    if (event.cron !== '*/5 * * * *') return;
     const status = await runTick(env, MONITORS);
     console.log('cron: ' + status);
   },
