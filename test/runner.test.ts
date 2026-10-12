@@ -24,6 +24,7 @@ function setup() {
   raw.exec(readFileSync(new URL('../migrations/0006_webhook_cooldown.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0007_webhook_disabled.sql', import.meta.url), 'utf8'));
   raw.exec(readFileSync(new URL('../migrations/0008_source_webhook_state.sql', import.meta.url), 'utf8'));
+  raw.exec(readFileSync(new URL('../migrations/0009_delivery_retention.sql', import.meta.url), 'utf8'));
 
   const db: Database = {
     prepare(sql) {
@@ -523,7 +524,7 @@ test('one-shot remote D1 smoke SQL requires an initialized monitor with matching
 
 test('the normal Cron sends the SQL-inserted probe and marks it sent without an API fetch', async () => {
   const s = setup();
-  const now = Date.now();
+  const now = Date.parse('2026-10-12T03:00:00Z'); // noon JST, inside delivery hours
   s.raw.prepare(
     'INSERT INTO monitor_state (id,initialized_at,next_due_at,config_identity) VALUES (?,?,?,?)'
   ).run('qiita-rust', now - 7_200_000, now + 3_600_000, '["qiita","tag:Rust"]');
