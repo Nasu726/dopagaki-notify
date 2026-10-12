@@ -106,7 +106,9 @@ test('XML reader decodes numeric entities, bounds response sizes and refuses bad
 test('all five monitors have individual minute intervals and separate webhook secret keys', () => {
   assert.deepEqual(new Set(MONITORS.map((m) => m.source)),
     new Set(['qiita', 'wikipedia', 'arxiv', 'zenn', 'youtube']));
-  assert.ok(MONITORS.every((m) => !m.enabled && Number.isInteger(m.intervalMinutes)));
+  assert.ok(MONITORS.every((m) => Number.isInteger(m.intervalMinutes)));
+  assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id), ['qiita-rust'],
+    'staging gate: only the Qiita smoke-test monitor may be enabled');
   for (const source of ['arxiv', 'zenn', 'youtube'] as const) {
     const key = 'DISCORD_WEBHOOK_' + source.toUpperCase();
     const env = { [key]: 'https://discord.com/api/webhooks/1234/token' } as Env;
