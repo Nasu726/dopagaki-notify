@@ -4,7 +4,7 @@ import { parseArxiv, stableArxivId, fetchArxiv } from '../src/sources/arxiv.ts';
 import { parseZenn, zennFeedUrl, fetchZenn } from '../src/sources/zenn.ts';
 import { parseYouTube, normalizeChannelReference, extractChannelId, fetchYouTube } from '../src/sources/youtube.ts';
 import { entries, fetchTextBounded, tagText } from '../src/sources/xml.ts';
-import { MONITORS, arxivCategoryQuery } from '../src/config.ts';
+import { MONITORS, arxivCategoryQuery, withYouTubeTargets } from '../src/config.ts';
 import { webhookFor } from '../src/discord.ts';
 import type { Env, Monitor } from '../src/types.ts';
 
@@ -162,4 +162,36 @@ test('arXiv category query config and dormant YouTube reference are explicit', (
     assert.throws(() => arxivCategoryQuery(invalid));
   }
   assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.query, '');
+});
+
+test('multiple YouTube channels have independent monitor IDs, polling intervals and enabled flags', () => {
+  const configured = withYouTubeTargets([
+    { id: 'youtube-daily', channel: '@DailyTest', intervalMinutes: 1440, enabled: true },
+    { id: 'youtube-weekly', channel: 'UC1234567890123456789012', intervalMinutes: 10080, enabled: true },
+    { id: 'youtube-paused', channel: '', intervalMinutes: 60, enabled: false },
+  ]);
+  assert.deepEqual(configured.map((m) => [m.id, m.query, m.intervalMinutes, m.enabled]), [
+    ['youtube-daily', '@DailyTest', 1440, true],
+    ['youtube-weekly', 'UC1234567890123456789012', 10080, true],
+    ['youtube-paused', '', 60, false],
+  ]);
+  assert.throws(() => withYouTubeTargets([
+    { id: 'youtube-bad', channel: '', intervalMinutes: 60, enabled: true },
+  ]), /channel/);
+  assert.throws(() => withYouTubeTargets([
+    { id: 'youtube-bad', channel: '@a', intervalMinutes: 60, enabled: true },
+  ]), /channel|YouTube/);
+  assert.throws(() => withYouTubeTargets([
+    { id: 'youtube-bad', channel: 'https://evil.test/watch', intervalMinutes: 60, enabled: true },
+  ]), /host/);
+  assert.throws(() => withYouTubeTargets([
+    { id: 'youtube-bad', channel: '@weekly', intervalMinutes: 0, enabled: true },
+  ]), /positive integer/);
+  assert.throws(() => withYouTubeTargets([
+    { id: 'youtube-bad', channel: '@weekly', intervalMinutes: 1.5, enabled: true },
+  ]), /positive integer/);
+  assert.throws(() => withYouTubeTargets([
+    { id: 'youtube-first', channel: '@Weekly', intervalMinutes: 120, enabled: true },
+    { id: 'youtube-second', channel: 'https://www.youtube.com/@weekly/videos', intervalMinutes: 180, enabled: true },
+  ]), /Duplicate YouTube channel/);
 });
