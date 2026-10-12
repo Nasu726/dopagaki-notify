@@ -773,7 +773,12 @@ test('all three YouTube monitors use independent Tuesday/Sunday hourly schedules
     assert.equal(await runTick(s.env, [monitor], base + 60 * 60_000, s.deps), 'processed');
     assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
       .get(monitor.id)?.next_due_at, base + 120 * 60_000);
-    assert.equal(await runTick(s.env, [monitor], base + 24 * 60 * 60_000, s.deps), 'idle');
+    // An overdue weekly target seen on a different day advances its stored
+    // deadline, without fetching upstream.
+    assert.equal(await runTick(s.env, [monitor], base + 24 * 60 * 60_000, s.deps), 'processed');
+    assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
+      .get(monitor.id)?.next_due_at,
+      nextHourlyJstWeekdayDue(base + 24 * 60 * 60_000, monitor.weeklyJstDay!));
   }
 });
 
@@ -798,7 +803,9 @@ test('Sunday YouTube API failure retries on Sunday then resumes hourly; off-day 
   assert.equal(await runTick(s.env, [monitor], retry, deps), 'processed');
   due = s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?').get(monitor.id)?.next_due_at;
   assert.equal(due, sunday + 60 * 60_000);
-  assert.equal(await runTick(s.env, [monitor], Date.parse('2026-10-18T15:00:00Z'), deps), 'idle');
+  assert.equal(await runTick(s.env, [monitor], Date.parse('2026-10-18T15:00:00Z'), deps), 'processed');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?').get(monitor.id)?.next_due_at,
+    Date.parse('2026-10-24T15:00:00Z')); // next Sunday 00:00 JST
 });
 
 test('pending YouTube notifications can be sent next morning even outside fetch weekday', async () => {
