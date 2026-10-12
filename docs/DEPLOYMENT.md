@@ -105,9 +105,7 @@ Do not store these URLs in D1 or `.dev.vars` in a public repository.
 
 1. Choose one low-volume source/monitor for staging, with its Webhook Secret
    configured. Keep the other monitors disabled.
-2. In `src/config.ts`, enable only that monitor. In `config/intervals.json`,
-   set an integer monitoring interval in minutes. Never place intervals in
-   `src/config.ts`.
+2. For Qiita/Wikipedia/arXiv/Zenn, enable only that monitor in `src/config.ts` and set its integer minute interval in `config/intervals.json`. For YouTube, edit `enabled` and `intervalMinutes` in the same `config/targets.json` channel entry.
 3. Deploy this change. On its first successful scan the Worker records a
    **silent baseline**; old articles should not generate Discord alerts.
 4. Confirm a genuinely newly published matching item is detected, queued,
@@ -175,7 +173,7 @@ bot access policy. Do **not** remove the identification header,
 masquerade as a browser, or bypass an upstream denial.
 
 The monitoring Cron is now `*/5 * * * *` (288 invocations/day),
-with per-monitor API polling intervals still in `config/intervals.json`.
+with non-YouTube API polling intervals in `config/intervals.json` and YouTube intervals in `config/targets.json`.
 The hourly retention Cron stays `10 * * * *`. YouTube's inactive example has `intervalMinutes:10080` (= 7 days) inside
 `config/targets.json`; set its actual channel and `enabled:true` in that same file before it can begin polling. Shorter intervals may be
 needed for channels posting over 15 videos between reads.
@@ -297,6 +295,43 @@ npx wrangler tail dopagaki-notify --format pretty
 Review the next Wiki attempt. The error may report HTTP status, a timeout or
 an API parsing issue. Do not replace the monitor ID or erase the state just
 to make the baseline appear complete. No additional sources are enabled.
+
+## Wrangler remote D1 authentication troubleshooting
+
+If `wrangler tail` works but `wrangler d1 execute --remote` responds with
+unauthorized/forbidden, diagnose **local CLI authentication and account
+selection**, not the Worker code. These operations use different API
+permissions.
+
+```powershell
+npx wrangler whoami
+```
+
+Confirm that the expected Cloudflare account is listed. If unauthenticated,
+or if the wrong identity was selected, authorize again:
+
+```powershell
+npx wrangler login
+npx wrangler whoami
+```
+
+If the usual browser callback fails, use `npx wrangler login --device`.
+If `whoami` succeeds but D1 remains inaccessible, check whether a local
+`CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` environment variable,
+a Wrangler authentication profile or an unexpectedly selected account
+overrides the intended login. A token with Workers Logs permissions may
+still lack D1 read permissions. Do not paste token values, login URLs or
+credentials into logs, tickets or chat. A failed local D1 command alone
+does not imply compromise of the deployed Worker.
+
+Cloudflare may take up to 15 minutes to propagate a Cron change. After the
+new five-minute dispatcher is deployed, old `* * * * *` tick entries may
+temporarily continue. Successful `Ok` ticks show that the scheduled
+handler exited without an exception; they do not prove the MediaWiki API
+was called. The Wikimedia 403 postpones the next API attempt for at least
+an hour. If another explicit `MediaWiki HTTP 403` appears, stop the
+optional Wikipedia monitor in `src/config.ts` via an isolated, tested
+PR. Do not delete its historical D1 state to stop polling.
 
 ## Configuring multiple YouTube channels
 
