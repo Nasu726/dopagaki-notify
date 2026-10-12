@@ -82,6 +82,8 @@ export async function runTick(
         } else {
           await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes,
             state.scan_started_at ?? now, !result.potentiallyTruncated);
+          if (state.initialized_at === null && !result.potentiallyTruncated)
+            console.log('monitor ' + runnable.id + ': silent baseline initialized');
         }
       } catch (error) {
         // A MediaWiki 403 may indicate upstream bot-policy rejection. Avoid

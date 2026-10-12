@@ -300,6 +300,33 @@ Review the next Wiki attempt. The error may report HTTP status, a timeout or
 an API parsing issue. Do not replace the monitor ID or erase the state just
 to make the baseline appear complete. No additional sources are enabled.
 
+## Multiple YouTube channels and Wikipedia failure policy
+
+Add every intended YouTube channel as a **separate monitor** in
+`config/targets.json`, using the fields `id` (stable), `channel`
+(`UC...`, `@handle` or supported YouTube channel URL), and
+`enabled` (`true`/`false`). Give each ID an independent interval
+in minutes in `config/intervals.json`, e.g. `60` for an active
+channel and `10080` for a weekly one. No TypeScript edits are needed
+for adding/activating YouTube channels. Do not change the query behind
+an initialized ID; create a new ID and a new silent baseline.
+
+The repository keeps YouTube targets **disabled** until the operator
+supplies real channels. All active channels of source `youtube` share
+`DISCORD_WEBHOOK_YOUTUBE` and its cooldown/block state, but not
+their monitor state or polling intervals.
+
+The most recent Wikipedia D1 check still showed
+`initialized_at = NULL`. Its stored retry deadline was
+2026-10-12 23:44:16 JST; no definitive post-fix API success or
+repeat 403 had been observed at that time. When a successful silent
+baseline is committed, the Worker now logs
+`monitor wikipedia-ja: silent baseline initialized`.
+If MediaWiki 403 **recurs after the identifying User-Agent release**,
+disable `wikipedia-ja` in `src/config.ts` (it is nonessential);
+do not attempt to bypass Wikimedia's denial. The operator can report
+the 403 for a small follow-up PR; no D1 deletion is needed.
+
 ## Recovery / stop procedure
 
 - To stop sending alerts immediately, set all monitors `enabled: false`

@@ -5,7 +5,7 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 ## Product scope / frozen choices
 
 - Cloudflare Workers Cron every five minutes for monitors, separate hourly Cron for bounded retention; per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
-- Independent source monitor definitions in `src/config.ts`; public arXiv category and YouTube channel targets in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
+- Independent source monitor definitions in `src/config.ts`; public arXiv category and YouTube channel targets, including enabled flags, in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
 - Five source adapters: arXiv, Qiita, Zenn, YouTube RSS, Wikipedia new-page events.
 - No GUI, long-running server, user authentication, public HTTP API, or paid infrastructure dependency for the initial version.
 - Remote D1 migrations `0001`–`0009` and source Secrets have been configured according to the owner; no new migration is required to adjust the maintenance schedule. Qiita outbound webhook delivery was verified with an idempotent D1 smoke record. Only Qiita and Wikipedia are enabled.
@@ -92,3 +92,9 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 - The owner's Worker logs confirmed `MediaWiki HTTP 403`, corresponding to `wikipedia-ja` having a NULL baseline. The adapter previously omitted User-Agent. Following Wikimedia's bot identification policy, both `User-Agent` and `Api-User-Agent` now identify `dopagaki-notify/0.1` and its public GitHub contact. This is a **hypothesis-based fix** until confirmed live. Persistent 403s are spaced at least one hour apart.
 - The monitor dispatcher Cron is reduced from `* * * * *` (1,440 runs/day) to `*/5 * * * *` (288 runs/day), separate from the existing `10 * * * *` hourly retention Cron. Source polling intervals remain 60m Qiita/Wikipedia, 120m default arXiv, 60m Zenn, and dormant 10,080m/7d YouTube; all are individually editable in `config/intervals.json`. Multiple overdue sources, pagination checkpoints and pending Discord deliveries motivate retaining sub-hour scheduler granularity.
 - Keep at most one fetched API page and three Discord sends per invocation; **never drop excess valid events just to hit 10ms CPU**. Queue and resume them instead; unverified Free CPU p99 peaks near 19ms remain an operational measurement gate.
+
+### YouTube multi-channel configuration and Wikipedia gate (2026-10-13)
+
+- The existing D1 architecture already supports distinct YouTube monitor IDs, fetch deadlines and intervals. JSON targets now include explicit `enabled` flags. Each channel is configured by adding one `config/targets.json` entry and a corresponding minutes value in `config/intervals.json`, with no source-code modification. No YouTube monitors are enabled by default.
+- The user authorized suspending the **nonessential** Wikipedia monitor if HTTP 403 recurs *after* the latest User-Agent change. As of the provided SQL result, the baseline is still NULL; there is no evidence yet of another post-fix 403. Leave it active until next due attempt or credible failure evidence, then disable if needed.
+- On successfully completed initial baselines, log only the monitor ID and an initialization marker to aid Cloudflare troubleshooting without logging article contents or credentials.
