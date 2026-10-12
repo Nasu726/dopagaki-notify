@@ -16,19 +16,18 @@ npm run check
 npm run bundle:check # Wrangler compiles without deploying
 ```
 
-**Set monitoring intervals only in [config/intervals.json](config/intervals.json).** Each value is a **positive integer number of minutes**; add an entry for every monitor ID:
+**Set non-YouTube monitoring intervals in [config/intervals.json](config/intervals.json).** Each value is a **positive integer number of minutes**; YouTube intervals live beside their channel references in `config/targets.json`:
 
 ```json
 {
   "qiita-rust": 7,
   "wikipedia-ja": 60,
   "arxiv-cs-ai": 120,
-  "zenn-topic-typescript": 60,
-  "youtube-example": 10080
+  "zenn-topic-typescript": 60
 }
 ```
 
-The file intentionally holds **interval values only**. arXiv categories and YouTube channels are editable in **[config/targets.json](config/targets.json)**; the enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv, Zenn and YouTube remain disabled pending subsequent live validation.
+The file intentionally holds **interval values only** for Qiita, Wikipedia, arXiv and Zenn. YouTube channels, their **individual intervals and enabled flags** are all editable together in **[config/targets.json](config/targets.json)**. Non-YouTube enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv, Zenn and YouTube remain disabled pending subsequent live validation.
 
 The monitoring Cron Trigger in `wrangler.jsonc` runs every **five minutes** (`*/5 * * * *`), irrespective of these settings. It checks D1 deadlines; it does **not** fetch every API every five minutes. A **second independent Cron** (`10 * * * *`, every hour at minute 10 UTC/JST) deletes at most 20 acknowledged messages per invocation (24 invocations/day; up to 480 sent receipts/day). The previous five-minute cadence was unnecessary overhead. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
 
@@ -42,12 +41,23 @@ Update **`config/targets.json`** without touching the source adapters:
     { "id": "arxiv-cs-ai", "categories": ["cs.AI", "cs.LG"] }
   ],
   "youtube": [
-    { "id": "youtube-example", "channel": "UCxxxxxxxxxxxxxxxxxxxxxx" }
+    {
+      "id": "youtube-tech-daily",
+      "channel": "@replace-with-real-handle",
+      "intervalMinutes": 1440,
+      "enabled": false
+    },
+    {
+      "id": "youtube-lectures-weekly",
+      "channel": "UCxxxxxxxxxxxxxxxxxxxxxx",
+      "intervalMinutes": 10080,
+      "enabled": false
+    }
   ]
 }
 ```
 
-Replace the example channel ID with a **real** `UC...` channel ID, `@handle`, or YouTube channel URL. The repository currently keeps the YouTube `channel` value **empty** and the arXiv categories at `["cs.AI"]` until the owner supplies the desired targets. The example above is syntax guidance, **not** the live configuration. The default interval for the dormant YouTube monitor is **10080 minutes (7 days)**; change that value in `config/intervals.json` whenever the target's upload frequency calls for shorter polling. Note that YouTube RSS exposes only a finite recent-video window, so a weekly scan can miss videos if a channel posts many times during a week. Additional entries require distinct stable IDs plus an interval in `config/intervals.json`. Source monitors stay **disabled** until explicitly enabled in `src/config.ts`. Never reuse a previously initialized monitor ID when changing its query/categories/channel: use a new ID to establish a silent baseline.
+The two YouTube entries above illustrate **different per-channel intervals in one file**: 1440 minutes (daily) and 10080 minutes (weekly). Replace the fake handles/channel IDs with actual channel IDs (`UC...`), `@handles` or YouTube URLs. The repository's actual sample keeps `youtube-example` with an **empty channel and `enabled:false`**, so no external YouTube requests are made yet. To add a channel, add an entry with a **unique permanent `id`**, `channel`, positive integer `intervalMinutes`, and `enabled`. There is **no YouTube entry to add in `config/intervals.json` or `src/config.ts`**. The example above is illustrative, not live configuration. The Worker maintains independent D1 fetch deadlines and baselines per ID; all YouTube channels share the same YouTube Discord webhook. Never reuse an initialized ID after changing its channel; assign a **new ID** and a fresh silent baseline. For high-volume channels, choose a shorter poll interval than weekly because the RSS feed includes only a bounded recent-video window.
 
 ## Notification hours, retention and privacy
 
@@ -80,7 +90,7 @@ One Discord server with separate channels works as intended. Create one incoming
 - **Wikipedia** recent *page creations*, not random articles or edits; Wikimedia-compliant descriptive `User-Agent` and `Api-User-Agent` include the repository as an operator contact. A 403 is retried no sooner than one hour later to avoid hammering a denied endpoint.
 - **arXiv** Atom API: creation date and version-independent paper ID.
 - **Zenn** user/topic RSS: stable GUID and publication date (trend feeds deliberately excluded).
-- **YouTube** channel Atom RSS: stable video ID and publication date; supports channel UC... ID or @handle/channel URL with D1 resolution cache.
+- **YouTube** channel Atom RSS: stable video ID and publication date; supports multiple independently configured channel monitors with their own poll intervals, channel UC... IDs, @handles or channel URLs, plus D1 handle-resolution cache.
 - Automated tests using an in-memory SQLite database executing the same migration SQL.
 
 ## Recovering an invalid Discord webhook
