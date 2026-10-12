@@ -12,5 +12,5 @@ export async function pruneSentDeliveries(db: Database, now: number): Promise<nu
     "SELECT rowid FROM deliveries WHERE status = 'sent' AND sent_at < ? " +
     "ORDER BY sent_at LIMIT ?)"
   ).bind(now - DELIVERY_RETENTION_MS, PRUNE_BATCH_SIZE).run();
-  return result.meta.changes;
+  return result.meta.changes ?? 0;
 }
