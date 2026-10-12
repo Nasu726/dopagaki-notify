@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { runTick } from '../src/runner.ts';
+import { HttpStatusError } from '../src/http.ts';
 import { isJstNotificationTime } from '../src/schedule.ts';
 import { DELIVERY_RETENTION_MS, PRUNE_BATCH_SIZE, pruneSentDeliveries } from '../src/maintenance.ts';
 import Worker from '../src/index.ts';
@@ -664,4 +665,39 @@ test('only the configured hourly schedule prunes and it differs from the polling
   assert.equal(hasOld(), 1);
   await Worker.scheduled({ cron: '10 * * * *' }, s.env);
   assert.equal(hasOld(), 0, 'hourly trigger runs the bounded maintenance deletion');
+});
+
+test('MediaWiki 403 holds its API retry for at least an hour without clearing baseline state', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-12T00:00:00Z');
+  const wiki: Monitor = { ...qiita, id: 'wikipedia-ja', query: 'ja', source: 'wikipedia' };
+  await assert.rejects(() => runTick(s.env, [wiki], now, {
+    ...s.deps,
+    fetchItems: async () => { throw new HttpStatusError('MediaWiki', 403, null); },
+  }), /MediaWiki HTTP 403/);
+  const state = s.raw.prepare('SELECT initialized_at,next_due_at FROM monitor_state WHERE id=?')
+    .get(wiki.id);
+  assert.equal(state?.initialized_at, null);
+  assert.equal(state?.next_due_at, now + 60 * 60_000);
+});
+
+test('five-minute global tick is independent of per-monitor weekly/60-minute intervals', async () => {
+  const s = setup();
+  const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  assert.deepEqual(config.triggers.crons, ['*/5 * * * *', '10 * * * *']);
+  const minute = 60_000;
+  const now = Date.parse('2026-10-12T00:00:00Z');
+  assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.intervalMinutes, 10_080);
+  assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.enabled, false);
+  // Prepare every enabled monitor as already initialized and next due in an hour.
+  for (const monitor of MONITORS.filter((m) => m.enabled)) {
+    s.raw.prepare(
+      'INSERT INTO monitor_state (id,initialized_at,next_due_at,config_identity) VALUES (?,?,?,?)'
+    ).run(monitor.id, now - minute, now + 60 * minute,
+      JSON.stringify([monitor.source, monitor.query.trim()]));
+  }
+  await Worker.scheduled({ cron: '* * * * *' }, s.env);
+  assert.deepEqual(s.sent, [], 'old per-minute Cron must not process monitors');
+  await Worker.scheduled({ cron: '*/5 * * * *' }, s.env);
+  assert.deepEqual(s.sent, [], 'five-minute scheduler does not fetch before individual deadline');
 });
