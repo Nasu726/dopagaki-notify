@@ -4,7 +4,7 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 
 ## Product scope / frozen choices
 
-- Cloudflare Workers Cron every minute for monitors, separate hourly Cron for bounded retention; per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
+- Cloudflare Workers Cron every five minutes for monitors, separate hourly Cron for bounded retention; per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
 - Independent source monitor definitions in `src/config.ts`; public arXiv category and YouTube channel targets in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
 - Five source adapters: arXiv, Qiita, Zenn, YouTube RSS, Wikipedia new-page events.
 - No GUI, long-running server, user authentication, public HTTP API, or paid infrastructure dependency for the initial version.
@@ -25,7 +25,7 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 
 **Preparation:** Staging runbook is in [DEPLOYMENT.md](DEPLOYMENT.md); source adapters and Wrangler bundle have passed CI, but real API/CPU measurements remain unverified.
 
-**Owner reports complete:** Cloudflare Worker deployment, remote D1 migrations `0001`–`0008`, and five source-specific Secrets. **Current gate:** Verify the Wikipedia first-run silent baseline and successful live MediaWiki API fetches; investigate observed occasional CPU p99 around 19 ms (10 ms Workers Free budget). Qiita Discord delivery was verified using a synthetic queued test item, but genuine upstream-new-item detection and delivery remain unverified. Never paste Webhook URLs into GitHub or chat.
+**Owner reports complete:** Cloudflare Worker deployment, remote D1 migrations `0001`–`0008`, and five source-specific Secrets. **Current gate:** Verify the Wikipedia first-run silent baseline following Wikimedia-compliant User-Agent changes (prior Cloudflare logs showed MediaWiki HTTP 403); investigate observed occasional CPU p99 around 19 ms (10 ms Workers Free budget). Qiita Discord delivery was verified using a synthetic queued test item, but genuine upstream-new-item detection and delivery remain unverified. Never paste Webhook URLs into GitHub or chat.
 
 1. Initial deployment was performed with all monitors disabled; next verify the Cron Trigger and that the HTTP handler stays 404.
 2. Enable only one low-traffic test monitor, verify silent initial baseline, subsequent delivery and duplicate suppression.
@@ -86,3 +86,9 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 - The per-invocation Workers Free CPU limit (10 ms) is **not** an unlimited daily invocation allowance: the account also has an aggregate Workers Free allowance of 100,000 requests/day, plus D1 row read/write quotas. The old cadence was unnecessary resource usage even though both cadences are well below the account's request quota.
 - A once-daily Cron with an unchanged 20-row cap would only remove 20 expired deliveries per day and could accumulate history if >20 notifications/day are sent. Hourly is a conservative bounded compromise; reduce further only after verifying delivery volume and maintenance CPU.
 - No schema or retention-window change. Cloudflare's updated triggers may take several minutes to propagate; verify both Cron entries after deployment.
+
+### MediaWiki 403 and dispatcher resource adjustment (2026-10-12)
+
+- The owner's Worker logs confirmed `MediaWiki HTTP 403`, corresponding to `wikipedia-ja` having a NULL baseline. The adapter previously omitted User-Agent. Following Wikimedia's bot identification policy, both `User-Agent` and `Api-User-Agent` now identify `dopagaki-notify/0.1` and its public GitHub contact. This is a **hypothesis-based fix** until confirmed live. Persistent 403s are spaced at least one hour apart.
+- The monitor dispatcher Cron is reduced from `* * * * *` (1,440 runs/day) to `*/5 * * * *` (288 runs/day), separate from the existing `10 * * * *` hourly retention Cron. Source polling intervals remain 60m Qiita/Wikipedia, 120m default arXiv, 60m Zenn, and dormant 10,080m/7d YouTube; all are individually editable in `config/intervals.json`. Multiple overdue sources, pagination checkpoints and pending Discord deliveries motivate retaining sub-hour scheduler granularity.
+- Keep at most one fetched API page and three Discord sends per invocation; **never drop excess valid events just to hit 10ms CPU**. Queue and resume them instead; unverified Free CPU p99 peaks near 19ms remain an operational measurement gate.
