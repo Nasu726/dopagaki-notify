@@ -686,7 +686,7 @@ test('five-minute global tick is independent of per-monitor weekly/60-minute int
   const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
   assert.deepEqual(config.triggers.crons, ['*/5 * * * *', '10 * * * *']);
   const minute = 60_000;
-  const now = Date.parse('2026-10-12T00:00:00Z');
+  const now = Date.now();
   assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.intervalMinutes, 10_080);
   assert.equal(MONITORS.find((m) => m.id === 'youtube-example')?.enabled, false);
   // Prepare every enabled monitor as already initialized and next due in an hour.
