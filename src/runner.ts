@@ -1,3 +1,4 @@
+import { isJstNotificationTime } from './schedule.ts';
 import { isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors } from './config.ts';
 import { notifyDiscord, webhookFor } from './discord.ts';
@@ -87,7 +88,10 @@ export async function runTick(
       }
     }
     const webhook = webhookFor(runnable, env);
-    const pending = state.webhook_cooldown_until > now || state.webhook_blocked_status !== null
+    // Continue polling sources at night, but leave outgoing notifications
+    // queued until the next 09:00-20:00 JST delivery window.
+    const pending = !isJstNotificationTime(now) || state.webhook_cooldown_until > now ||
+      state.webhook_blocked_status !== null
       ? [] : await getPending(env.DB, runnable.id, now, MAX_NOTIFICATIONS_PER_TICK);
     for (const item of pending) {
       try {
