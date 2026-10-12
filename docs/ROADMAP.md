@@ -4,11 +4,11 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 
 ## Product scope / frozen choices
 
-- Single Cloudflare Workers Cron Trigger (`* * * * *`); per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
-- Independent source monitor definitions in `src/config.ts`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
+- Cloudflare Workers Cron every minute for monitors, separate five-minute Cron for bounded retention; per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
+- Independent source monitor definitions in `src/config.ts`; public arXiv category and YouTube channel targets in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
 - Five source adapters: arXiv, Qiita, Zenn, YouTube RSS, Wikipedia new-page events.
 - No GUI, long-running server, user authentication, public HTTP API, or paid infrastructure dependency for the initial version.
-- Remote D1 migrations `0001`–`0008` and source Secrets have been configured; Qiita outbound webhook delivery was verified with an idempotent D1 smoke record. Only Qiita and Wikipedia are enabled.
+- Remote D1 migrations `0001`–`0008` and source Secrets were configured; migration `0009` is **pending owner application** for indexed retention. Qiita outbound webhook delivery was verified with an idempotent D1 smoke record. Only Qiita and Wikipedia are enabled.
 
 ## Stage A — complete local correctness and resource hygiene (current)
 
@@ -48,7 +48,7 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 ## Stage D — measure-driven optimization and maintenance
 
 - Only after Stage B measurements: consider eliminating remaining idle-tick SQL, streaming/partial RSS parsing, reducing Qiita payload CPU, and changing page sizes. Compare before/after CPU p50/p95, rows read/written, request counts and missed/delayed items.
-- Bound long-term D1 outbox growth while retaining sufficient deduplication/history for the monitored sources.
+- **Implemented for staging**: separate five-minute Cron prunes up to 20 `sent` deliveries per invocation once ten days old. Publication-time eligibility is bounded to the same ten-day horizon to avoid resurrection after deletion. Pending retries and scan state remain durable; validate D1 quota/CPU and retention throughput in Cloudflare.
 - Add an actionable failure or stale-scan alert channel if operational evidence shows one is needed.
 - Keep source APIs and Cloudflare limits current.
 
@@ -57,6 +57,7 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 - All source changes through feature branches and PRs; merge only after CI success. No direct pushes to `main`.
 - Reuse existing adapters and tests; no speculative rewrites, premature Wasm, large dependency stacks or extra Cloudflare Cron Triggers.
 - No claimed CPU/RSS/D1 performance improvement without quantified observations. Local SQL-statement reductions are valid only as **statement counts**, not cloud CPU measurements.
+- A second maintenance Cron was deliberately introduced to keep deletion CPU outside ordinary fetch/delivery invocations; it must be monitored separately.
 - Update this roadmap only when milestone status or verified constraints change.
 
 ## Current risks and known limitations
@@ -71,3 +72,10 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 - arXiv/Wikipedia use a bounded overlap rather than mathematically exhaustive detection. Qiita search sorting is not assumed chronological; it may take up to 100 scheduled page checks. Zenn/YouTube RSS cannot page backwards once entries fall out of their feed.
 - Discord delivery followed by D1 acknowledgement cannot be atomic: failures between these steps can duplicate notification.
 - Cloudflare staging is deployed by the owner. Production readiness remains unverified because live upstream item detection for each source and worst-case CPU resource use have not yet passed.
+
+## New staging conditions (2026-10-12)
+
+- Wikipedia's real D1 row was observed with `initialized_at = NULL`, `last_complete_at = NULL`, and a nonzero future `next_due_at`: the initial MediaWiki fetch has **not yet completed**. Inspect the actual Worker error logs and Retry-After status before calling this source healthy; do not infer the specific root cause from that one row.
+- **JST notification window**: 09:00 inclusive, 20:00 exclusive. Source polling and outbox insertion continue overnight. Pending-only wakeups are suppressed until morning.
+- **Retention**: separate `*/5 * * * *` maintenance Cron, 20 expired `sent` receipts maximum per invocation, ten-day cutoff and partial `sent_at` index. Pending rows are never pruned automatically. This is not yet measured against Workers Free CPU limits.
+- **Editable target lists**: `config/targets.json` contains arXiv category sets and YouTube channel references (empty placeholder). Changing the query of an initialized monitor requires a new ID to preserve the fail-closed semantic history invariant.
