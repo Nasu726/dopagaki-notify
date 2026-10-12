@@ -57,7 +57,7 @@ export async function assertMonitorIdentity(
   if (result.meta.changes !== 1) throw new Error('Monitor identity could not be pinned under the active lease');
 }
 // D1 permits at most 100 SQL bindings. Each monitor uses two; reserve
-// two additional bindings for the current time and bound each read to 40.
+// three additional bindings for the delivery-hours flag and current time; each read uses at most 83.
 const MONITOR_SELECT_BATCH = 40;
 export async function getRunnableIds(
   db: Database, now: number, enabled: readonly { id: string; source: SourceName }[],
