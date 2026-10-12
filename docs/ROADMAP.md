@@ -64,7 +64,7 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 
 - v0.8 shared-source webhook migration: atomic pending-delivery claims now consult `webhook_source_state`, not the obsolete monitor-level cooldown/block fields. This also preserves delivery after an explicit source-level recovery. Regression-tested locally; Cloudflare D1 deployment is not yet verified.
 
-- D1 SQL bind parameters cap at 100 per statement; notification inserts use at most 84 binds per query (12 rows × 7 fields), and due-monitor selection is chunked at 40 monitors (82 binds).
+- D1 SQL bind parameters cap at 100 per statement; notification inserts use at most 84 binds per query (12 rows × 7 fields), and due-monitor selection is chunked at 40 monitors (83 binds).
 
 - **Workers Free CPU time is 10 ms/invocation** (Cloudflare's actual measurement is required).
 - A Cron tick processes **one monitor and at most one paginated API page**, so many concurrently due monitors can run late.
