@@ -16,7 +16,7 @@ const make = (id: string, publishedAt = now + 1_000): ContentItem => ({
 });
 function database() {
   const raw = new DatabaseSync(':memory:');
-  for (const n of ['0001_init', '0003_catchup', '0004_monitor_identity', '0005_scan_coverage', '0006_webhook_cooldown', '0007_webhook_disabled', '0008_source_webhook_state'])
+  for (const n of ['0001_init', '0003_catchup', '0004_monitor_identity', '0005_scan_coverage', '0006_webhook_cooldown', '0007_webhook_disabled', '0008_source_webhook_state', '0009_delivery_retention'])
     raw.exec(readFileSync(new URL('../migrations/' + n + '.sql', import.meta.url), 'utf8'));
   const DB: Database = {
     prepare(sql) {
