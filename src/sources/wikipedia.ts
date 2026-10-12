@@ -1,6 +1,11 @@
 import { requireSuccess } from '../http.ts';
 import type { ContentItem, Monitor } from '../types.ts';
 
+// Wikimedia requires a descriptive bot User-Agent with contact information.
+// This repository's issue tracker is the publicly reachable operator contact.
+export const WIKIMEDIA_USER_AGENT =
+  'dopagaki-notify/0.1 (https://github.com/Nasu726/dopagaki-notify)';
+
 interface RecentChange {
   type: string;
   ns: number;
@@ -54,7 +59,8 @@ export async function fetchWikipedia(
     url.searchParams.set('continue', continuation.continue);
   }
   const response = await fetcher(url, {
-    headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000),
+    headers: { Accept: 'application/json', 'User-Agent': WIKIMEDIA_USER_AGENT,
+      'Api-User-Agent': WIKIMEDIA_USER_AGENT }, signal: AbortSignal.timeout(15_000),
   });
   requireSuccess(response, 'MediaWiki');
   const raw = await response.json() as { continue?: unknown };
