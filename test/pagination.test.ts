@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fetchQiita, qiitaQueryWithWindow } from '../src/sources/qiita.ts';
-import { fetchWikipedia } from '../src/sources/wikipedia.ts';
+import { fetchWikipedia, WIKIMEDIA_USER_AGENT } from '../src/sources/wikipedia.ts';
 import { fetchArxiv } from '../src/sources/arxiv.ts';
 import type { Monitor } from '../src/types.ts';
 
@@ -36,8 +36,12 @@ test('Qiita uses a bounded page cursor, not an entire feed in a single invocatio
 
 test('Wikipedia persists both rccontinue and continue tokens', async () => {
   let attempts = 0;
-  const fetcher: typeof fetch = async (input) => {
+  const fetcher: typeof fetch = async (input, init) => {
     const req = new URL(String(input));
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('User-Agent'), WIKIMEDIA_USER_AGENT);
+    assert.equal(headers.get('Api-User-Agent'), WIKIMEDIA_USER_AGENT);
+    assert.match(WIKIMEDIA_USER_AGENT, /dopagaki-notify\/0\.1 \(https:\/\/github\.com\/Nasu726\/dopagaki-notify\)/);
     attempts++;
     if (attempts === 1) {
       assert.equal(req.searchParams.get('rccontinue'), null);
@@ -108,4 +112,12 @@ test('Qiita respects a creation-date window but never relies on result sorting',
   assert.equal(second.nextCursor, null);
   assert.deepEqual(requested, ['tag:Rust created:>=2026-10-09', 'tag:Rust created:>=2026-10-09'],
     'all pages in a scan must share the same historical lower bound');
+});
+
+test('Wikimedia HTTP 403 surfaces as explicit denial even with descriptive identification', async () => {
+  const monitor = makeMonitor('wikipedia', 'ja');
+  await assert.rejects(() => fetchWikipedia(monitor, async (_url, init) => {
+    assert.ok(new Headers(init?.headers).get('User-Agent')?.includes('dopagaki-notify'));
+    return new Response('blocked', { status: 403 });
+  }), /MediaWiki HTTP 403/);
 });
