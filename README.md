@@ -74,7 +74,7 @@ One Discord server with separate channels works as intended. Create one incoming
 
 1. Create a D1 database named `dopagaki-notify`, put its real `database_id` in `wrangler.jsonc`, and apply **all** SQL migrations in the `migrations/` directory (now through `0009_delivery_retention.sql`) in filename order using Wrangler.
 2. Set the corresponding **Cloudflare Secrets** for the enabled sources: `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_WIKIPEDIA`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_YOUTUBE`. Never commit Webhook URLs to Git.
-3. Configure monitors in `src/config.ts` and integer-minute intervals in `config/intervals.json`.
+3. Configure Qiita/Wikipedia/arXiv/Zenn monitors in `src/config.ts`, their intervals in `config/intervals.json`, and each YouTube channel with its interval and enable flag in `config/targets.json`.
 4. Connect GitHub to Cloudflare Workers Builds or deploy with Wrangler. Keep deployment disabled until D1/Secrets are configured.
 5. Test the first silent baseline, later new-item notifications, failure retries, CPU limits and D1 state.
 
@@ -116,7 +116,7 @@ Do not clear the block before the Secret is corrected. Avoid publishing the Webh
 - Cloudflare Workers Free CPU budget is 10 ms per invocation. The owner observed p50 around 1.17 ms and normal p99 around 2.07 ms, with occasional p99 near 19 ms (zero reported errors). These measurements precede the new maintenance Cron and do not establish worst-case compliance. API waiting time is excluded from CPU accounting.
 - Initial baseline and permanently ineligible pre-baseline items are excluded without storing `ignored` outbox rows; existing legacy rows remain compatible.
 - Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.
-- Each persistent monitor ID is pinned to its source and trimmed query (not its interval). **To change a source or query, choose a new monitor ID and add the matching integer interval in `config/intervals.json`.** The new ID creates a separate silent baseline; an unchanged ID with a changed query now fails closed. Interval-only changes require no state migration. Legacy initialized D1 rows that lack identity information fail closed until intentionally migrated or reset.
+- Each persistent monitor ID is pinned to its source and trimmed query (not its interval). **To change a source or query, choose a new monitor ID; add its interval in `config/intervals.json` for non-YouTube targets or in `config/targets.json` for YouTube.** The new ID creates a separate silent baseline; an unchanged ID with a changed query now fails closed. Interval-only changes require no state migration. Legacy initialized D1 rows that lack identity information fail closed until intentionally migrated or reset.
 - A Cloudflare Worker has been deployed by the owner, and the eight remote D1 migrations and Discord Secrets have been configured by the owner. The Qiita outbound delivery path was confirmed by the owner with a synthetic test item. The configured second staging monitor is Wikipedia new pages; first-run and real upstream ingestion still need inspection. CPU p50 around 1.17 ms and p99 around 2.07 ms were reported, with occasional p99 peaks near 19 ms and zero reported errors. This is **not** proof that all invocations remain within the 10 ms Workers Free CPU limit.
 
 ## Prior source code and API references
@@ -128,7 +128,7 @@ Do not clear the block before the Secret is corrected. Avoid publishing the Webh
 
 ## Monitoring cadence and actual API usage (2026-10-12)
 
-- The previous one-minute monitoring dispatcher ran 1,440 times/day, mostly idle with only 60-minute Qiita and Wikipedia checks. The new **five-minute** dispatcher runs **288 times/day** (80% fewer scheduler invocations); individual monitor intervals are unchanged and set in `config/intervals.json`.
+- The previous one-minute monitoring dispatcher ran 1,440 times/day, mostly idle with only 60-minute Qiita and Wikipedia checks. The new **five-minute** dispatcher runs **288 times/day** (80% fewer scheduler invocations); individual non-YouTube intervals are unchanged in `config/intervals.json`; YouTube intervals live in `config/targets.json`.
 - Pending delivery can be processed at the next **five-minute** Cron (during JST 09:00–20:00), instead of waiting for the next 60-minute source check. Multiple pending notifications and multi-page scans are deliberately handled across multiple invocations to stay within the Workers Free 10ms CPU budget. Dropping all but the latest three real new items is **not** an acceptable CPU optimization because it introduces missed notifications.
 - The separate retention Cron remains hourly (`10 * * * *`). The scheduler's 5-minute granularity may add delay to a due scan or retry; it does not alter the source's requested interval. Periodic execution and maximum throughput should be re-evaluated after live CPU results.
 - A MediaWiki HTTP 403 was observed in Cloudflare: the old adapter sent no identifying User-Agent. A descriptive User-Agent was added according to Wikimedia policy; **the fix is not live-verified until the next successful baseline**. Continued 403s require further diagnosis rather than claims of success.
