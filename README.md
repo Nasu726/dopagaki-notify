@@ -24,49 +24,47 @@ npm run bundle:check # Wrangler compiles without deploying
   "wikipedia-ja": 60,
   "arxiv-cs-ai": 120,
   "zenn-topic-typescript": 60,
-  "youtube-example": 10080
+  "youtube-yurugengo": 10080,
+  "youtube-yurucom": 10080,
+  "youtube-3blue1brown-japan": 10080
 }
 ```
 
-The file intentionally holds **interval values only**. arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; the fixed Qiita/Wikipedia/Zenn enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv, Zenn and YouTube remain disabled pending subsequent live validation.
+The file intentionally holds **interval values only**. arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; the fixed Qiita/Wikipedia/Zenn enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the three explicitly selected YouTube channels are also enabled for weekly JST weekday checks; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv and Zenn remain disabled. All YouTube checks and real deliveries are **unverified** in Cloudflare until their first live baselines succeed.
 
 The monitoring Cron Trigger in `wrangler.jsonc` runs every **five minutes** (`*/5 * * * *`), irrespective of these settings. It checks D1 deadlines; it does **not** fetch every API every five minutes. A **second independent Cron** (`10 * * * *`, every hour at minute 10 UTC/JST) deletes at most 20 acknowledged messages per invocation (24 invocations/day; up to 480 sent receipts/day). The previous five-minute cadence was unnecessary overhead. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
 
-## arXiv categories and multiple YouTube channels
+## arXiv categories and YouTube channels with weekly JST weekdays
 
-No TypeScript changes are needed to **add or activate YouTube channels**. Edit two JSON files; keep the intervals in their single designated file.
+Three user-selected YouTube channels are configured and **enabled**:
 
-1. In **`config/targets.json`**, add one entry per channel with a stable unique ID, a real channel reference (`UC...`, `@handle`, or YouTube channel URL), and `enabled: true`.
-2. In **`config/intervals.json`**, give each of those IDs its own positive integer interval in **minutes**.
+| Monitor ID | Channel | Check time (JST) | Interval |
+| --- | --- | --- | --- |
+| `youtube-yurugengo` | [ゆる言語学ラジオ](https://www.youtube.com/@yurugengo) | Tuesday 09:00 | 10,080 minutes (weekly) |
+| `youtube-yurucom` | [ゆるコンピュータ科学ラジオ](https://www.youtube.com/@yurucom) | Sunday 09:00 | 10,080 minutes (weekly) |
+| `youtube-3blue1brown-japan` | [3Blue1BrownJapan](https://www.youtube.com/@3Blue1BrownJapan) | Sunday 09:00 | 10,080 minutes (weekly) |
 
-Example (replace the illustrative handles with real channels before enabling):
+Each channel has its **own** D1 identity, first-run baseline, due timestamp and delivery history, and all three share the single `DISCORD_WEBHOOK_YOUTUBE` Secret. Real YouTube fetching, handle resolution and notifications **have not yet been verified in Cloudflare**.
 
-`config/targets.json`
+The checked-in `config/targets.json` contains these definitions:
+
 ```json
 {
-  "arxiv": [
-    { "id": "arxiv-cs-ai", "categories": ["cs.AI"], "enabled": false }
-  ],
   "youtube": [
-    { "id": "youtube-fast", "channel": "@replace-with-fast-channel", "enabled": true },
-    { "id": "youtube-weekly", "channel": "@replace-with-weekly-channel", "enabled": true }
+    { "id": "youtube-yurugengo", "channel": "@yurugengo", "enabled": true, "weekdayJst": "tuesday" },
+    { "id": "youtube-yurucom", "channel": "@yurucom", "enabled": true, "weekdayJst": "sunday" },
+    { "id": "youtube-3blue1brown-japan", "channel": "@3Blue1BrownJapan", "enabled": true, "weekdayJst": "sunday" }
   ]
 }
 ```
 
-`config/intervals.json` (add these alongside the existing Qiita, Wikipedia, arXiv, and Zenn entries):
-```json
-{
-  "youtube-fast": 60,
-  "youtube-weekly": 10080
-}
-```
+The actual file also includes the independently configured arXiv category list, which is still disabled. All three corresponding keys in `config/intervals.json` have the value `10080`; **minute intervals have a single source of truth in that file**.
 
-Each channel has an independent D1 monitor ID, due date, silent first-run baseline and deduplicated delivery history. The YouTube monitors share the **one YouTube Discord webhook**, but can be enabled/disabled and polled independently. Existing IDs with historical state cannot be reassigned to another channel; use a new ID for a different target. Removing an ID also requires removing its old entry from the interval file. Do not copy only the abbreviated `intervals.json` example over the complete configuration.
+To add or change channels, edit `config/targets.json` (`id`, `channel`, `enabled`, optional `weekdayJst`) and `config/intervals.json` (matching ID → positive integer minutes). With `weekdayJst` set, only a **weekly interval of 10080 minutes** is accepted, and the next successful check is aligned to that weekday at **09:00 JST** (not simply seven days from the previous check). For other intervals, omit `weekdayJst` and checks remain relative to their previous completion time. The five-minute dispatcher can add a small delay. Retried failures may fetch outside the nominated day, then return to the nominated day after success.
 
-The **actual repository** retains an empty, disabled `youtube-example` monitor by default. Nothing starts polling YouTube until real channel references are supplied and explicitly enabled.
+**Initial activation is intentionally different:** newly added monitors take one immediate *silent baseline* on the next eligible dispatcher invocation so existing videos are not sent; subsequent checks follow the assigned weekday. A query/channel change must use a **new monitor ID** rather than reusing an initialized ID. Avoid changing IDs just to change their weekday or interval.
 
-The YouTube Atom feed contains only a finite number of recent uploads (approximately 15 items). Choose an interval short enough that the channel is unlikely to publish more than that between scans. For a slow weekly uploader, `10080` minutes (7 days) is reasonable, with the tradeoff that delayed or missed scheduled checks may allow older uploads to fall out of the feed. arXiv category lists and their enabled flags also live in `config/targets.json`.
+The YouTube Atom feed includes only a bounded set of recent uploads (typically about 15). With weekly polling, channels posting heavily can lose old feed entries before the next read; choose shorter intervals and omit `weekdayJst` when needed. Resolving `@handles` from YouTube public channel pages may be blocked in some execution environments; if a live Worker fails, prefer a direct `UC...` channel ID instead, with a new monitor ID if already initialized.
 
 ## Notification hours, retention and privacy
 
