@@ -109,7 +109,7 @@ test('all five monitors have individual minute intervals and separate webhook se
   assert.ok(MONITORS.every((m) => Number.isInteger(m.intervalMinutes)));
   assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id),
     ['qiita-rust', 'wikipedia-ja', 'youtube-yurugengo', 'youtube-yurucom', 'youtube-3blue1brown-japan'],
-    'the three owner-selected weekly YouTube channels are enabled alongside Qiita and Wikipedia');
+    'owner-selected YouTube channels enabled for hourly checks on their respective JST weekdays');
   for (const source of ['arxiv', 'zenn', 'youtube'] as const) {
     const key = 'DISCORD_WEBHOOK_' + source.toUpperCase();
     const env = { [key]: 'https://discord.com/api/webhooks/1234/token' } as Env;
@@ -170,17 +170,17 @@ test('arXiv category query config and dormant YouTube reference are explicit', (
     const monitor = MONITORS.find((m) => m.id === target.id);
     assert.equal(monitor?.query, target.query);
     assert.equal(monitor?.weeklyJstDay, target.weekday);
-    assert.equal(monitor?.intervalMinutes, 10080);
+    assert.equal(monitor?.intervalMinutes, 60);
     assert.equal(monitor?.enabled, true);
   }
   assert.ok(!MONITORS.some((m) => m.id === 'youtube-example'));
   assert.throws(() => validateMonitors(withIntervals(
     youtubeMonitorsFromTargets([{ id: 'weekly-invalid', channel: '@valid', enabled: true, weekdayJst: 'not-a-day' }]),
-    { 'weekly-invalid': 10080 },
+    { 'weekly-invalid': 60 },
   )), /weeklyJstDay/);
   assert.throws(() => validateMonitors(withIntervals(
     youtubeMonitorsFromTargets([{ id: 'weekly-mismatch', channel: '@valid', enabled: true, weekdayJst: 'sunday' }]),
-    { 'weekly-mismatch': 60 },
+    { 'weekly-mismatch': 10080 },
   )), /weeklyJstDay/);
 });
 
