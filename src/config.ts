@@ -1,11 +1,11 @@
 import intervals from '../config/intervals.json' with { type: 'json' };
 import targets from '../config/targets.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
+import { normalizeChannelReference } from './sources/youtube.ts';
 
-// Only interval minutes belong in config/intervals.json. Keep monitor definitions here.
-// Public target selection lives in config/targets.json. Add a stable monitor
-// id and an interval in config/intervals.json when adding another source target.
-// Keep arXiv and YouTube disabled until the owner selects actual targets.
+// Non-YouTube intervals live in config/intervals.json. YouTube channels, intervals
+// and enabled flags are kept together in config/targets.json for easy editing.
+// Preserve unique stable monitor IDs; never reuse an initialized ID for a new channel.
 export function arxivCategoryQuery(categories: readonly string[]): string {
   if (!categories.length || categories.length > 12 ||
       categories.some((category) => !/^[a-z][a-zA-Z0-9.-]{0,31}$/.test(category))) {
@@ -22,10 +22,6 @@ const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
     query: arxivCategoryQuery(target.categories), enabled: false,
   })),
   { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: false },
-  ...targets.youtube.map((target) => ({
-    id: target.id, source: 'youtube' as const,
-    query: target.channel.trim(), enabled: false,
-  })),
 ];
 
 export function withIntervals(
@@ -45,7 +41,40 @@ export function withIntervals(
   });
 }
 
-export const MONITORS: readonly Monitor[] = withIntervals(definitions, intervals);
+export interface YouTubeTarget {
+  id: string;
+  channel: string;
+  intervalMinutes: number;
+  enabled: boolean;
+}
+
+/** Each channel is an independent monitor with its own D1 cursor and deadline. */
+export function withYouTubeTargets(configured: readonly YouTubeTarget[]): readonly Monitor[] {
+  const seen = new Set<string>();
+  return configured.map((target) => {
+    if (!Number.isSafeInteger(target.intervalMinutes) || target.intervalMinutes < 1)
+      throw new Error('YouTube ' + target.id + ': intervalMinutes must be a positive integer');
+    if (typeof target.enabled !== 'boolean')
+      throw new Error('YouTube ' + target.id + ': enabled must be boolean');
+    if (typeof target.channel !== 'string')
+      throw new Error('YouTube ' + target.id + ': channel must be a string');
+    const reference = target.channel.trim();
+    if (reference || target.enabled) {
+      // Reject malformed channel URLs/handles before deployment.
+      const normalized = normalizeChannelReference(reference);
+      if (seen.has(normalized))
+        throw new Error('Duplicate YouTube channel reference: ' + normalized);
+      seen.add(normalized);
+    }
+    return { id: target.id, source: 'youtube' as const, query: reference,
+      intervalMinutes: target.intervalMinutes, enabled: target.enabled };
+  });
+}
+
+export const MONITORS: readonly Monitor[] = [
+  ...withIntervals(definitions, intervals),
+  ...withYouTubeTargets(targets.youtube),
+];
 
 export function validateMonitors(monitors: readonly Monitor[]): void {
   const ids = new Set<string>();
