@@ -1,6 +1,6 @@
 # Development roadmap
 
-Updated: 2026-10-10. Current stage: **Cloudflare Qiita-only smoke test after owner deployment, D1 migration and Secrets setup**.
+Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wikipedia), after a successful Qiita outbound Discord smoke test**.
 
 ## Product scope / frozen choices
 
@@ -8,7 +8,7 @@ Updated: 2026-10-10. Current stage: **Cloudflare Qiita-only smoke test after own
 - Independent source monitor definitions in `src/config.ts`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
 - Five source adapters: arXiv, Qiita, Zenn, YouTube RSS, Wikipedia new-page events.
 - No GUI, long-running server, user authentication, public HTTP API, or paid infrastructure dependency for the initial version.
-- Deployment remains disabled and example monitors remain disabled until verified setup.
+- Remote D1 migrations `0001`–`0008` and source Secrets have been configured; Qiita outbound webhook delivery was verified with an idempotent D1 smoke record. Only Qiita and Wikipedia are enabled.
 
 ## Stage A — complete local correctness and resource hygiene (current)
 
@@ -25,7 +25,7 @@ Updated: 2026-10-10. Current stage: **Cloudflare Qiita-only smoke test after own
 
 **Preparation:** Staging runbook is in [DEPLOYMENT.md](DEPLOYMENT.md); source adapters and Wrangler bundle have passed CI, but real API/CPU measurements remain unverified.
 
-**Owner reports complete:** Cloudflare Worker deployment, remote D1 migrations `0001`–`0008`, and five source-specific Secrets. **Current gate:** GitHub Workers Builds must deploy the Qiita-only staging config successfully; Cloudflare CPU/D1 and real Discord notifications still require live verification. Never paste Webhook URLs into GitHub or chat.
+**Owner reports complete:** Cloudflare Worker deployment, remote D1 migrations `0001`–`0008`, and five source-specific Secrets. **Current gate:** Verify the Wikipedia first-run silent baseline and successful live MediaWiki API fetches; investigate observed occasional CPU p99 around 19 ms (10 ms Workers Free budget). Qiita Discord delivery was verified using a synthetic queued test item, but genuine upstream-new-item detection and delivery remain unverified. Never paste Webhook URLs into GitHub or chat.
 
 1. Initial deployment was performed with all monitors disabled; next verify the Cron Trigger and that the HTTP handler stays 404.
 2. Enable only one low-traffic test monitor, verify silent initial baseline, subsequent delivery and duplicate suppression.
@@ -70,4 +70,4 @@ Updated: 2026-10-10. Current stage: **Cloudflare Qiita-only smoke test after own
 - The first observation is intentionally a silent time-based baseline.
 - arXiv/Wikipedia use a bounded overlap rather than mathematically exhaustive detection. Qiita search sorting is not assumed chronological; it may take up to 100 scheduled page checks. Zenn/YouTube RSS cannot page backwards once entries fall out of their feed.
 - Discord delivery followed by D1 acknowledgement cannot be atomic: failures between these steps can duplicate notification.
-- Cloudflare staging/production has **not** been deployed.
+- Cloudflare staging is deployed by the owner. Production readiness remains unverified because live upstream item detection for each source and worst-case CPU resource use have not yet passed.
