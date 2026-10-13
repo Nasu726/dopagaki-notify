@@ -104,3 +104,22 @@ test('invalid private window fails closed, even when monitor settings are valid'
   assert.throws(() => resolveNotificationWindowJst(invalid, undefined), /invalid notificationWindowJst/);
   assert.throws(() => resolveNotificationWindowJst(undefined, '00:00-00:00'), /start and end/);
 });
+
+test('OpenAlex is opt-in and old private Secrets without openalex key remain valid', () => {
+  assert.equal(loadRuntimeMonitors(JSON.stringify(privateTargets)).some(m=>m.source==='openalex'),false);
+  const config={...privateTargets,
+    targets:{...privateTargets.targets,openalex:[
+      {id:'oa-graph',query:'search:graph algorithms',enabled:true},
+      {id:'oa-topic',query:'topic:T123',enabled:false},
+    ]},
+    intervals:{...privateTargets.intervals,'oa-graph':360,'oa-topic':720},
+  };
+  const monitors=loadRuntimeMonitors(JSON.stringify(config));
+  assert.deepEqual(monitors.filter(m=>m.source==='openalex'),[
+    {id:'oa-graph',source:'openalex',query:'search:graph algorithms',enabled:true,intervalMinutes:360},
+    {id:'oa-topic',source:'openalex',query:'topic:T123',enabled:false,intervalMinutes:720},
+  ]);
+  assert.throws(()=>loadRuntimeMonitors(JSON.stringify({...config,
+    targets:{...config.targets,openalex:[{id:'oa-bad',query:'raw:invalid',enabled:true}]},
+    intervals:{...config.intervals,'oa-bad':360}})));
+});

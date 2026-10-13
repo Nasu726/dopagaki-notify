@@ -1266,3 +1266,37 @@ test('YouTube sent ID receipts outlive the ten-day cleanup while other sources a
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:oldreceipt'")
     .get(), undefined);
 });
+
+test('OpenAlex initializes silently by storing initial IDs and detects later same-day additions', async () => {
+  const s=setup();
+  s.env.DISCORD_WEBHOOK_OPENALEX=webhook;
+  const monitor: Monitor={id:'openalex-graphs',source:'openalex',query:'search:graph algorithms',
+    enabled:true,intervalMinutes:60};
+  const now=Date.parse('2026-10-13T03:00:00Z');
+  const work=(id:string,publicationAt=Date.parse('2026-10-13T00:00:00Z')): ContentItem=>({
+    id:'openalex:'+id,title:'Work '+id,url:'https://openalex.org/'+id,publishedAt:publicationAt,
+  });
+  s.setItems([work('W123'),work('W124')]);
+  assert.equal(await runTick(s.env,[monitor],now,s.deps),'processed');
+  assert.deepEqual(s.sent,[]);
+  assert.equal(s.raw.prepare("SELECT count(*) AS n FROM deliveries WHERE status='ignored'").get()?.n,2);
+  // Same publication_date as baseline, but a NEW OpenAlex work ID.
+  s.setItems([work('W123'),work('W124'),work('W125')]);
+  assert.equal(await runTick(s.env,[monitor],now+60*60_000,s.deps),'processed');
+  assert.deepEqual(s.sent,['openalex:W125']);
+  await runTick(s.env,[monitor],now+120*60_000,s.deps);
+  assert.deepEqual(s.sent,['openalex:W125'],'sent and ignored records must prevent duplicates');
+});
+
+test('OpenAlex ignores works outside its seven-day eligibility horizon', async () => {
+  const s=setup();
+  s.env.DISCORD_WEBHOOK_OPENALEX=webhook;
+  const monitor: Monitor={id:'openalex-old',source:'openalex',query:'author:A123',
+    enabled:true,intervalMinutes:60};
+  const now=Date.parse('2026-10-13T04:00:00Z');
+  await runTick(s.env,[monitor],now,s.deps);
+  s.setItems([{id:'openalex:W999',title:'Old paper',url:'https://openalex.org/W999',
+    publishedAt:now-30*86400_000}]);
+  await runTick(s.env,[monitor],now+60*60_000,s.deps);
+  assert.deepEqual(s.sent,[]);
+});
