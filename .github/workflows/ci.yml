@@ -14,5 +14,6 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --ignore-scripts
+      - run: npm run config:check
       - run: npm run check
       - run: npm run bundle:check
