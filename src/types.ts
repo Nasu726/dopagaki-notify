@@ -5,6 +5,7 @@ export interface ContentItem {
   title: string;
   url: string;
   publishedAt: number; // publication time for news; recommendation time for Wikipedia discovery
+  imageUrl?: string; // transient Discord embed enrichment; never stored in D1
   discoveryKind?: 'featured' | 'random'; // transient Wikipedia selection metadata (not persisted)
 }
 export interface Monitor {
