@@ -3,6 +3,13 @@ import { entries, fetchTextBounded, parseDate, requiredText, tagText } from './x
 
 const CHANNEL_ID = /^UC[A-Za-z0-9_-]{22}$/;
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+/** The feed-level yt:channelId may omit the 'UC' prefix, whereas
+ * entry-level identifiers generally carry the full UC... channel ID.
+ * Compare only an exact full ID or its exact 22-character suffix.
+ */
+function sameYouTubeChannelId(observed: string, expected: string): boolean {
+  return observed === expected || (CHANNEL_ID.test(expected) && observed === expected.slice(2));
+}
 export function normalizeChannelReference(raw: string): string {
   const value = raw.trim();
   if (CHANNEL_ID.test(value)) return value;
@@ -28,8 +35,12 @@ export function extractChannelId(html: string): string {
   }
   throw new Error('Could not identify YouTube channel owner from metadata; configure pinned channelId');
 }
-export function parseYouTube(xml: string): ContentItem[] {
+export function parseYouTube(xml: string, expectedChannelId?: string): ContentItem[] {
   return entries(xml, 'entry').map((entry) => {
+    const entryChannelId = tagText(entry, 'yt:channelId');
+    if (expectedChannelId && entryChannelId && !sameYouTubeChannelId(entryChannelId, expectedChannelId))
+      throw new Error('YouTube RSS entry channel mismatch: expected=' + expectedChannelId +
+        ', received=' + entryChannelId);
     const raw = tagText(entry, 'yt:videoId') || requiredText(entry, 'id').split(':').at(-1)!;
     if (!VIDEO_ID.test(raw)) throw new Error('Invalid YouTube video ID');
     return {
@@ -69,15 +80,17 @@ export async function fetchYouTube(
   // identity of the RSS document. Channel IDs are public, safe diagnostics.
   const entryStart = /<entry(?:\s|>)/i.exec(xml)?.index ?? xml.length;
   const feedChannelId = tagText(xml.slice(0, entryStart), 'yt:channelId');
-  if (feedChannelId && feedChannelId !== channelId)
+  if (feedChannelId && !sameYouTubeChannelId(feedChannelId, channelId))
     throw new Error('YouTube RSS channel mismatch for ' + monitor.id +
       ': expected=' + channelId + ', received=' + feedChannelId);
   // A pinned subscription must not silently accept a response without any
   // channel-identity marker. Standard YouTube RSS includes yt:channelId.
-  if (monitor.youtubeChannelId && feedChannelId !== channelId)
+  if (monitor.youtubeChannelId && !feedChannelId)
     throw new Error('YouTube RSS channel identity missing for ' + monitor.id +
       ': expected=' + channelId + ', received=missing');
-  const items = parseYouTube(xml);
+  // Entries may contain a full channel ID even when the feed header is
+  // prefixless. A contradictory entry must fail closed before any staging.
+  const items = parseYouTube(xml, channelId);
   // A YouTube channel feed exposes only a bounded number of recent videos.
   return { items, potentiallyTruncated: items.length >= 15 };
 }

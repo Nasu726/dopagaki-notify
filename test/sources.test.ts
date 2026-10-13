@@ -170,6 +170,8 @@ test('arXiv category query config and dormant YouTube reference are explicit', (
     { id: 'youtube-yurucom', query: '@yurucom', weekday: 'sunday' },
     { id: 'youtube-3blue1brown-japan', query: '@3Blue1BrownJapan', weekday: 'sunday' },
   ];
+  assert.equal(MONITORS.find((m) => m.id === 'youtube-3blue1brown-japan')?.youtubeChannelId,
+    'UCBevyiJ2ierZY-0yZhfLrmQ', '3Blue1BrownJapan must bypass mutable handle cache');
   for (const target of expected) {
     const monitor = MONITORS.find((m) => m.id === target.id);
     assert.equal(monitor?.query, target.query);
