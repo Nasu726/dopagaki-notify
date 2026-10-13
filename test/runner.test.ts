@@ -1300,3 +1300,28 @@ test('OpenAlex ignores works outside its seven-day eligibility horizon', async (
   await runTick(s.env,[monitor],now+60*60_000,s.deps);
   assert.deepEqual(s.sent,[]);
 });
+
+
+test('Zenn sends a freshly fetched RSS enclosure without waiting for a second HTML request', async () => {
+  const s=setup();
+  s.env.DISCORD_WEBHOOK_ZENN=webhook;
+  const monitor:Monitor={id:'zenn-live-image',source:'zenn',query:'topic:algorithm',
+    enabled:true,intervalMinutes:60};
+  const now=Date.parse('2026-10-13T00:00:00Z');
+  await runTick(s.env,[monitor],now,s.deps);
+  s.setItems([{
+    id:'zenn:https://zenn.dev/tester/articles/graph',
+    title:'Graph',url:'https://zenn.dev/tester/articles/graph',
+    publishedAt:now+30_000,
+    imageUrl:'https://res.cloudinary.com/zenn/image/upload/graph.png',
+  }]);
+  const received: ContentItem[]=[];
+  await runTick(s.env,[monitor],now+60*60_000,{
+    ...s.deps,
+    send:async(_hook,_source,item)=>{received.push(item);},
+  });
+  assert.equal(received.length,1);
+  assert.equal(received[0]?.imageUrl,'https://res.cloudinary.com/zenn/image/upload/graph.png');
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE monitor_id=?")
+    .get(monitor.id)?.status,'sent');
+});
