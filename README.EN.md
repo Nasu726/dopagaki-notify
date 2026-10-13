@@ -8,6 +8,8 @@ Built for personal use and for people who want to fork and tailor a simple notif
 
 > **Availability:** Cloudflare Workers + D1 is the primary, deployed runtime. An **opt-in** [GitHub Actions + SQLite notification template](templates/github-actions/notifier.yml) is now included, sharing the same polling logic. The Actions template has automated integration tests but is not yet long-term production-verified; its scheduling and persistence guarantees differ from Cloudflare.
 
+**Always-on YouTube test monitor:** `youtube-quizknock` (`@QuizKnock`, pinned `UCQ_MqAw18jFTlBB-f8BP7dw`) now polls **hourly every day** without a weekday restriction, sharing `DISCORD_WEBHOOK_YOUTUBE`. Its first successful poll can notify the latest available video. Deployments using a complete `MONITOR_CONFIG_JSON` override must add the new target to that private configuration too.
+
 ## Features
 
 | Source | Notification selection |
