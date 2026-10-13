@@ -71,10 +71,12 @@ const FEATURED_POOL_MAX = 500;
 const DISCOVERY_CANDIDATES_PER_KIND = 8;
 const RANDOM_MIN_BYTES = 10_000;
 
+// list=categorymembers returns pageid; list=random returns id.
 interface WikiPage {
-  ns: number;
-  pageid: number;
-  title: string;
+  ns?: unknown;
+  pageid?: unknown;
+  id?: unknown;
+  title?: unknown;
 }
 function discoveryCandidates(raw: unknown, field: 'categorymembers' | 'random',
   lang: string, kind: 'featured' | 'random'): ContentItem[] {
@@ -84,14 +86,20 @@ function discoveryCandidates(raw: unknown, field: 'categorymembers' | 'random',
   const pages = response.query?.[field];
   if (!Array.isArray(pages) || !pages.length)
     throw new Error('Missing or empty MediaWiki ' + field + ' response');
-  return pages.map((page: WikiPage) => {
-    if (page.ns !== 0 || !Number.isSafeInteger(page.pageid) || page.pageid <= 0 ||
+  return pages.map((entry: unknown) => {
+    // MediaWiki's two list modules do not use the same identifier field.
+    // See https://www.mediawiki.org/wiki/API:Random and API:Categorymembers.
+    const page: WikiPage = entry !== null && typeof entry === 'object'
+      ? entry as WikiPage : {};
+    const pageId = field === 'random' ? page.id : page.pageid;
+    if (page.ns !== 0 || typeof pageId !== 'number' ||
+      !Number.isSafeInteger(pageId) || pageId <= 0 ||
       typeof page.title !== 'string' || !page.title)
-      throw new Error('Malformed MediaWiki discovery page');
+      throw new Error('Malformed MediaWiki discovery page (' + field + ')');
     return {
-      id: 'wikipedia:' + lang + ':' + page.pageid,
+      id: 'wikipedia:' + lang + ':' + pageId,
       title: page.title,
-      url: 'https://' + lang + '.wikipedia.org/?curid=' + page.pageid,
+      url: 'https://' + lang + '.wikipedia.org/?curid=' + pageId,
       publishedAt: 0, // runner replaces this with the actual recommendation time
       discoveryKind: kind,
     };

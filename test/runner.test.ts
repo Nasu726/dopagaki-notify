@@ -954,3 +954,33 @@ test('Wikipedia discovery never sends repeats or more than two items at a succes
   assert.deepEqual(s.sent, ['wikipedia:ja:8'], 'sent receipts suppress repeat recommendations');
   assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()?.n, 1);
 });
+
+test('failed YouTube RSS logs the monitor ID, source, fetch phase, HTTP status and retry time', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const m: Monitor = { id: 'youtube-diagnostic-test', source: 'youtube',
+    query: '@example', enabled: true, intervalMinutes: 60 };
+  const now = Date.parse('2026-10-13T00:00:00Z');
+  const messages: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { messages.push(args.map(String).join(' ')); };
+  try {
+    await assert.rejects(() => runTick(s.env, [m], now, {
+      ...s.deps,
+      fetchItems: async () => { throw new HttpStatusError('YouTube RSS', 404, null); },
+    }), /YouTube RSS HTTP 404/);
+  } finally {
+    console.error = original;
+  }
+  const row = messages.map((m) => JSON.parse(m) as Record<string, unknown>)
+    .find((r) => r.event === 'monitor_failure');
+  assert.ok(row);
+  assert.equal(row.monitorId, m.id);
+  assert.equal(row.source, 'youtube');
+  assert.equal(row.phase, 'fetch_and_parse');
+  assert.equal(row.httpStatus, 404);
+  assert.equal(row.upstream, 'YouTube RSS');
+  assert.equal(row.retryAt, new Date(now + 5 * 60_000).toISOString());
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
+    .get(m.id)?.next_due_at, now + 5 * 60_000);
+});

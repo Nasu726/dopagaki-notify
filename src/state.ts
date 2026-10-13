@@ -185,9 +185,11 @@ export async function deferFetchUntil(
   ).bind(nextDueAt, id, token).run();
   if (result.meta.changes !== 1) throw new Error('Lost lease while deferring weekday fetch');
 }
-export async function postponeFetch(db: Database, id: string, token: string, now: number, suggestedMs?: number | null): Promise<void> {
+export async function postponeFetch(db: Database, id: string, token: string, now: number, suggestedMs?: number | null): Promise<number> {
+  const nextDueAt = now + retryDelay(MIN_RETRY_MS, suggestedMs);
   await db.prepare('UPDATE monitor_state SET next_due_at = ? WHERE id = ? AND lease_token = ?')
-    .bind(now + retryDelay(MIN_RETRY_MS, suggestedMs), id, token).run();
+    .bind(nextDueAt, id, token).run();
+  return nextDueAt;
 }
 export async function coolDownPending(
   db: Database, source: SourceName, now: number, suggestedMs?: number | null,
@@ -267,10 +269,12 @@ export async function markSent(db: Database, id: string, itemId: string, now: nu
     "UPDATE deliveries SET status = 'sent', sent_at = ? WHERE monitor_id = ? AND item_id = ? AND status = 'pending'"
   ).bind(now, id, itemId).run();
 }
-export async function retryLater(db: Database, id: string, itemId: string, attempts: number, now: number, suggestedMs?: number | null): Promise<void> {
+export async function retryLater(db: Database, id: string, itemId: string, attempts: number, now: number, suggestedMs?: number | null): Promise<number> {
   const backoff = retryDelay(Math.min(MAX_RETRY_MS, MIN_RETRY_MS * 2 ** Math.min(attempts, 5)), suggestedMs);
+  const nextDueAt = now + backoff;
   await db.prepare(
     "UPDATE deliveries SET attempts = attempts + 1, next_attempt_at = ? " +
     "WHERE monitor_id = ? AND item_id = ? AND status = 'pending'"
-  ).bind(now + backoff, id, itemId).run();
+  ).bind(nextDueAt, id, itemId).run();
+  return nextDueAt;
 }
