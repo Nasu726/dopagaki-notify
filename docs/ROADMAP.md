@@ -68,7 +68,7 @@ Updated: 2026-10-13. Current stage: **Wikipedia discovery and basic article noti
 
 - **Workers Free CPU time is 10 ms/invocation** (Cloudflare's actual measurement is required).
 - A Cron tick processes **one monitor and at most one paginated API page**, so many concurrently due monitors can run late.
-- The first observation is intentionally a silent time-based baseline.
+- The first observation is usually a silent time-based baseline; YouTube now stages its most recent video on the first successful poll, and subsequent scans still detect all new uploads.
 - arXiv uses a bounded overlap rather than mathematically exhaustive detection; Wikipedia discovery deliberately samples a bounded candidate pool. Qiita search sorting is not assumed chronological; it may take up to 100 scheduled page checks. Zenn/YouTube RSS cannot page backwards once entries fall out of their feed.
 - Discord delivery followed by D1 acknowledgement cannot be atomic: failures between these steps can duplicate notification.
 - Cloudflare staging is deployed by the owner. Production readiness remains unverified because live upstream item detection for each source and worst-case CPU resource use have not yet passed.
@@ -102,7 +102,7 @@ Updated: 2026-10-13. Current stage: **Wikipedia discovery and basic article noti
 ### Tuesday/Sunday hourly YouTube checks (2026-10-13, revised per user)
 
 - `youtube-yurugengo`: Tuesday 00:00–23:00 hourly JST; `youtube-yurucom` and `youtube-3blue1brown-japan`: Sunday 00:00–23:00 hourly JST. All have `intervalMinutes=60`, validated `weekdayJst` target metadata and dedicated D1 monitor IDs. No requests on other weekdays, except queued Discord delivery may occur the following permitted morning.
-- Newly added off-day monitors are configured and deferred to the next selected weekday without an API fetch. First on-day scan is a silent baseline. Subsequent successes schedule the next JST hour, jumping to the next week after 23:00. Retry delays that spill into an off-day are likewise deferred. Ordinary 5-minute dispatcher Cron remains unchanged.
+- Newly added off-day monitors are configured and deferred to the next selected weekday without an API fetch. First on-day scan creates a baseline and stages only the latest available video (whether historical or new). Subsequent successes schedule the next JST hour, jumping to the next week after 23:00. Retry delays that spill into an off-day are likewise deferred. Ordinary 5-minute dispatcher Cron remains unchanged.
 - User's `更新があれば通知` means newly published videos, **not** edits to existing uploads, per the project's established publication-only contract. Notification delivery defaults to all hours; users may enable a private JST window, with out-of-window discoveries queued.
 - Actual RSS/handle resolution in Cloudflare is unverified. MediaWiki baseline remains NULL; conditionally disable it on a newly observed post-fix HTTP 403, not on NULL alone.
 

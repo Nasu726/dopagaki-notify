@@ -21,7 +21,7 @@
    gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
    ```
 7. **Secrets の登録後**、`.github/workflows/notifier.yml` をコミットして push。テンプレートをコピーするまでは通知ワークフローが有効になりません。
-8. GitHub の Actions タブから `Discord notifier (SQLite)` を選び **Run workflow** を1回実行。初回は過去の記事・動画を通知せず基準時刻を記録します。
+8. GitHub の Actions タブから `Discord notifier (SQLite)` を選び **Run workflow** を1回実行。初回は原則として過去の記事を通知せず基準時刻を記録します。ただし YouTube を有効にしている場合、最初に取得できた最新動画1件を通知します。
 
 定期実行は UTC の毎時07・17・27・37・47・57分 (10分間隔) に設定されています。実際の起動はベストエフォートです。**既定では通知時間帯に制限はありません**。個人設定だけで制限するには、`MONITOR_CONFIG_JSON` に `"notificationWindowJst": "09:00-20:00"` を追加するか、別の Actions Secret `NOTIFICATION_WINDOW_JST` に値 `09:00-20:00` を登録してください。時間帯の指定は JST、終了時刻は除外です。時間帯外にも取得・キュー保存は行われます。
 
@@ -39,7 +39,7 @@ GitHub Actions Secret は定期実行で参照できます。フォーク後に�
 
 ## 障害対応
 
-- **新着通知が来ない:** 最初の取得は必ずサイレントです。その後も新着が無ければ通知されません。Actions 実行結果と各 Secret の存在を確認。
+- **新着通知が来ない:** 初回は YouTube 以外ではサイレントです。YouTube は初回の最新動画1件が対象ですが、RSS が動画を返さない場合には通知できません。その後も新着が無ければ通知されません。Actions 実行結果と各 Secret の存在を確認。
 - **State artifact missing:** 保存済み Artifact の保持期限切れ・削除・保存失敗が考えられます。勝手な再初期化はしません。復元できる別の Artifact が無いときは、必要性を理解した上で手動実行時の `reset_state: true` を選択します。
 - **Decrypt error:** `NOTIFY_STATE_KEY` の値が変更されたか、Artifact が損傷しています。元の鍵を復元してください。鍵を再生成すると古い DB は復元できません。
 - **Webhook 401/403/404/410:** Discord Webhook Secret を直し、保存済み SQLite DB の `webhook_source_state` 停止フラグも解除する必要があります。履歴のリセットで対処すると未送信の通知が失われます。

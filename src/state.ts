@@ -123,14 +123,22 @@ export async function release(db: Database, id: string, token: string): Promise<
 const OUTBOX_INSERT_BATCH = 12;
 export async function stage(
   db: Database, monitorId: string, items: readonly ContentItem[], baselineAt: number | null, now: number,
+  options: { allowHistoricalFirstItem?: boolean } = {},
 ): Promise<void> {
-  // The initial observation is a silent time-based baseline; there is no reason to
-  // persist legacy content IDs. Older backfilled items are likewise never eligible.
-  if (baselineAt === null) return;
-  // Sent receipts expire after ten days. Exclude older publications so
-  // clearing a receipt cannot later requeue the same stale feed item.
-  const eligibleAfter = Math.max(baselineAt, now - DELIVERY_RETENTION_MS);
-  const eligible = items.filter((item) => item.publishedAt > eligibleAfter);
+  // Usually the first observation is a silent time-based baseline.
+  // For YouTube, the caller may stage only its first (freshest) item at
+  // initialization, regardless of its age; the remaining older videos stay
+  // excluded until truly new publications appear.
+  if (baselineAt === null && !options.allowHistoricalFirstItem) return;
+  // Sent receipts expire after ten days. Historical latest items may bypass
+  // the baseline once, or during the same ten-day publication window.
+  // Beyond that window, they must never be requeued after receipt pruning.
+  const retentionCutoff = now - DELIVERY_RETENTION_MS;
+  const eligibleAfter = Math.max(baselineAt ?? now, retentionCutoff);
+  const eligible = items.filter((item, index) =>
+    (options.allowHistoricalFirstItem && index === 0 &&
+      (baselineAt === null || item.publishedAt > retentionCutoff)) ||
+    (baselineAt !== null && item.publishedAt > eligibleAfter));
   for (let offset = 0; offset < eligible.length; offset += OUTBOX_INSERT_BATCH) {
     const chunk = eligible.slice(offset, offset + OUTBOX_INSERT_BATCH);
     // Read-before-write avoids D1 writes during the common "no new article" scan.

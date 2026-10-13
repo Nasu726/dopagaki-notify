@@ -319,7 +319,7 @@ The three owner-approved YouTube channels are **enabled**:
 
 All three use `intervalMinutes=60` in `config/intervals.json`
 and `weekdayJst` in `config/targets.json`. Checks run **only on the
-specified JST day**. Initial checks on that day silently establish baselines.
+specified JST day**. The first successful YouTube check on that day records the baseline **and queues the most recently published video**, even if it predates deployment; subsequent checks continue to catch all newly published videos.
 Subsequent checks use the top of each JST hour. Actual Cron timing can lag
 by up to one dispatcher interval. When an API fetch fails near midnight, an
 off-day retry is skipped until the next selected weekday. This choice favors

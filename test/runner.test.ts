@@ -1158,3 +1158,74 @@ test('optional private delivery window suppresses nightly sends and keeps pendin
   assert.equal(await runTick(s.env, [qiita], inside, s.deps), 'processed');
   assert.deepEqual(s.sent, ['qiita:overnight-only']);
 });
+
+test('YouTube announces only the newest video on the very first successful poll, even if years old', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitor: Monitor = { id: 'youtube-first', source: 'youtube', query: '@example',
+    intervalMinutes: 60, enabled: true };
+  const now = Date.parse('2026-10-13T03:00:00Z');
+  s.setItems([
+    { id: 'youtube:veryOld0001', title: 'Old video',
+      url: 'https://www.youtube.com/watch?v=veryOld0001',
+      publishedAt: now - 400 * 86400_000 },
+    { id: 'youtube:oldNewest01', title: 'Latest old video',
+      url: 'https://www.youtube.com/watch?v=oldNewest01',
+      publishedAt: now - 200 * 86400_000 },
+  ]);
+  assert.equal(await runTick(s.env, [monitor], now, s.deps), 'processed');
+  assert.deepEqual(s.sent, ['youtube:oldNewest01']);
+  assert.equal(s.raw.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE monitor_id=?")
+    .get(monitor.id)?.c, 1, 'only the newest old video must be staged');
+  await runTick(s.env, [monitor], now + 60 * 60_000, s.deps);
+  assert.deepEqual(s.sent, ['youtube:oldNewest01'], 'same video must not be delivered twice');
+  const afterRetention = now + 11 * 86400_000;
+  await pruneSentDeliveries(s.env.DB, afterRetention);
+  assert.equal(s.raw.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE monitor_id=?")
+    .get(monitor.id)?.c, 0, 'expired sent receipt can be pruned');
+  await runTick(s.env, [monitor], afterRetention, s.deps);
+  assert.deepEqual(s.sent, ['youtube:oldNewest01'],
+    'once the initial baseline is recorded, pruning must not resend an ancient latest video');
+});
+
+test('existing YouTube monitor can deliver latest recently published video even if older than initialization', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitor: Monitor = { id: 'youtube-existing', source: 'youtube', query: '@example',
+    intervalMinutes: 60, enabled: true };
+  const now = Date.parse('2026-10-13T03:00:00Z');
+  await runTick(s.env, [monitor], now, s.deps);
+  const newest = { id: 'youtube:sLGshNDA5Ko', title: 'Latest published video',
+    url: 'https://www.youtube.com/watch?v=sLGshNDA5Ko',
+    publishedAt: now - 3 * 60 * 60_000 };
+  const old = { id: 'youtube:older000001', title: 'Older video',
+    url: 'https://www.youtube.com/watch?v=older000001',
+    publishedAt: now - 6 * 86400_000 };
+  s.setItems([old, newest]); // deliberately not in chronological order
+  await runTick(s.env, [monitor], now + 60 * 60_000, s.deps);
+  assert.deepEqual(s.sent, [newest.id]);
+  await runTick(s.env, [monitor], now + 120 * 60_000, s.deps);
+  assert.deepEqual(s.sent, [newest.id]);
+  assert.equal(s.raw.prepare("SELECT item_id FROM deliveries WHERE monitor_id=? AND item_id=?")
+    .get(monitor.id, old.id), undefined, 'older historical videos must not create a backlog');
+});
+
+test('YouTube initial notification honors optional send hours and delivers queued item later', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  s.env.NOTIFICATION_WINDOW_JST = '09:00-20:00';
+  const monitor: Monitor = { id: 'youtube-queued-initial', source: 'youtube', query: '@example',
+    intervalMinutes: 60, enabled: true };
+  const night = Date.parse('2026-10-13T11:00:00Z'); // 20:00 JST
+  const latest = { id: 'youtube:latest00001', title: 'Existing video',
+    url: 'https://www.youtube.com/watch?v=latest00001',
+    publishedAt: night - 2 * 86400_000 };
+  s.setItems([latest]);
+  await runTick(s.env, [monitor], night, s.deps);
+  assert.deepEqual(s.sent, []);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id=?")
+    .get(latest.id)?.status, 'pending');
+  const nextMorning = Date.parse('2026-10-14T00:00:00Z');
+  await runTick(s.env, [monitor], nextMorning, s.deps);
+  assert.deepEqual(s.sent, [latest.id]);
+});

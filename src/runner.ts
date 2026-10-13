@@ -136,9 +136,16 @@ export async function runTick(
           // No refill from outside the top three if one is already sent.
           await pruneUnselectedArticlePending(env.DB, runnable.id, selected.map((item) => item.id));
           await stage(env.DB, runnable.id, selected, state.initialized_at, now);
+        } else if (runnable.source === 'youtube') {
+          // The first successful scan should notify the latest upload, even
+          // if it was published before monitoring started. Still collect all
+          // newly published videos on later scans, not merely the latest one.
+          const sorted = [...result.items].sort((a, b) =>
+            b.publishedAt - a.publishedAt || a.id.localeCompare(b.id));
+          await stage(env.DB, runnable.id, sorted, state.initialized_at, now,
+            { allowHistoricalFirstItem: true });
         } else {
-          // YouTube queues every video in the available feed; arXiv retains
-          // its chronological multi-page scan.
+          // arXiv retains its chronological multi-page scan.
           await stage(env.DB, runnable.id, result.items, state.initialized_at, now);
         }
         const reachedOverlap = paginated && state.last_complete_at !== null &&
@@ -160,7 +167,9 @@ export async function runTick(
             paginated ? !result.potentiallyTruncated : true, nextDueAt);
           if (wikipedia) wikipediaFetchSucceeded = true;
           if (state.initialized_at === null && (!paginated || !result.potentiallyTruncated))
-            console.log('monitor ' + runnable.id + ': silent baseline initialized');
+            console.log('monitor ' + runnable.id + (runnable.source === 'youtube'
+              ? ': initial scan initialized; latest video eligible for delivery'
+              : ': silent baseline initialized'));
         }
       } catch (error) {
         // MediaWiki 403 and YouTube RSS 404 can persist for hours upstream.

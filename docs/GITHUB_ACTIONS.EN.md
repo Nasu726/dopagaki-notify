@@ -15,7 +15,7 @@ This opt-in template reuses the same monitoring, scheduling and Discord delivery
    - The relevant `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_YOUTUBE`, `DISCORD_WEBHOOK_WIKIPEDIA` URLs.
 5. With GitHub CLI, run `gh auth login`, then `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` and `gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt`. Set the Discord webhook Secrets separately.
 6. **After secrets are in place**, commit and push `.github/workflows/notifier.yml`. The template in `templates/` is inert until copied into your workflows directory.
-7. Under **Actions → Discord notifier (SQLite)** select **Run workflow** once. This starts the initial silent baseline; old posts are not sent.
+7. Under **Actions → Discord notifier (SQLite)** select **Run workflow** once. This creates an initial silent baseline for non-YouTube sources. For YouTube, the latest available video is eligible for notification immediately, even if previously published.
 
 The template schedules runs at UTC minutes 07, 17, 27, 37, 47 and 57 (every 10 minutes, best effort). **Delivery is unrestricted by default**. Optionally set `notificationWindowJst` to `"09:00-20:00"` in `MONITOR_CONFIG_JSON`, or register `NOTIFICATION_WINDOW_JST` as an Actions Secret containing `09:00-20:00`; the dedicated Secret takes precedence. Times are JST with an exclusive end. Source polling continues outside the optional delivery window.
 
@@ -33,7 +33,7 @@ GitHub Secrets belonging to the upstream project are **not** copied to your fork
 
 ## Recovery and limits
 
-- **No notifications**: the first scan is silent. Later scans send only if eligible new content exists; inspect workflow results and secret names.
+- **No notifications**: non-YouTube sources start silently; YouTube sends the newest available video after its first successful poll, if the feed contains one. Later scans send only if eligible content exists; inspect workflow results and secret names.
 - **Checkpoint missing**: an expired, deleted or failed artifact upload can leave no usable state. The workflow fails closed; it will not silently discard deduplication. Use `workflow_dispatch` with `reset_state: true` **only after accepting loss of old pending messages and history**.
 - **Decryption failure**: the key may have changed or the artifact may be corrupt. Restore the original key; generating a new key cannot recover old ciphertext.
 - **Invalid Discord Webhook**: update the GitHub Secret and clear the stored source-wide block in the SQLite `webhook_source_state` table. Resetting all history merely to clear a webhook error can drop pending messages.
