@@ -37,6 +37,8 @@ export interface Env {
   DISCORD_WEBHOOK_ARXIV?: string;
   DISCORD_WEBHOOK_ZENN?: string;
   DISCORD_WEBHOOK_YOUTUBE?: string;
+  /** Optional official YouTube Data API key. Absent = RSS; present = Data API. */
+  YOUTUBE_API_KEY?: string;
 }
 export interface MonitorState {
   id: string;

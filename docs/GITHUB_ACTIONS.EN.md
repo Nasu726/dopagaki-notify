@@ -53,3 +53,8 @@ GitHub scheduled runs may be delayed or dropped; inactive public repositories ca
 - [Integration tests](../test/actions-template.test.ts)
 
 The Actions backend and Cloudflare D1 **do not share their notification history**. Running both at once can duplicate notifications. Choose one active runtime for a given target set.
+
+
+## Optional YouTube Data API
+
+Register an optional GitHub Actions **Secret `YOUTUBE_API_KEY`** from a Google Cloud project with YouTube Data API v3 enabled to use the official API instead of RSS. Without a key, RSS remains the default. This uses `channels.list` and `playlistItems.list`, shares the same ID-based sent history, and reports API errors rather than silently falling back to RSS. YouTube sent receipts are retained indefinitely to prevent re-notification of old latest videos.

@@ -8,6 +8,7 @@ import { fetchWikipedia, fetchWikipediaDiscovery } from './sources/wikipedia.ts'
 import { fetchArxiv } from './sources/arxiv.ts';
 import { fetchZenn } from './sources/zenn.ts';
 import { fetchYouTube } from './sources/youtube.ts';
+import { fetchYouTubeDataApi } from './sources/youtube-api.ts';
 import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, deferFetchUntil, getPending, getRunnableIds,
@@ -51,7 +52,9 @@ const defaults: Dependencies = {
         fetchWikipedia(monitor, fetch, cursor, env.WIKIMEDIA_CONTACT_URL);
       case 'arxiv': return fetchArxiv(monitor, fetch, cursor);
       case 'zenn': return fetchZenn(monitor);
-      case 'youtube': return fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));
+      case 'youtube': return env.YOUTUBE_API_KEY
+        ? fetchYouTubeDataApi(monitor, env.YOUTUBE_API_KEY)
+        : fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));
     }
   },
   send: notifyDiscord,
@@ -137,9 +140,10 @@ export async function runTick(
           await pruneUnselectedArticlePending(env.DB, runnable.id, selected.map((item) => item.id));
           await stage(env.DB, runnable.id, selected, state.initialized_at, now);
         } else if (runnable.source === 'youtube') {
-          // The first successful scan should notify the latest upload, even
-          // if it was published before monitoring started. Still collect all
-          // newly published videos on later scans, not merely the latest one.
+          // Always notify the latest video if unseen, even when it predates
+          // the baseline or our ten-day horizon. Keep sent YouTube receipts
+          // indefinitely so this never repeats across future polls.
+          // Other videos are eligible only when genuinely new.
           const sorted = [...result.items].sort((a, b) =>
             b.publishedAt - a.publishedAt || a.id.localeCompare(b.id));
           await stage(env.DB, runnable.id, sorted, state.initialized_at, now,
