@@ -836,7 +836,7 @@ test('off-day YouTube initialization is deferred until specified day, with no up
 test('all three YouTube monitors use independent Tuesday/Sunday hourly schedules', async () => {
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
-  const monitors = MONITORS.filter((m) => m.source === 'youtube');
+  const monitors = MONITORS.filter((m) => m.source === 'youtube' && m.weeklyJstDay !== undefined);
   for (const monitor of monitors) {
     const base = monitor.weeklyJstDay === 'tuesday'
       ? Date.parse('2026-10-13T03:00:00Z')

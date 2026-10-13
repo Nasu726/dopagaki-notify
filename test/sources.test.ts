@@ -110,7 +110,8 @@ test('all five monitors have individual minute intervals and separate webhook se
   assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id),
     ['qiita-rust', 'qiita-algorithms', 'qiita-design', 'wikipedia-ja-discovery',
       'arxiv-cs-ai', 'arxiv-cs-ds', 'zenn-topic-typescript', 'zenn-topic-algorithm', 'zenn-topic-architecture',
-      'youtube-yurugengo', 'youtube-yurucom', 'youtube-3blue1brown-japan'],
+      'youtube-yurugengo', 'youtube-yurucom', 'youtube-3blue1brown-japan',
+      'youtube-quizknock'],
     'Qiita/Zenn/arXiv targets and selected YouTube channels are enabled');
   for (const source of ['arxiv', 'zenn', 'youtube'] as const) {
     const key = 'DISCORD_WEBHOOK_' + source.toUpperCase();
@@ -315,4 +316,16 @@ test('Discord YouTube embeds include a video thumbnail while other sources remai
   const qiita = payloads[1] as {embeds:{image?:{url:string}}[]};
   assert.equal(yt.embeds[0]?.image?.url,'https://i.ytimg.com/vi/XkD2XZSerCg/hqdefault.jpg');
   assert.equal(qiita.embeds[0]?.image,undefined);
+});
+
+test('QuizKnock runs every day hourly with a pinned immutable channel ID', () => {
+  const monitor=MONITORS.find((m)=>m.id==='youtube-quizknock');
+  assert.ok(monitor);
+  assert.equal(monitor.source,'youtube');
+  assert.equal(monitor.query,'@QuizKnock');
+  assert.equal(monitor.youtubeChannelId,'UCQ_MqAw18jFTlBB-f8BP7dw');
+  assert.equal(monitor.intervalMinutes,60);
+  assert.equal(monitor.enabled,true);
+  assert.equal(monitor.weeklyJstDay,undefined,
+    'QuizKnock must not be restricted to a particular weekday');
 });

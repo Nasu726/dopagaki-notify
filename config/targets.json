@@ -69,6 +69,12 @@
       "channel": "@3Blue1BrownJapan",
       "enabled": true,
       "weekdayJst": "sunday"
+    },
+    {
+      "id": "youtube-quizknock",
+      "channel": "@QuizKnock",
+      "channelId": "UCQ_MqAw18jFTlBB-f8BP7dw",
+      "enabled": true
     }
   ],
   "notificationWindowJst": null,
