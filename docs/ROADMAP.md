@@ -1,12 +1,12 @@
 # Development roadmap
 
-Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wikipedia), after a successful Qiita outbound Discord smoke test**.
+Updated: 2026-10-13. Current stage: **expanded learning feeds and Wikipedia discovery locally CI-tested; Cloudflare deployment and real API/CPU verification outstanding**.
 
 ## Product scope / frozen choices
 
 - Cloudflare Workers Cron every five minutes for monitors, separate hourly Cron for bounded retention; per-monitor positive **integer minute intervals** configured **only** in `config/intervals.json`.
-- Independent source monitor definitions in `src/config.ts`; public arXiv category and YouTube channel targets, including enabled flags, in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
-- Five source adapters: arXiv, Qiita, Zenn, YouTube RSS, Wikipedia new-page events.
+- Independent source monitor definitions in `src/config.ts`; Qiita/Zenn/arXiv/YouTube targets, including enabled flags, in `config/targets.json`; source-specific Discord webhook Secrets; D1 as durable notification outbox and scan checkpoint.
+- Five source adapters: arXiv, Qiita, Zenn, YouTube RSS, Wikipedia discovery (featured-category + substantial random pages); legacy Wikipedia new-page adapter remains for compatibility tests but is disabled in production.
 - No GUI, long-running server, user authentication, public HTTP API, or paid infrastructure dependency for the initial version.
 - Remote D1 migrations `0001`–`0009` and source Secrets have been configured according to the owner; no new migration is required to adjust the maintenance schedule. Qiita outbound webhook delivery was verified with an idempotent D1 smoke record. Qiita, Wikipedia, and the three user-selected YouTube monitors are enabled.
 
@@ -69,7 +69,7 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 - **Workers Free CPU time is 10 ms/invocation** (Cloudflare's actual measurement is required).
 - A Cron tick processes **one monitor and at most one paginated API page**, so many concurrently due monitors can run late.
 - The first observation is intentionally a silent time-based baseline.
-- arXiv/Wikipedia use a bounded overlap rather than mathematically exhaustive detection. Qiita search sorting is not assumed chronological; it may take up to 100 scheduled page checks. Zenn/YouTube RSS cannot page backwards once entries fall out of their feed.
+- arXiv uses a bounded overlap rather than mathematically exhaustive detection; Wikipedia discovery deliberately samples a bounded candidate pool. Qiita search sorting is not assumed chronological; it may take up to 100 scheduled page checks. Zenn/YouTube RSS cannot page backwards once entries fall out of their feed.
 - Discord delivery followed by D1 acknowledgement cannot be atomic: failures between these steps can duplicate notification.
 - Cloudflare staging is deployed by the owner. Production readiness remains unverified because live upstream item detection for each source and worst-case CPU resource use have not yet passed.
 
@@ -105,3 +105,11 @@ Updated: 2026-10-12. Current stage: **Cloudflare two-source staging (Qiita + Wik
 - Newly added off-day monitors are configured and deferred to the next selected weekday without an API fetch. First on-day scan is a silent baseline. Subsequent successes schedule the next JST hour, jumping to the next week after 23:00. Retry delays that spill into an off-day are likewise deferred. Ordinary 5-minute dispatcher Cron remains unchanged.
 - User's `更新があれば通知` means newly published videos, **not** edits to existing uploads, per the project's established publication-only contract. Notification sends continue only 09:00–20:00 JST; overnight discoveries are queued.
 - Actual RSS/handle resolution in Cloudflare is unverified. MediaWiki baseline remains NULL; conditionally disable it on a newly observed post-fix HTTP 403, not on NULL alone.
+
+## Editorial policy / implementation (2026-10-13)
+
+**Accepted:** Wikipedia curated+random article discovery (up to 2 notices/2h with 10-day repeat suppression); Qiita algorithm/design and Zenn algorithm/architecture topics, retaining Rust/TypeScript at less frequent checks; unchanged arXiv cs.DS/cs.AI and YouTube.
+
+**Deferred:** historical Qiita/Zenn recommendations, AI scoring, large tag expansions including testing/performance, global daily notification caps and cross-monitor duplicate suppression. These require measurements and an explicit quality/budget policy. The current topic-based feeds do not guarantee high quality.
+
+**Verify:** real Wikipedia featured category membership, MediaWiki 403 recovery, Worker CPU and D1 rows; GitHub Actions checks and bundle success do not establish successful Cloudflare Builds. The old monitor ID `wikipedia-ja` was replaced with `wikipedia-ja-discovery` to keep old receipts isolated; old pending rows may need manual cleanup if they accumulate.

@@ -88,7 +88,7 @@ The checked-in `config/targets.json` contains these definitions:
 }
 ```
 
-The actual file also includes the independently configured arXiv category list, which is now enabled for the selected cs.AI and cs.DS categories. All three corresponding keys in `config/intervals.json` have the value `60`; **minute intervals have a single source of truth in that file**.
+The actual file also includes the independently configured arXiv categories (cs.AI, cs.DS), Qiita searches and Zenn topics. All three corresponding keys in `config/intervals.json` have the value `60`; **minute intervals have a single source of truth in that file**.
 
 To add or change channels, edit `config/targets.json` (`id`, `channel`, `enabled`, optional `weekdayJst`) and `config/intervals.json` (matching ID → positive integer minutes). With `weekdayJst` set, only an **hourly interval of 60 minutes** is accepted. Checks happen **only on the named JST weekday, at each hour from 00:00 through 23:00**. Outside that weekday, no YouTube upstream fetch is made; the next D1 due timestamp is advanced to the next selected weekday. Other monitors without `weekdayJst` continue using elapsed-minute intervals. The five-minute dispatcher can add a small delay. A failed on-day fetch may be retried later on that day; if its retry becomes due after midnight, fetching is deferred until the next selected weekday.
 

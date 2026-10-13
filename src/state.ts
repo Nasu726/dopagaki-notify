@@ -252,7 +252,10 @@ export async function selectWikipediaDiscovery(
   for (const kind of ['featured', 'random'] as const) {
     const candidate = pool.find((item) => item.discoveryKind === kind && !seen.has(item.id));
     if (candidate) {
-      selected.push({ ...candidate, publishedAt: now });
+      selected.push({ ...candidate,
+        title: (kind === 'featured' ? '【秀逸な記事】' : '【ランダム】') + candidate.title,
+        publishedAt: now,
+      });
       seen.add(candidate.id); // A random pick must never repeat the featured one.
     }
   }
