@@ -37,7 +37,7 @@ test('YouTube handle resolution uses D1 cache and refreshes only after seven day
     const url = new URL(String(input));
     if (url.pathname === '/@sample') {
       channelPageRequests++;
-      return new Response('{"channelId":"' + ID + '"}');
+      return new Response('<meta itemprop="channelId" content="' + ID + '">');
     }
     assert.equal(url.searchParams.get('channel_id'), ID);
     rssRequests++;

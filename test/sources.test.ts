@@ -81,13 +81,13 @@ test('YouTube preserves video identity and published timestamp despite updates',
 });
 
 test('YouTube @handle resolves through public channel page before RSS fetch', async () => {
-  assert.equal(extractChannelId('{"channelId":"UC1234567890123456789012"}'), 'UC1234567890123456789012');
+  assert.equal(extractChannelId('<meta itemprop="channelId" content="UC1234567890123456789012">'), 'UC1234567890123456789012');
   let count = 0;
   await fetchYouTube(base('youtube', '@example'), async (input) => {
     count++;
     if (count === 1) {
       assert.equal(String(input), 'https://www.youtube.com/@example');
-      return new Response('{"channelId":"UC1234567890123456789012"}');
+      return new Response('<meta itemprop="channelId" content="UC1234567890123456789012">');
     }
     assert.equal(new URL(String(input)).searchParams.get('channel_id'), 'UC1234567890123456789012');
     return new Response(youtubeXml);
