@@ -68,5 +68,6 @@
       "enabled": true,
       "weekdayJst": "sunday"
     }
-  ]
+  ],
+  "notificationWindowJst": null
 }

@@ -25,7 +25,7 @@ if (!existsSync(privatePath)) {
   };
   const intervals = { 'qiita-example': 240 };
   writeFileSync(privatePath,
-    JSON.stringify({ targets, intervals, wikipediaEnabled: false }, null, 2) + '\n',
+    JSON.stringify({ targets, intervals, wikipediaEnabled: false, notificationWindowJst: null }, null, 2) + '\n',
     { mode: 0o600 });
   console.log('Created .private/monitor-config.json (gitignored). Edit before publishing workflow.');
 } else {

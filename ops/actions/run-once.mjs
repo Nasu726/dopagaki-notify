@@ -36,6 +36,7 @@ async function main() {
   }
   const env = {
     MONITOR_CONFIG_JSON: process.env.MONITOR_CONFIG_JSON,
+    NOTIFICATION_WINDOW_JST: process.env.NOTIFICATION_WINDOW_JST || undefined,
     DISCORD_WEBHOOK_QIITA: process.env.DISCORD_WEBHOOK_QIITA,
     DISCORD_WEBHOOK_ZENN: process.env.DISCORD_WEBHOOK_ZENN,
     DISCORD_WEBHOOK_ARXIV: process.env.DISCORD_WEBHOOK_ARXIV,

@@ -20,7 +20,7 @@ Built for personal use and for people who want to fork and tailor a simple notif
 
 - Stable item IDs prevent repeated notifications. The first successful poll establishes a **silent baseline**: it does not send already published content.
 - Each monitor has its own polling interval. YouTube monitors may run only on a chosen day of the week in Japan Standard Time.
-- One Discord webhook **per source** (shared by monitors of that source). Messages are sent only **09:00–19:59 JST**; new content found outside these hours waits in D1.
+- One Discord webhook **per source** (shared by monitors of that source). **Notifications are enabled around the clock by default**. An optional JST delivery window can defer messages while source polling continues.
 - The 5-minute dispatcher polls one due monitor at a time and sends up to three queued notifications per invocation. D1 tracks pending items, retries, webhook cooldowns, and deduplication state.
 - Qiita and Zenn deliberately **prioritize freshness over completeness**; this is not a content archive. Qiita search results are not necessarily chronological, so posts outside the first 20 results cannot be selected.
 - YouTube's RSS feed holds a limited number of videos. An extended source outage or videos that have already fallen out of its feed may cause gaps.
@@ -55,9 +55,21 @@ Matching `config/intervals.json`:
 }
 ```
 
-These are illustrative **complete** files. Remove any example targets you do not want, and ensure every target ID has an interval. YouTube monitors with `weekdayJst` must use a `60`-minute interval. The Japanese Wikipedia discovery monitor is defined in `src/config.ts` and enabled in normal checked-in configuration.
+These are illustrative **complete** files. Set the optional top-level `notificationWindowJst` field in `config/targets.json` to `null` for unrestricted delivery (the default), or a time range as described below. Remove any example targets you do not want, and ensure every target ID has an interval. YouTube monitors with `weekdayJst` must use a `60`-minute interval. The Japanese Wikipedia discovery monitor is defined in `src/config.ts` and enabled in normal checked-in configuration.
 
 **Important:** Never reuse an initialized monitor ID for a different query, platform, or category set. D1 pins IDs to their original source/query identity and will reject changes to avoid mixing histories. Choose a new ID when changing the monitored subject. Updating the interval alone is safe.
+
+### Optional notification delivery hours (JST)
+
+Notifications are sent **at all hours by default**. Set `"notificationWindowJst": "09:00-20:00"` in `config/targets.json` to restrict starts of Discord sends to 09:00 through 19:59 JST. The end is **exclusive**. Overnight ranges such as `"22:00-06:00"` are supported. Leave the setting `null` for no restriction; identical start/end times are invalid. Polling and durable queueing continue even when delivery is paused.
+
+For a public fork with personal notification hours, register a private deployment Secret instead:
+
+```sh
+npx wrangler secret put NOTIFICATION_WINDOW_JST
+```
+
+Enter `09:00-20:00` (or your preferred range) into the prompt. You can also include `"notificationWindowJst": "09:00-20:00"` in your private `MONITOR_CONFIG_JSON`. Precedence: **dedicated Secret → private monitor JSON → checked-in `config/targets.json`**. No database migration or new monitor IDs are needed.
 
 For public forks where your topic choices should **not be visible on GitHub**, use the private configuration described in [Section 3](#3-keep-your-interests-private-public-forks) instead of committing your target list.
 
@@ -160,7 +172,8 @@ Example **private** Secret value:
     "youtube": []
   },
   "intervals": { "my-qiita-go": 360 },
-  "wikipediaEnabled": false
+  "wikipediaEnabled": false,
+  "notificationWindowJst": null
 }
 ```
 
@@ -195,7 +208,7 @@ GitHub schedules can be delayed or skipped, and artifacts expire. If the state a
 
 ## Operations and limitations
 
-- Discord send window: **09:00–19:59 JST**. Polling continues at night.
+- **Delivery is unrestricted by default (24 hours)**. You may enable a JST delivery window in configuration or a private Secret; monitoring continues regardless.
 - arXiv continues bounded paginated scans; Qiita/Zenn intentionally skip older candidates; Wikipedia uses sampled recommendations.
 - The YouTube RSS endpoint sometimes returns HTTP 404/500. A YouTube RSS 404 is retried after at least 60 minutes.
 - When a webhook has been blocked due to an invalid URL, fixing the Secret alone is insufficient; the source-wide `webhook_source_state` block must also be cleared manually. See the [deployment runbook](docs/DEPLOYMENT.md).
