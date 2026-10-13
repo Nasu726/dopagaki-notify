@@ -72,22 +72,45 @@ export async function fetchYouTube(
       await cache?.set(reference, channelId);
     }
   }
+  const videosOnly = monitor.youtubeVideoType === 'videos';
+  // YouTube's undocumented UULF virtual playlist contains ordinary videos
+  // (no Shorts/live). This is a feed selection, not a hashtag/duration guess.
+  // Never fall back to the all-uploads feed if UULF is unavailable.
+  if (videosOnly && !monitor.youtubeChannelId)
+    throw new Error('YouTube videos-only feed requires a pinned channel ID');
+  const playlistId = 'UULF' + channelId.slice(2);
   const url = new URL('https://www.youtube.com/feeds/videos.xml');
-  url.searchParams.set('channel_id', channelId);
+  if (videosOnly) url.searchParams.set('playlist_id', playlistId);
+  else url.searchParams.set('channel_id', channelId);
   const xml = await fetchTextBounded(url, 'YouTube RSS', fetcher);
   // Only the feed-level identity is authoritative. An entry may itself
   // contain metadata mentioning another channel; never treat that as the
   // identity of the RSS document. Channel IDs are public, safe diagnostics.
   const entryStart = /<entry(?:\s|>)/i.exec(xml)?.index ?? xml.length;
-  const feedChannelId = tagText(xml.slice(0, entryStart), 'yt:channelId');
+  const header = xml.slice(0, entryStart);
+  const feedChannelId = tagText(header, 'yt:channelId');
+  // A videos-only response must identify the exact UULF virtual playlist,
+  // otherwise a substituted all-uploads feed could reintroduce Shorts.
+  if (videosOnly) {
+    const feedPlaylistId = tagText(header, 'yt:playlistId');
+    const rootId = tagText(header, 'id');
+    const rootPlaylistId = rootId?.startsWith('yt:playlist:') ? rootId.slice('yt:playlist:'.length) : null;
+    if ((feedPlaylistId && feedPlaylistId !== playlistId) ||
+        (rootPlaylistId && rootPlaylistId !== playlistId) ||
+        (!feedPlaylistId && !rootPlaylistId))
+      throw new Error('YouTube videos-only playlist identity mismatch for ' + monitor.id);
+  }
   if (feedChannelId && !sameYouTubeChannelId(feedChannelId, channelId))
     throw new Error('YouTube RSS channel mismatch for ' + monitor.id +
       ': expected=' + channelId + ', received=' + feedChannelId);
   // A pinned subscription must not silently accept a response without any
   // channel-identity marker. Standard YouTube RSS includes yt:channelId.
-  if (monitor.youtubeChannelId && !feedChannelId)
+  if (monitor.youtubeChannelId && !feedChannelId && !videosOnly)
     throw new Error('YouTube RSS channel identity missing for ' + monitor.id +
       ': expected=' + channelId + ', received=missing');
+  // For UULF, feed-level channel metadata can be absent, but the playlist
+  // marker already binds the response to the immutable requested channel.
+  // If a channel marker exists, always verify it independently.
   // Entries may contain a full channel ID even when the feed header is
   // prefixless. A contradictory entry must fail closed before any staging.
   const items = parseYouTube(xml, channelId);

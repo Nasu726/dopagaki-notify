@@ -55,9 +55,11 @@ const defaults: Dependencies = {
       case 'arxiv': return fetchArxiv(monitor, fetch, cursor);
       case 'openalex': return fetchOpenAlex(monitor, env.OPENALEX_API_KEY);
       case 'zenn': return fetchZenn(monitor);
-      case 'youtube': return env.YOUTUBE_API_KEY
-        ? fetchYouTubeDataApi(monitor, env.YOUTUBE_API_KEY)
-        : fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));
+      case 'youtube': return monitor.youtubeVideoType === 'videos'
+        ? fetchYouTube(monitor, fetch, d1ChannelCache(env.DB))
+        : env.YOUTUBE_API_KEY
+          ? fetchYouTubeDataApi(monitor, env.YOUTUBE_API_KEY)
+          : fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));
     }
   },
   send: notifyDiscordWithArticleThumbnails,

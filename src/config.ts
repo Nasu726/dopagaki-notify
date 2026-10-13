@@ -42,6 +42,7 @@ export interface YouTubeTarget {
   readonly enabled: boolean;
   readonly weekdayJst?: string;
   readonly channelId?: string;
+  readonly videoType?: 'all' | 'videos';
 }
 
 export function youtubeMonitorsFromTargets(
@@ -52,6 +53,7 @@ export function youtubeMonitorsFromTargets(
     query: target.channel.trim(), enabled: target.enabled,
     ...(target.weekdayJst !== undefined ? { weeklyJstDay: target.weekdayJst } : {}),
     ...(target.channelId !== undefined ? { youtubeChannelId: target.channelId } : {}),
+    ...(target.videoType !== undefined ? { youtubeVideoType: target.videoType } : {}),
   }));
 }
 
@@ -67,7 +69,9 @@ const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
     query: target.query.trim(), enabled: target.enabled,
   })),
   ...queryMonitorsFromTargets('zenn', targets.zenn),
-  ...youtubeMonitorsFromTargets(targets.youtube),
+  // JSON imports widen string literals; validateMonitors checks the actual
+  // values at runtime (also used by config:check before deployment).
+  ...youtubeMonitorsFromTargets(targets.youtube as unknown as readonly YouTubeTarget[]),
 ];
 
 export function withIntervals(
@@ -157,7 +161,8 @@ export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[
       if (source === 'youtube' && (
         typeof target.channel !== 'string' ||
         (target.weekdayJst !== undefined && typeof target.weekdayJst !== 'string') ||
-        (target.channelId !== undefined && typeof target.channelId !== 'string')
+        (target.channelId !== undefined && typeof target.channelId !== 'string') ||
+        (target.videoType !== undefined && !['all', 'videos'].includes(target.videoType as string))
       )) {
         throw new Error('MONITOR_CONFIG_JSON YouTube targets require channel and optional weekdayJst');
       }
@@ -223,6 +228,13 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
       try { zennFeedUrl(monitor.query); }
       catch { throw new Error('Enabled Zenn monitor ' + monitor.id + ': invalid user/topic feed query'); }
     }
+    if (monitor.youtubeVideoType !== undefined &&
+        (monitor.source !== 'youtube' || !['all', 'videos'].includes(monitor.youtubeVideoType)))
+      throw new Error('Invalid YouTube videoType for monitor ' + monitor.id);
+    // The videos-only feed is derived from an immutable UC ID, never a
+    // potentially poisoned @handle cache or scraped channel-page result.
+    if (monitor.youtubeVideoType === 'videos' && !monitor.youtubeChannelId)
+      throw new Error('YouTube videos-only monitor ' + monitor.id + ' requires pinned channelId');
     if (monitor.youtubeChannelId !== undefined) {
       if (monitor.source !== 'youtube' || !/^UC[A-Za-z0-9_-]{22}$/.test(monitor.youtubeChannelId))
         throw new Error('Invalid pinned YouTube channel ID for monitor ' + monitor.id);

@@ -75,6 +75,7 @@
       "id": "youtube-quizknock",
       "channel": "@QuizKnock",
       "channelId": "UCQ_MqAw18jFTlBB-f8BP7dw",
+      "videoType": "videos",
       "enabled": true
     }
   ],

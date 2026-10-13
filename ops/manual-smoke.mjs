@@ -58,9 +58,11 @@ async function fetchSnapshot(monitor, env, fetcher) {
         ? fetchWikipediaDiscovery(monitor, fetcher, env.WIKIMEDIA_CONTACT_URL)
         : fetchWikipedia(monitor, fetcher, null, env.WIKIMEDIA_CONTACT_URL);
     case 'youtube':
-      return env.YOUTUBE_API_KEY
-        ? fetchYouTubeDataApi(monitor, env.YOUTUBE_API_KEY, fetcher)
-        : fetchYouTube(monitor, fetcher);
+      return monitor.youtubeVideoType === 'videos'
+        ? fetchYouTube(monitor, fetcher)
+        : env.YOUTUBE_API_KEY
+          ? fetchYouTubeDataApi(monitor, env.YOUTUBE_API_KEY, fetcher)
+          : fetchYouTube(monitor, fetcher);
     default: throw new Error('Unsupported monitor source');
   }
 }
@@ -85,7 +87,9 @@ export async function runSmoke(monitor, env = {}, options = {}) {
     ...(monitor.weeklyJstDay ? { weeklyJstDay: monitor.weeklyJstDay } : {}),
     ...(monitor.source === 'youtube' ? {
       pinnedChannelId: monitor.youtubeChannelId ?? null,
-      adapter: env.YOUTUBE_API_KEY ? 'YouTube Data API' : 'YouTube RSS',
+      videoType: monitor.youtubeVideoType ?? 'all',
+      adapter: monitor.youtubeVideoType === 'videos' ? 'YouTube RSS (UULF videos only)' :
+        env.YOUTUBE_API_KEY ? 'YouTube Data API' : 'YouTube RSS',
     } : {}),
     fetchedItems: result.items.length,
     potentiallyTruncated: result.potentiallyTruncated,
