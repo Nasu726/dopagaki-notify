@@ -40,7 +40,7 @@ const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
     id: target.id, source: 'arxiv' as const,
     query: arxivCategoryQuery(target.categories), enabled: target.enabled,
   })),
-  { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: false },
+  { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: true },
   ...youtubeMonitorsFromTargets(targets.youtube),
 ];
 

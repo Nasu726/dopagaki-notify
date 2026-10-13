@@ -6,6 +6,16 @@ See [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the Japanese product specification 
 
 For the owner-assisted Cloudflare setup, see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. This is a staging runbook, not an assertion of production readiness.
 
+## Notification policy (2026-10-13)
+
+- **Wikipedia (Japanese):** newest **three** main-namespace page creations only, once every **120 minutes**, with **no pagination**. Only pages created within the preceding two hours are eligible. Wikipedia delivery is permitted only after its successful scheduled source fetch, not via five-minute pending-only wakeups. A failed delivery remains pending while fresh and can be retried at the next poll; stale pending rows are removed in bounded batches of **at most 12 per successful poll**. This is deliberate sampling, **not complete capture** of new pages.
+- **Qiita (Rust):** continues at 60-minute checks.
+- **arXiv (cs.AI)** and **Zenn (TypeScript topic):** enabled in code at 120-minute and 60-minute checks respectively. If their source-specific Discord Webhook Secret has not been configured in Cloudflare, the monitor is **skipped before any D1 read/write or upstream fetch**, preventing runaway failures. Set `DISCORD_WEBHOOK_ARXIV` and `DISCORD_WEBHOOK_ZENN` to activate. The first successful scan is silent.
+- **YouTube:** three configured channels continue their Tuesday/Sunday hourly JST checks.
+- **Discord delivery hours:** 09:00–19:59 JST remain unchanged. Source intervals are target cadences, not exact wall-clock guarantees.
+
+D1 Free optimization: Wikipedia causes approximately **12 source scans/day**, with **at most 36 new items staged per day**, plus one bounded stale-pending cleanup per successful scan. No new D1 schema or migration is required. These figures do **not** bound total D1 usage by the other sources, hourly retention, or any other Worker. Inspect Cloudflare D1 row-read/row-write metrics and build logs after deploy.
+
 ## Quick setup
 
 Requires Node.js 22+; the project is written in TypeScript.
@@ -21,7 +31,7 @@ npm run bundle:check # Wrangler compiles without deploying
 ```json
 {
   "qiita-rust": 60,
-  "wikipedia-ja": 60,
+  "wikipedia-ja": 120,
   "arxiv-cs-ai": 120,
   "zenn-topic-typescript": 60,
   "youtube-yurugengo": 60,
@@ -30,7 +40,7 @@ npm run bundle:check # Wrangler compiles without deploying
 }
 ```
 
-The file intentionally holds **interval values only**. arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; the fixed Qiita/Wikipedia/Zenn enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` and `wikipedia-ja` are enabled at **60-minute** intervals; the three explicitly selected YouTube channels are also enabled for hourly checks on their selected JST weekdays; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv and Zenn remain disabled. All YouTube checks and real deliveries are **unverified** in Cloudflare until their first live baselines succeed.
+The file intentionally holds **interval values only**. arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; the fixed Qiita/Wikipedia/Zenn enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` is enabled at **60 minutes** and `wikipedia-ja` samples at **120 minutes**; the three explicitly selected YouTube channels are also enabled for hourly checks on their selected JST weekdays; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv and Zenn are enabled in configuration and become active after their Discord Webhook Secrets are configured. All YouTube checks and real deliveries are **unverified** in Cloudflare until their first live baselines succeed.
 
 The monitoring Cron Trigger in `wrangler.jsonc` runs every **five minutes** (`*/5 * * * *`), irrespective of these settings. It checks D1 deadlines; it does **not** fetch every API every five minutes. A **second independent Cron** (`10 * * * *`, every hour at minute 10 UTC/JST) deletes at most 20 acknowledged messages per invocation (24 invocations/day; up to 480 sent receipts/day). The previous five-minute cadence was unnecessary overhead. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
 
@@ -119,7 +129,7 @@ Do not clear the block before the Secret is corrected. Avoid publishing the Webh
 - **Qiita, Wikipedia and arXiv now resume bounded API pages across Cron ticks** using D1 checkpointed cursors. Each tick fetches at most one page for its selected monitor. When a non-initial scan has traversed multiple pages, it **rechecks the newest page once** before marking the scan complete, to recover top-of-feed inserts during offset pagination. A broken fetch retries the same page/checkpoint after backoff.
 - The first scan establishes a silent baseline from the newest page only. Follow-up arXiv and MediaWiki scans use a **48-hour overlap** from the preceding completed scan to bound older-page traversal, as those feeds explicitly request creation/submission order. Qiita uses the documented `created:>=YYYY-MM-DD` query operator to restrict subsequent searches to an overlapping date window (preceding completed scan minus 48 hours, and another day for timezone safety). As results may use relevance ordering, it still paginates the filtered subset until exhausted or the API's 100-page limit, rather than stopping at a known ID.
 - **Incomplete scans are now recorded in D1** (`monitor_state.incomplete_count`, `last_incomplete_at`), and do not advance `last_complete_at`. Inspect these fields when diagnosing a busy feed. A truncated page is still eligible to stage genuinely new notifications, but is not counted as a complete sweep. **This is not an absolute no-loss guarantee.** Late-indexed posts older than the 48-hour overlap, Qiita filtered results beyond 100 pages, and fixed-length Zenn/YouTube RSS feeds may leave undiscovered items. Head verification helps with page shifts but cannot guarantee coverage if new articles exceed the first-page capacity during a long scan, or if results reorder within the historical pages. Full RSS/Atom XML is still read within a size bound before individual entries are parsed; HTTP streaming currently bounds response bytes but does not stop after a matching known ID. Watch warnings when a paging limit is reached.
-- The Worker processes one due monitor and one API page per five-minute monitoring Cron invocation and sends at most three notifications per invocation. A scan that needs many pages can temporarily extend effective monitoring intervals. Repeated high-frequency checks are best-effort.
+- The Worker processes one due monitor and one API page per five-minute monitoring Cron invocation and sends at most three notifications per invocation. Wikipedia intentionally samples its latest three creations without paging, and suppresses pending-only delivery between 120-minute checks. A scan that needs many pages can temporarily extend effective monitoring intervals. Repeated high-frequency checks are best-effort.
 - Cloudflare Workers Free CPU budget is 10 ms per invocation. The owner observed p50 around 1.17 ms and normal p99 around 2.07 ms, with occasional p99 near 19 ms (zero reported errors). These measurements precede the new maintenance Cron and do not establish worst-case compliance. API waiting time is excluded from CPU accounting.
 - Initial baseline and permanently ineligible pre-baseline items are excluded without storing `ignored` outbox rows; existing legacy rows remain compatible.
 - Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.

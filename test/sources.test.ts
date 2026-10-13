@@ -108,8 +108,9 @@ test('all five monitors have individual minute intervals and separate webhook se
     new Set(['qiita', 'wikipedia', 'arxiv', 'zenn', 'youtube']));
   assert.ok(MONITORS.every((m) => Number.isInteger(m.intervalMinutes)));
   assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id),
-    ['qiita-rust', 'wikipedia-ja', 'youtube-yurugengo', 'youtube-yurucom', 'youtube-3blue1brown-japan'],
-    'owner-selected YouTube channels enabled for hourly checks on their respective JST weekdays');
+    ['qiita-rust', 'wikipedia-ja', 'arxiv-cs-ai', 'zenn-topic-typescript',
+      'youtube-yurugengo', 'youtube-yurucom', 'youtube-3blue1brown-japan'],
+    'arXiv/Zenn targets and selected YouTube channels are enabled');
   for (const source of ['arxiv', 'zenn', 'youtube'] as const) {
     const key = 'DISCORD_WEBHOOK_' + source.toUpperCase();
     const env = { [key]: 'https://discord.com/api/webhooks/1234/token' } as Env;

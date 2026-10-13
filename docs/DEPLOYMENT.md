@@ -1,10 +1,13 @@
 # Cloudflare staging deployment runbook
 
+**Source activation update (2026-10-13):** arXiv and Zenn are enabled in code with the existing `cs.AI` and TypeScript topic targets, respectively, but are dormant until their individual Discord Webhook Secrets are present. Wikipedia now samples at most three new page creations every 120 minutes. See the README's notification policy for details.
+
+
 Status: **live Cloudflare staging; Qiita D1 outbox → Discord → D1 ACK confirmed by owner; enabling Japanese Wikipedia as second source** (2026-10-12).
 
 This Worker has no public UI or HTTP API. It has a five-minute monitoring Cron (`*/5 * * * *`) and a separate hourly bounded retention Cron (`10 * * * *`).
 It uses D1 for checkpoints and outbox, and an independent Discord Webhook Secret for
-each **source**. Qiita, Japanese Wikipedia, and the three requested YouTube channels are enabled for staged validation; arXiv and Zenn remain disabled.
+each **source**. Qiita, Japanese Wikipedia, arXiv, Zenn and three selected YouTube channels are enabled in code. arXiv and Zenn remain dormant if their Discord Secrets are missing.
 
 ## Step 0 — prerequisites and safety
 

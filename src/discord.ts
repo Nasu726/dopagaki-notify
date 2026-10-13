@@ -1,12 +1,21 @@
 import { requireSuccess } from './http.ts';
 import type { ContentItem, Env, Monitor } from './types.ts';
 
-export function webhookFor(monitor: Monitor, env: Env): string {
-  const webhook = monitor.source === 'qiita' ? env.DISCORD_WEBHOOK_QIITA :
+function webhookSecretValue(monitor: Monitor, env: Env): string | undefined {
+  return monitor.source === 'qiita' ? env.DISCORD_WEBHOOK_QIITA :
     monitor.source === 'wikipedia' ? env.DISCORD_WEBHOOK_WIKIPEDIA :
     monitor.source === 'arxiv' ? env.DISCORD_WEBHOOK_ARXIV :
     monitor.source === 'zenn' ? env.DISCORD_WEBHOOK_ZENN :
     monitor.source === 'youtube' ? env.DISCORD_WEBHOOK_YOUTUBE : undefined;
+}
+
+// Missing Secrets must not trigger repeated failed leases or D1 writes.
+export function hasWebhookSecret(monitor: Monitor, env: Env): boolean {
+  return !!webhookSecretValue(monitor, env);
+}
+
+export function webhookFor(monitor: Monitor, env: Env): string {
+  const webhook = webhookSecretValue(monitor, env);
   if (!webhook) throw new Error('Missing Discord webhook secret for ' + monitor.source);
   const url = new URL(webhook);
   if (url.protocol !== 'https:' || !['discord.com', 'discordapp.com'].includes(url.hostname) ||

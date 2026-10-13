@@ -89,6 +89,67 @@ test('first observation creates silent baseline; subsequent article sends once',
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:backfill'").get(), undefined);
 });
 
+
+test('Wikipedia samples three newest pages once per two hours, without catch-up pagination', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_WIKIPEDIA = webhook;
+  const wikipedia: Monitor = {
+    id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: true, intervalMinutes: 120,
+  };
+  const now = Date.parse('2026-10-10T00:00:00Z'); // 09:00 JST
+  const page = (id: number, publishedAt: number): ContentItem => ({
+    id: 'wikipedia:ja:' + id, title: 'Page ' + id,
+    url: 'https://ja.wikipedia.org/?curid=' + id, publishedAt,
+  });
+  let feed = [page(1, now - 60_000)];
+  let fetches = 0;
+  const deps = { ...s.deps, fetchItems: async () => {
+    fetches++;
+    return { items: feed, potentiallyTruncated: false, nextCursor: 'obsolete-cursor' };
+  } };
+  await runTick(s.env, [wikipedia], now, deps);
+  assert.deepEqual(s.sent, [], 'first scan creates a silent baseline');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state').get()?.next_due_at,
+    now + 120 * 60_000);
+  feed = Array.from({ length: 12 }, (_, i) => page(i + 2, now + (i + 1) * 60_000));
+  await runTick(s.env, [wikipedia], now + 120 * 60_000, deps);
+  assert.deepEqual(s.sent, ['wikipedia:ja:13', 'wikipedia:ja:12', 'wikipedia:ja:11']);
+  assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()?.n, 3);
+  assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, null);
+  assert.equal(await runTick(s.env, [wikipedia], now + 125 * 60_000, deps), 'idle');
+  assert.equal(await runTick(s.env, [wikipedia], now + 239 * 60_000, deps), 'idle');
+  assert.equal(fetches, 2);
+});
+
+test('Wikipedia stale pending backlog does not wake the five-minute dispatcher', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_WIKIPEDIA = webhook;
+  const wikipedia: Monitor = {
+    id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: true, intervalMinutes: 120,
+  };
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  await runTick(s.env, [wikipedia], now, s.deps);
+  s.raw.prepare(
+    "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at) " +
+    "VALUES (?,?,'pending',?,?,?,?)"
+  ).run(wikipedia.id, 'wikipedia:ja:999', 'Stale',
+    'https://ja.wikipedia.org/?curid=999', now - 60_000, now);
+  assert.equal(await runTick(s.env, [wikipedia], now + 5 * 60_000, s.deps), 'idle');
+  await runTick(s.env, [wikipedia], now + 120 * 60_000, s.deps);
+  assert.equal(s.raw.prepare("SELECT COUNT(*) AS n FROM deliveries WHERE status='pending'").get()?.n, 0);
+  assert.deepEqual(s.sent, []);
+});
+
+test('missing Discord Secret disables only that monitor with zero D1 writes', async () => {
+  const s = setup();
+  const monitor: Monitor = {
+    id: 'arxiv-cs-ai', source: 'arxiv', query: 'cat:cs.AI',
+    enabled: true, intervalMinutes: 120,
+  };
+  assert.equal(await runTick(s.env, [monitor], Date.parse('2026-10-10T00:00:00Z'), s.deps), 'idle');
+  assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM monitor_state').get()?.n, 0);
+});
+
 test('a configured seven-minute interval determines next due and rejects early checks', async () => {
   const s = setup();
   const now = Date.parse('2026-10-10T00:00:00Z');
@@ -154,6 +215,7 @@ test('Wikipedia selects only newly created pages, never edits', async () => {
     const u = new URL(String(url));
     assert.equal(u.searchParams.get('rctype'), 'new');
     assert.equal(u.searchParams.get('rcnamespace'), '0');
+    assert.equal(u.searchParams.get('rclimit'), '3');
     return Response.json(raw);
   });
   assert.equal(result.items.length, 1);
