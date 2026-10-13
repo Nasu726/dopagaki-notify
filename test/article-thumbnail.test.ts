@@ -80,6 +80,13 @@ test('production Discord notifications enrich Qiita and Zenn while retaining saf
       return page('<head><meta property="og:image" content="https://images.example.net/qiita.png"></head>');
     }
     if (url.hostname === 'zenn.dev') {
+      if (url.pathname === '/tester/feed') {
+        return new Response('<rss><channel><item><title>Article</title>' +
+          '<link>https://zenn.dev/tester/articles/test-article</link>' +
+          '<pubDate>Tue, 13 Oct 2026 01:00:00 GMT</pubDate>' +
+          '<enclosure type="false" length="0" url="https://res.cloudinary.com/zenn/image/upload/from-rss.png"/>' +
+          '</item></channel></rss>');
+      }
       return page('<head><meta property="og:image" content="https://res.cloudinary.com/zenn/image/upload/cover.png"></head>');
     }
     throw new Error('Unexpected network request');
@@ -91,7 +98,7 @@ test('production Discord notifications enrich Qiita and Zenn while retaining saf
   await notifyDiscordWithArticleThumbnails(webhook, 'zenn', item(zenn), fake);
   assert.deepEqual(seen, ['qiita.com','discord.com','zenn.dev','discord.com']);
   assert.equal(posted[0]?.embeds[0]?.image?.url, 'https://images.example.net/qiita.png');
-  assert.equal(posted[1]?.embeds[0]?.image?.url, 'https://res.cloudinary.com/zenn/image/upload/cover.png');
+  assert.equal(posted[1]?.embeds[0]?.image?.url, 'https://res.cloudinary.com/zenn/image/upload/from-rss.png');
   assert.deepEqual(posted[0]?.allowed_mentions, { parse: [] });
 
   // Image metadata failure is best effort: Discord delivery still goes ahead.
@@ -120,4 +127,46 @@ test('other sources are not given extra HTTP requests', async () => {
     title: 'Paper', publishedAt: Date.now(),
   }, fake);
   assert.equal(calls, 1);
+});
+
+
+test('RSS-derived Zenn image avoids extra fetch and wins over HTML', async () => {
+  const url = 'https://zenn.dev/nasu/articles/from-tick';
+  let calls = 0;
+  const mock: typeof fetch = async (input, options) => {
+    calls++;
+    assert.equal(new URL(String(input)).hostname, 'discord.com',
+      'image already acquired during polling: only Discord POST is necessary');
+    const payload = JSON.parse(String(options?.body));
+    assert.equal(payload.embeds[0].image.url,
+      'https://res.cloudinary.com/zenn/image/upload/next.png');
+    return Response.json({id: 'sent'});
+  };
+  await notifyDiscordWithArticleThumbnails(webhook,'zenn',{
+    id:'zenn:'+url, title:'Next',url,publishedAt:Date.now(),
+    imageUrl:'https://res.cloudinary.com/zenn/image/upload/next.png',
+  },mock);
+  assert.equal(calls,1);
+});
+
+test('Zenn RSS-unavailable fallback still uses article HTML OG image and sends', async () => {
+  const image = 'https://res.cloudinary.com/zenn/image/upload/fallback.png';
+  const sent: any[]=[];
+  const requested: string[]=[];
+  const mock: typeof fetch=async(input,options)=>{
+    const url=new URL(String(input));
+    requested.push(url.pathname);
+    if(url.hostname==='discord.com'){
+      sent.push(JSON.parse(String(options?.body)));
+      return Response.json({id:'sent'});
+    }
+    if(url.pathname==='/tester/feed')
+      return new Response('rate limited',{status:429});
+    return page('<head><meta property="og:image" content="'+image+'"></head>');
+  };
+  await notifyDiscordWithArticleThumbnails(webhook,'zenn',{
+    id:'zenn:'+zenn,title:'Fallback',url:zenn,publishedAt:Date.now(),
+  },mock);
+  assert.deepEqual(requested,['/tester/feed','/tester/articles/test-article','/api/webhooks/123456789/token']);
+  assert.equal(sent[0]?.embeds[0]?.image?.url,image);
 });

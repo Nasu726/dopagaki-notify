@@ -329,3 +329,33 @@ test('QuizKnock runs every day hourly with a pinned immutable channel ID', () =>
   assert.equal(monitor.weeklyJstDay,undefined,
     'QuizKnock must not be restricted to a particular weekday');
 });
+
+test('Zenn RSS enclosure URL is used as a validated article thumbnail', () => {
+  const prefix = '<?xml version="1.0"?><rss><channel><item><title>Graph algorithms</title>' +
+    '<link>https://zenn.dev/nasu/articles/test-graph</link>' +
+    '<guid>https://zenn.dev/nasu/articles/test-graph</guid>' +
+    '<pubDate>Tue, 13 Oct 2026 01:00:00 GMT</pubDate>';
+  const finish = '</item></channel></rss>';
+  const original = prefix +
+    '<enclosure url="https://res.cloudinary.com/zenn/image/upload/graph.png?x=1&amp;y=2" length="0" type="false"/>' +
+    finish;
+  const works = parseZenn(original);
+  assert.equal(works.length, 1);
+  assert.equal(works[0]?.imageUrl,
+    'https://res.cloudinary.com/zenn/image/upload/graph.png?x=1&y=2');
+
+  const otherOrder = prefix +
+    '<enclosure type="false" length="0" url="//res.cloudinary.com/zenn/image/upload/other.png"/>' + finish;
+  assert.equal(parseZenn(otherOrder)[0]?.imageUrl,
+    'https://res.cloudinary.com/zenn/image/upload/other.png');
+
+  for (const bad of [
+    'http://localhost/evil', 'https://127.0.0.1/evil', 'javascript:alert(1)',
+  ]) {
+    assert.equal(parseZenn(prefix + '<enclosure url="' + bad + '" />' + finish)[0]?.imageUrl,
+      undefined, bad);
+  }
+  const fake = prefix +
+    '<!-- <enclosure url="https://example.com/false.png" /> -->' + finish;
+  assert.equal(parseZenn(fake)[0]?.imageUrl, undefined);
+});
