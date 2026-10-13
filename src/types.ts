@@ -28,6 +28,8 @@ export interface Env {
   DB: Database;
   /** Optional complete private monitor configuration as a Worker Secret. */
   MONITOR_CONFIG_JSON?: string;
+  /** Optional private JST delivery hours, e.g. 09:00-20:00; unset = 24h. */
+  NOTIFICATION_WINDOW_JST?: string;
   DISCORD_WEBHOOK_QIITA?: string;
   DISCORD_WEBHOOK_WIKIPEDIA?: string;
   DISCORD_WEBHOOK_ARXIV?: string;

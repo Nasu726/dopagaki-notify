@@ -1,5 +1,6 @@
 import type { Database, Delivery, MonitorState, ContentItem, SourceName } from './types.ts';
 import { isJstNotificationTime } from './schedule.ts';
+import type { NotificationWindowJst } from './schedule.ts';
 import { DELIVERY_RETENTION_MS } from './maintenance.ts';
 
 export const LEASE_MS = 120_000;
@@ -61,13 +62,14 @@ export async function assertMonitorIdentity(
 const MONITOR_SELECT_BATCH = 40;
 export async function getRunnableIds(
   db: Database, now: number, enabled: readonly { id: string; source: SourceName }[],
+  deliveryWindow: NotificationWindowJst | null = null,
 ): Promise<string[]> {
   if (!enabled.length) return [];
   type Row = {
     id: string; existing_id: string | null; next_due_at: number | null;
     lease_until: number | null; pending_due: number;
   };
-  const deliveryAllowed = isJstNotificationTime(now);
+  const deliveryAllowed = isJstNotificationTime(now, deliveryWindow);
   const all: Row[] = [];
   for (let offset = 0; offset < enabled.length; offset += MONITOR_SELECT_BATCH) {
     const batch = enabled.slice(offset, offset + MONITOR_SELECT_BATCH);

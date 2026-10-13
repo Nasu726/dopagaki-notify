@@ -1,6 +1,6 @@
 import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue } from './schedule.ts';
 import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
-import { validateMonitors } from './config.ts';
+import { validateMonitors, resolveNotificationWindowJst } from './config.ts';
 import { logFailure } from './observability.ts';
 import { hasWebhookSecret, notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
@@ -62,12 +62,15 @@ export async function runTick(
   env: Env, monitors: readonly Monitor[], now = Date.now(), deps: Dependencies = defaults,
 ): Promise<'idle' | 'processed' | 'busy'> {
   validateMonitors(monitors);
+  const deliveryWindow = resolveNotificationWindowJst(
+    env.MONITOR_CONFIG_JSON, env.NOTIFICATION_WINDOW_JST,
+  );
   // An enabled monitor without its Cloudflare Discord Secret remains dormant:
   // no D1 initialization or recurrent failing lease attempts.
   const enabled = new Map(monitors.filter((monitor) => monitor.enabled && hasWebhookSecret(monitor, env))
     .map((monitor) => [monitor.id, monitor]));
   if (!enabled.size) return 'idle';
-  const runnable = (await getRunnableIds(env.DB, now, [...enabled.values()]))
+  const runnable = (await getRunnableIds(env.DB, now, [...enabled.values()], deliveryWindow))
     .map((id) => enabled.get(id)).find(Boolean);
   if (!runnable) return 'idle';
   const token = deps.randomId();
@@ -178,16 +181,16 @@ export async function runTick(
     }
     phase = 'prepare_delivery';
     const webhook = webhookFor(runnable, env);
-    // Continue polling sources at night, but leave outgoing notifications
-    // queued until the next 09:00-20:00 JST delivery window.
+    // Poll sources independently of delivery hours. If an optional delivery
+    // window is configured, preserve queued notifications until it reopens.
     const deliveryNow = deps.clock?.() ?? now;
-    const pending = !isJstNotificationTime(deliveryNow) || state.webhook_cooldown_until > now ||
+    const pending = !isJstNotificationTime(deliveryNow, deliveryWindow) || state.webhook_cooldown_until > now ||
       state.webhook_blocked_status !== null || (wikipedia && !wikipediaFetchSucceeded)
       ? [] : await getPending(env.DB, runnable.id, now, discovery ? 2 : MAX_NOTIFICATIONS_PER_TICK,
         wikipedia ? wikipediaCutoff : undefined);
     for (const item of pending) {
-      // A slow upstream fetch may have crossed 20:00 JST since the tick began.
-      if (!isJstNotificationTime(deps.clock?.() ?? now)) break;
+      // A slow upstream fetch may have crossed the configured delivery cutoff.
+      if (!isJstNotificationTime(deps.clock?.() ?? now, deliveryWindow)) break;
       phase = 'discord_send';
       try {
         await deps.send(webhook, runnable.source, {

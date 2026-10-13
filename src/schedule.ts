@@ -1,9 +1,32 @@
 // Japan Standard Time is UTC+9 year-round (no DST).
 const JST_OFFSET_MINUTES = 9 * 60;
 const DAY_MINUTES = 24 * 60;
-export function isJstNotificationTime(now: number): boolean {
+
+/** End-exclusive optional local-time delivery window. null means 24-hour sending. */
+export interface NotificationWindowJst {
+  readonly startMinutes: number;
+  readonly endMinutes: number;
+}
+
+export function parseNotificationWindowJst(value: unknown): NotificationWindowJst | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') throw new Error('Notification window must be HH:MM-HH:MM or null');
+  const match = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  if (!match) throw new Error('Notification window must be HH:MM-HH:MM (JST)');
+  const startMinutes = Number(match[1]) * 60 + Number(match[2]);
+  const endMinutes = Number(match[3]) * 60 + Number(match[4]);
+  if (startMinutes === endMinutes)
+    throw new Error('Notification window start and end must differ (use null for 24-hour sending)');
+  return { startMinutes, endMinutes };
+}
+
+export function isJstNotificationTime(now: number, window: NotificationWindowJst | null = null): boolean {
+  if (window === null) return true;
   const minutes = ((Math.floor(now / 60_000) + JST_OFFSET_MINUTES) % DAY_MINUTES + DAY_MINUTES) % DAY_MINUTES;
-  return minutes >= 9 * 60 && minutes < 20 * 60;
+  const { startMinutes, endMinutes } = window;
+  return startMinutes < endMinutes
+    ? minutes >= startMinutes && minutes < endMinutes
+    : minutes >= startMinutes || minutes < endMinutes;
 }
 
 /** Weekday schedule uses JST (UTC+9, no daylight-saving transition). */

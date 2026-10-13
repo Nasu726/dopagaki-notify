@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { runTick } from '../src/runner.ts';
 import { HttpStatusError } from '../src/http.ts';
-import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue } from '../src/schedule.ts';
+import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue, parseNotificationWindowJst } from '../src/schedule.ts';
 import { DELIVERY_RETENTION_MS, PRUNE_BATCH_SIZE, pruneSentDeliveries } from '../src/maintenance.ts';
 import Worker from '../src/index.ts';
 import { MONITORS, validateMonitors, withIntervals } from '../src/config.ts';
@@ -641,12 +641,13 @@ test('JST notification window is 09:00 inclusive and 20:00 exclusive', () => {
     ['2026-10-13T10:59:59Z', true],  // 19:59 JST
     ['2026-10-13T11:00:00Z', false], // 20:00 JST
   ] as const) {
-    assert.equal(isJstNotificationTime(Date.parse(utc)), allowed, utc);
+    assert.equal(isJstNotificationTime(Date.parse(utc), parseNotificationWindowJst('09:00-20:00')), allowed, utc);
   }
 });
 
 test('night scans still enqueue new articles but do not post or spin; morning drains backlog', async () => {
   const s = setup();
+  s.env.NOTIFICATION_WINDOW_JST = '09:00-20:00';
   const day = Date.parse('2026-10-12T10:00:00Z'); // 19:00 JST
   await runTick(s.env, [qiita], day, s.deps); // baseline
   s.setItems([item('after-baseline', day + 30 * 60_000)]);
@@ -655,7 +656,7 @@ test('night scans still enqueue new articles but do not post or spin; morning dr
   assert.deepEqual(s.sent, [], 'night-time API discoveries must remain queued');
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:after-baseline'").get()?.status,
     'pending');
-  assert.deepEqual(await getRunnableIds(s.env.DB, night + 60_000, [qiita]), [],
+  assert.deepEqual(await getRunnableIds(s.env.DB, night + 60_000, [qiita], parseNotificationWindowJst('09:00-20:00')), [],
     'pending-only deliveries should not cause an every-minute night-time loop');
   const morning = Date.parse('2026-10-13T00:00:00Z'); // 09:00 JST
   assert.equal(await runTick(s.env, [qiita], morning, s.deps), 'processed');
@@ -709,6 +710,7 @@ test('retention Cron deletes only 20 expired sent receipts per invocation', asyn
 
 test('a long fetch crossing 20:00 JST never initiates a Discord POST', async () => {
   const s = setup();
+  s.env.NOTIFICATION_WINDOW_JST = '09:00-20:00';
   const baseline = Date.parse('2026-10-12T09:59:00Z'); // 18:59 JST
   await runTick(s.env, [qiita], baseline, s.deps);
   s.setItems([item('crossing', baseline + 60_000)]);
@@ -887,6 +889,7 @@ test('Sunday YouTube API failure retries on Sunday then resumes hourly; off-day 
 
 test('pending YouTube notifications can be sent next morning even outside fetch weekday', async () => {
   const s = setup();
+  s.env.NOTIFICATION_WINDOW_JST = '09:00-20:00';
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
   const monitor = MONITORS.find((m) => m.id === 'youtube-yurugengo')!;
   const tuesday = Date.parse('2026-10-13T10:00:00Z'); // Tue 19:00 JST

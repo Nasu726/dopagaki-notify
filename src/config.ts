@@ -3,7 +3,8 @@ import targets from '../config/targets.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
 import { normalizeChannelReference } from './sources/youtube.ts';
 import { zennFeedUrl } from './sources/zenn.ts';
-import { isWeeklyJstDay } from './schedule.ts';
+import { isWeeklyJstDay, parseNotificationWindowJst } from './schedule.ts';
+import type { NotificationWindowJst } from './schedule.ts';
 
 // All per-monitor intervals remain in config/intervals.json.
 // Configure any number of Qiita searches, Zenn feeds, arXiv category groups,
@@ -90,6 +91,27 @@ export const MONITORS: readonly Monitor[] = withIntervals(definitions, intervals
  */
 function objectRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+
+/** Override order: deployment Secret > private monitor JSON > public sample JSON.
+ * Absence or null means unrestricted notifications, including at night.
+ * The deployment Secret lets a public fork or the maintainer customize this
+ * without committing personal preferences or replacing all monitor targets.
+ */
+export function resolveNotificationWindowJst(
+  privateConfigJson: string | undefined, secret: string | undefined,
+): NotificationWindowJst | null {
+  if (secret !== undefined) return parseNotificationWindowJst(secret);
+  if (privateConfigJson !== undefined) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(privateConfigJson); }
+    catch { throw new Error('MONITOR_CONFIG_JSON contains invalid JSON'); }
+    if (!objectRecord(parsed)) throw new Error('MONITOR_CONFIG_JSON must be an object');
+    try { return parseNotificationWindowJst(parsed.notificationWindowJst); }
+    catch { throw new Error('MONITOR_CONFIG_JSON has an invalid notificationWindowJst'); }
+  }
+  return parseNotificationWindowJst(targets.notificationWindowJst);
 }
 
 export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[] {
