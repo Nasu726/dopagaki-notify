@@ -170,3 +170,52 @@ test('Zenn RSS-unavailable fallback still uses article HTML OG image and sends',
   assert.deepEqual(requested,['/tester/feed','/tester/articles/test-article','/api/webhooks/123456789/token']);
   assert.equal(sent[0]?.embeds[0]?.image?.url,image);
 });
+
+
+test('Qiita author avatar appears as small thumbnail when HTML OGP is blocked', async () => {
+  const avatar='https://s3-ap-northeast-1.amazonaws.com/qiita-image-store/0/photo.png';
+  const article={id:'qiita:abc',url:qiita,title:'Rust on Qiita',publishedAt:Date.now(),
+    thumbnailUrl:avatar};
+  let posted: any=null;
+  await notifyDiscordWithArticleThumbnails(webhook,'qiita',article,async(input,init)=>{
+    const url=new URL(String(input));
+    if(url.hostname==='qiita.com')return new Response('forbidden',{status:403});
+    posted=JSON.parse(String(init?.body));
+    return Response.json({id:'sent'});
+  });
+  assert.equal(posted.embeds[0].image,undefined);
+  assert.equal(posted.embeds[0].thumbnail.url,avatar);
+  assert.equal(posted.embeds[0].url,qiita);
+});
+
+test('Qiita OGP takes precedence over fallback avatar if image metadata is available', async () => {
+  const avatar='https://s3-ap-northeast-1.amazonaws.com/qiita-image-store/0/photo.png';
+  const main='https://qiita-user-contents.imgix.net/sample.png';
+  const article={id:'qiita:abc',url:qiita,title:'Rust on Qiita',publishedAt:Date.now(),
+    thumbnailUrl:avatar};
+  let posted: any=null;
+  await notifyDiscordWithArticleThumbnails(webhook,'qiita',article,async(input,init)=>{
+    const url=new URL(String(input));
+    if(url.hostname==='qiita.com')return page('<head><meta property="og:image" content="'+main+'"></head>');
+    posted=JSON.parse(String(init?.body));
+    return Response.json({id:'sent'});
+  });
+  assert.equal(posted.embeds[0].image.url,main);
+  assert.equal(posted.embeds[0].thumbnail,undefined);
+});
+
+test('Qiita oversized OGP falls back to avatar instead of posting broken Discord image', async () => {
+  const avatar='https://s3-ap-northeast-1.amazonaws.com/qiita-image-store/0/photo.png';
+  const tooLong='https://qiita-user-contents.imgix.net/img.png?t='+('a'.repeat(2300));
+  const article={id:'qiita:abc',url:qiita,title:'Rust on Qiita',publishedAt:Date.now(),
+    thumbnailUrl:avatar};
+  let posted:any=null;
+  await notifyDiscordWithArticleThumbnails(webhook,'qiita',article,async(input,init)=>{
+    const url=new URL(String(input));
+    if(url.hostname==='qiita.com')return page('<head><meta property="og:image" content="'+tooLong+'"></head>');
+    posted=JSON.parse(String(init?.body));
+    return Response.json({id:'sent'});
+  });
+  assert.equal(posted.embeds[0].image,undefined);
+  assert.equal(posted.embeds[0].thumbnail.url,avatar);
+});
