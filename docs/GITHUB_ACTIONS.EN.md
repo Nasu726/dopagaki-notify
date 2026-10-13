@@ -58,3 +58,8 @@ The Actions backend and Cloudflare D1 **do not share their notification history*
 ## Optional YouTube Data API
 
 Register an optional GitHub Actions **Secret `YOUTUBE_API_KEY`** from a Google Cloud project with YouTube Data API v3 enabled to use the official API instead of RSS. Without a key, RSS remains the default. This uses `channels.list` and `playlistItems.list`, shares the same ID-based sent history, and reports API errors rather than silently falling back to RSS. YouTube sent receipts are retained indefinitely to prevent re-notification of old latest videos.
+
+
+## OpenAlex papers
+
+Add `{"id":"oa-graph","query":"search:graph algorithms","enabled":true}` to `targets.openalex` in the private config, plus its interval in `intervals`. Set the **`DISCORD_WEBHOOK_OPENALEX` GitHub Actions Secret**. An optional free **`OPENALEX_API_KEY` Secret** increases the request budget; keyless low-volume API access works too. Supported monitor queries are `search:terms`, `topic:T12345`, `author:A12345`. Initial result IDs are silently marked ignored; later unseen IDs published within the last seven days may notify (up to 25 works per poll).
