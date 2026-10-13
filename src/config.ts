@@ -135,23 +135,28 @@ export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[
       }
     }
   }
-  const definitions: Omit<Monitor, 'intervalMinutes'>[] = [
-    ...queryMonitorsFromTargets('qiita', targetsBySource.qiita as unknown as QueryTarget[]),
-    ...(raw.wikipediaEnabled === false ? [] : [{
-      id: 'wikipedia-ja-discovery', source: 'wikipedia' as const,
-      query: 'ja:discover', enabled: true,
-    }]),
-    ...(targetsBySource.arxiv ?? []).map((target) => ({
-      id: target.id as string, source: 'arxiv' as const,
-      query: arxivCategoryQuery(target.categories as string[]),
-      enabled: target.enabled as boolean,
-    })),
-    ...queryMonitorsFromTargets('zenn', targetsBySource.zenn as unknown as QueryTarget[]),
-    ...youtubeMonitorsFromTargets(targetsBySource.youtube as unknown as YouTubeTarget[]),
-  ];
-  const result = withIntervals(definitions, raw.intervals);
-  validateMonitors(result);
-  return result;
+  // Do not echo names/queries from a private Secret into exception logs.
+  try {
+    const definitions: Omit<Monitor, 'intervalMinutes'>[] = [
+      ...queryMonitorsFromTargets('qiita', targetsBySource.qiita as unknown as QueryTarget[]),
+      ...(raw.wikipediaEnabled === false ? [] : [{
+        id: 'wikipedia-ja-discovery', source: 'wikipedia' as const,
+        query: 'ja:discover', enabled: true,
+      }]),
+      ...(targetsBySource.arxiv ?? []).map((target) => ({
+        id: target.id as string, source: 'arxiv' as const,
+        query: arxivCategoryQuery(target.categories as string[]),
+        enabled: target.enabled as boolean,
+      })),
+      ...queryMonitorsFromTargets('zenn', targetsBySource.zenn as unknown as QueryTarget[]),
+      ...youtubeMonitorsFromTargets(targetsBySource.youtube as unknown as YouTubeTarget[]),
+    ];
+    const result = withIntervals(definitions, raw.intervals);
+    validateMonitors(result);
+    return result;
+  } catch {
+    throw new Error('MONITOR_CONFIG_JSON has invalid target values or intervals');
+  }
 }
 
 export function validateMonitors(monitors: readonly Monitor[]): void {
