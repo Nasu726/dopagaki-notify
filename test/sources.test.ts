@@ -315,10 +315,12 @@ test('Discord YouTube embeds include a video thumbnail while other sources remai
     url:'https://www.youtube.com/watch?v=XkD2XZSerCg',publishedAt:Date.now() };
   await notifyDiscord(discordWebhook,'youtube',video,post);
   await notifyDiscord(discordWebhook,'qiita',{...video,id:'qiita:abcd'},post);
-  const yt = payloads[0] as {embeds: {image?:{url:string}}[]};
-  const qiita = payloads[1] as {embeds:{image?:{url:string}}[]};
-  assert.equal(yt.embeds[0]?.image?.url,'https://i.ytimg.com/vi/XkD2XZSerCg/hqdefault.jpg');
+  const yt = payloads[0] as {embeds: {thumbnail?:{url:string};image?:{url:string}}[]};
+  const qiita = payloads[1] as {embeds:{thumbnail?:{url:string};image?:{url:string}}[]};
+  assert.equal(yt.embeds[0]?.thumbnail?.url,'https://i.ytimg.com/vi/XkD2XZSerCg/hqdefault.jpg');
+  assert.equal(yt.embeds[0]?.image,undefined);
   assert.equal(qiita.embeds[0]?.image,undefined);
+  assert.equal(qiita.embeds[0]?.thumbnail,undefined);
 });
 
 test('QuizKnock runs every day hourly with a pinned immutable channel ID', () => {
