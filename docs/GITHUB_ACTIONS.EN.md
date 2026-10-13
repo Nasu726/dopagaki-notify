@@ -19,6 +19,8 @@ This opt-in template reuses the same monitoring, scheduling and Discord delivery
 
 The template schedules runs at UTC minutes 07, 17, 27, 37, 47 and 57 (every 10 minutes, best effort). **Delivery is unrestricted by default**. Optionally set `notificationWindowJst` to `"09:00-20:00"` in `MONITOR_CONFIG_JSON`, or register `NOTIFICATION_WINDOW_JST` as an Actions Secret containing `09:00-20:00`; the dedicated Secret takes precedence. Times are JST with an exclusive end. Source polling continues outside the optional delivery window.
 
+When Wikipedia is enabled, the Wikimedia User-Agent defaults to the current fork's `GITHUB_REPOSITORY` as its operator contact. To use a different contact URL, set `WIKIMEDIA_CONTACT_URL` as a GitHub Actions **Variable** containing a public HTTPS URL. No Wikimedia API key is required.
+
 ## How private state works
 
 An Actions hosted runner does not retain files between jobs. This template connects `src/index.ts` and `src/runner.ts` to Node's built-in `node:sqlite`. It encrypts the completed SQLite file using **AES-256-GCM**, stores the ciphertext only in an Action Artifact called `notifier-state`, and decrypts the newest previous artifact on the next run. The upload sets `include-hidden-files: true` for the exact encrypted file, because GitHub otherwise ignores files under the hidden `.private/` folder.

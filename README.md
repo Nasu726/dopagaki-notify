@@ -73,6 +73,14 @@ npx wrangler secret put NOTIFICATION_WINDOW_JST
 
 公開フォークに自分の興味・購読先を掲載したくない場合は、下記の **「設定を非公開にする」** を利用してください。GitHub 上の公開 JSON を編集する必要はありません。
 
+### Wikipedia の User-Agent (フォーク利用者向け)
+
+Wikipedia の API は自動アクセス元のアプリ名と、運用者へ連絡できる情報を User-Agent に含めるよう求めています。リポジトリにはアプリ名 `dopagaki-notify/0.1` と作者の連絡先が初期値として設定されていますが、**フォークして Wikipedia を有効にする場合は、運用者自身の連絡先に変更してください**。
+
+Cloudflare Workers の **Settings → Variables and Secrets** で通常の Variable `WIKIMEDIA_CONTACT_URL` を追加し、値に `https://github.com/YOUR_USERNAME/dopagaki-notify` などの公開 HTTPS URL を指定します。メールアドレス・API キーは不要です。この値から `User-Agent` と `Api-User-Agent` の両方を自動構築します。
+
+既存の作者環境では未設定でも元の連絡先が使われ、動作は変わりません。GitHub Actions 版は、指定が無い場合、自分のフォークの `GITHUB_REPOSITORY` から連絡先 URL を自動設定します。
+
 ## 2. Cloudflare Workers に導入する(対応済み)
 
 **必要なもの:** Node.js 22 以上、Cloudflare アカウント、Discord の通知先チャンネルと Webhook。Cloudflare の利用枠と料金条件は事前に確認してください。まず GitHub 上でこのリポジトリを Fork し、そのフォークを clone します。フォークせずローカルで試す場合は、元リポジトリを clone しても構いません。

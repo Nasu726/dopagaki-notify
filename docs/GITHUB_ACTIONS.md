@@ -25,6 +25,8 @@
 
 定期実行は UTC の毎時07・17・27・37・47・57分 (10分間隔) に設定されています。実際の起動はベストエフォートです。**既定では通知時間帯に制限はありません**。個人設定だけで制限するには、`MONITOR_CONFIG_JSON` に `"notificationWindowJst": "09:00-20:00"` を追加するか、別の Actions Secret `NOTIFICATION_WINDOW_JST` に値 `09:00-20:00` を登録してください。時間帯の指定は JST、終了時刻は除外です。時間帯外にも取得・キュー保存は行われます。
 
+Wikipedia を有効にした場合、API リクエストの User-Agent はフォーク先の `GITHUB_REPOSITORY` を連絡先として自動構築します。別の連絡先を使いたいときは GitHub Actions の **Variables** に `WIKIMEDIA_CONTACT_URL` (公開 HTTPS URL) を設定してください。Secret は不要です。
+
 ## 状態の保存とプライバシー
 
 GitHub-hosted runner のローカルファイルは実行後に消えるため、Node.js `node:sqlite` で作成した DB を **AES-256-GCM で暗号化して** GitHub Actions Artifact `notifier-state` に保存します。次のジョブは最新の Artifact を復元し、復号して実行します。ローカルの平文 DB は Artifact に含めません。アップロード対象は暗号化済み `.private/notify-state.enc` の1ファイルのみです。`actions/upload-artifact@v4` が隠しディレクトリを通常除外するため、テンプレートでは `include-hidden-files: true` を指定しています。

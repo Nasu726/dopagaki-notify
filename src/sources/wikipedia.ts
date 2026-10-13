@@ -5,10 +5,32 @@ import type { ContentItem, Monitor } from '../types.ts';
 // disabled for Wikipedia to bound both alerts and D1 operations.
 export const WIKIPEDIA_SAMPLE_SIZE = 3;
 
-// Wikimedia requires a descriptive bot User-Agent with contact information.
-// This repository's issue tracker is the publicly reachable operator contact.
+// An existing owner deployment keeps working without a new setting.
+// Operators of forks should set WIKIMEDIA_CONTACT_URL to their own reachable
+// URL; identifying upstream code authors as the operator of every fork is wrong.
+const DEFAULT_WIKIMEDIA_CONTACT_URL = 'https://github.com/Nasu726/dopagaki-notify';
 export const WIKIMEDIA_USER_AGENT =
-  'dopagaki-notify/0.1 (https://github.com/Nasu726/dopagaki-notify)';
+  'dopagaki-notify/0.1 (' + DEFAULT_WIKIMEDIA_CONTACT_URL + ')';
+
+/** Wikimedia expects an identifiable application and an operator contact.
+ * Accept a contact HTTPS URL only; reject control chars/header injection and
+ * unsafe schemes. An unset value preserves the original deployment.
+ */
+export function wikimediaUserAgent(contactUrl?: string): string {
+  if (contactUrl === undefined || contactUrl === '') return WIKIMEDIA_USER_AGENT;
+  if (contactUrl.length > 256 || !/^[\x21-\x7e]+$/.test(contactUrl) ||
+      /[()\\]/.test(contactUrl)) {
+    throw new Error('Invalid WIKIMEDIA_CONTACT_URL: expected a short HTTPS URL');
+  }
+  let parsed: URL;
+  try { parsed = new URL(contactUrl); }
+  catch { throw new Error('Invalid WIKIMEDIA_CONTACT_URL: expected a HTTPS URL'); }
+  if (parsed.protocol !== 'https:' || !parsed.hostname ||
+      parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('Invalid WIKIMEDIA_CONTACT_URL: expected a HTTPS URL without credentials, query or fragment');
+  }
+  return 'dopagaki-notify/0.1 (' + parsed.href + ')';
+}
 
 interface RecentChange {
   type: string;
@@ -41,6 +63,7 @@ export function parseNewPages(raw: unknown, language: string): ContentItem[] {
 
 export async function fetchWikipedia(
   monitor: Monitor, fetcher: typeof fetch = fetch, _cursor?: string | null,
+  contactUrl?: string,
 ): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor?: string | null }> {
   const language = monitor.query.trim().toLowerCase();
   if (!/^[a-z]{2,12}(?:-[a-z]{2,12})?$/.test(language))
@@ -53,9 +76,10 @@ export async function fetchWikipedia(
   })) url.searchParams.set(key, value);
   // Ignore legacy pagination cursors; always use the current newest page.
 
+  const userAgent = wikimediaUserAgent(contactUrl);
   const response = await fetcher(url, {
-    headers: { Accept: 'application/json', 'User-Agent': WIKIMEDIA_USER_AGENT,
-      'Api-User-Agent': WIKIMEDIA_USER_AGENT }, signal: AbortSignal.timeout(15_000),
+    headers: { Accept: 'application/json', 'User-Agent': userAgent,
+      'Api-User-Agent': userAgent }, signal: AbortSignal.timeout(15_000),
   });
   requireSuccess(response, 'MediaWiki');
   const raw = await response.json();
@@ -114,17 +138,17 @@ function randomSubset<T>(items: readonly T[], limit: number): T[] {
   }
   return shuffled.slice(0, limit);
 }
-async function wikiJson(url: URL, fetcher: typeof fetch): Promise<unknown> {
+async function wikiJson(url: URL, fetcher: typeof fetch, userAgent: string): Promise<unknown> {
   const response = await fetcher(url, {
-    headers: { Accept: 'application/json', 'User-Agent': WIKIMEDIA_USER_AGENT,
-      'Api-User-Agent': WIKIMEDIA_USER_AGENT },
+    headers: { Accept: 'application/json', 'User-Agent': userAgent,
+      'Api-User-Agent': userAgent },
     signal: AbortSignal.timeout(15_000),
   });
   requireSuccess(response, 'MediaWiki');
   return response.json();
 }
 export async function fetchWikipediaDiscovery(
-  monitor: Monitor, fetcher: typeof fetch = fetch,
+  monitor: Monitor, fetcher: typeof fetch = fetch, contactUrl?: string,
 ): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor: null }> {
   const match = /^([a-z]{2,12}(?:-[a-z]{2,12})?):discover$/.exec(monitor.query.trim().toLowerCase());
   if (!match) throw new Error('Invalid Wikipedia discovery query');
@@ -143,8 +167,9 @@ export async function fetchWikipediaDiscovery(
     rnminsize: String(RANDOM_MIN_BYTES),
     rnlimit: String(DISCOVERY_CANDIDATES_PER_KIND),
   })) random.searchParams.set(key, value);
+  const userAgent = wikimediaUserAgent(contactUrl);
   const [featuredData, randomData] = await Promise.all([
-    wikiJson(featured, fetcher), wikiJson(random, fetcher),
+    wikiJson(featured, fetcher, userAgent), wikiJson(random, fetcher, userAgent),
   ]);
   const curated = discoveryCandidates(featuredData, 'categorymembers', lang, 'featured');
   const candidates = discoveryCandidates(randomData, 'random', lang, 'random');
