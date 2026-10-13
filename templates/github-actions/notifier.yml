@@ -38,7 +38,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --ignore-scripts
+      # No npm install: the runtime imports only local files and Node 22+
+      # built-in APIs. Keep TypeScript/Wrangler installation in CI only.
       - id: restore
         name: Restore encrypted SQLite checkpoint
         env:
