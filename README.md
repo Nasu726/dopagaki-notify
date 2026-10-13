@@ -228,6 +228,8 @@ npm run smoke -- --monitor=youtube-quizknock
 
 ### 安全な診断コマンド
 
+**本番で取得を前倒し:** `npm run poll:request -- --monitor=youtube-quizknock` はSQLのプレビューのみ。`--confirm-remote` を付けたときだけCloudflare D1の`next_due_at`を更新し、**次のCron**での取得を依頼します。直ちにWorkerが実行されるわけではありません。既存の送信済み履歴は残ります。[本番実行の手順](docs/PRODUCTION_POLL.md)。
+
 **手動取得:** `npm run smoke -- --monitor=ID` はその場で実際の情報源を1回取得しますが、**本番Cloudflare環境ではありません**。デフォルトでDiscord送信もD1変更も行いません。明示的な`--send-test --confirm-send`を**両方指定した場合のみ**、ローカル環境のWebhookで`[TEST]`通知を1件送信します。詳しくは[手動スモークテスト](docs/MANUAL_SMOKE.md)。
 
 **Discord画像:** ローカルの非公開`DISCORD_WEBHOOK_YOUTUBE`を設定し、すでに届いたメッセージのリンクを渡します。

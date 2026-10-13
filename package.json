@@ -15,7 +15,8 @@
     "config:check": "node --experimental-strip-types ops/config-preflight.mjs",
     "predeploy": "npm run config:check",
     "smoke": "node --experimental-strip-types ops/manual-smoke.mjs",
-    "inspect:discord": "node ops/inspect-discord-embed.mjs"
+    "inspect:discord": "node ops/inspect-discord-embed.mjs",
+    "poll:request": "node ops/request-production-poll.mjs"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

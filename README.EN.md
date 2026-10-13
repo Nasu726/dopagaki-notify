@@ -228,6 +228,8 @@ npm run smoke -- --monitor=youtube-quizknock
 
 ### Safe diagnostic commands
 
+**Bring forward the production scan:** `npm run poll:request -- --monitor=youtube-quizknock` previews guarded SQL. Add `--confirm-remote` to update only the selected monitor's D1 due time and request fetching on the **next Cron**; it does not run the Worker immediately or reset sent receipts. [Production polling guide](docs/PRODUCTION_POLL.md).
+
 **One-off fetch:** `npm run smoke -- --monitor=ID` fetches a real snapshot **from your local machine**, not the deployed Cloudflare runtime. Default mode does not access D1 or send Discord messages. Both `--send-test --confirm-send` must be supplied to send one explicitly labeled `[TEST]` notification using your local webhook Secret. See [manual smoke guide](docs/MANUAL_SMOKE.md).
 
 **Discord thumbnail investigation:** Supply the private `DISCORD_WEBHOOK_YOUTUBE` to your local environment, then inspect the **link of an already delivered** Discord notification:
