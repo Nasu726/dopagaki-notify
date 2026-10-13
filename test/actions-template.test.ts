@@ -22,7 +22,7 @@ test('AES-GCM encrypted SQLite snapshots round-trip and reject tampering or wron
   assert.throws(() => decryptState(changed, key), /decrypt|authenticate/);
   assert.throws(() => decryptState(ciphertext, randomBytes(32)), /decrypt|authenticate/);
   assert.throws(() => parseKey('short'), /64 hexadecimal/);
-  assert.deepEqual(parseKey('  ' + '33'.repeat(32) + '\\n'), Buffer.from('33'.repeat(32), 'hex'));
+  assert.deepEqual(parseKey('  ' + '33'.repeat(32) + '\n'), Buffer.from('33'.repeat(32), 'hex'));
 });
 
 test('SQLite port runs real bundled migrations and persists the same scheduler state', async () => {
