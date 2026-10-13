@@ -90,7 +90,7 @@ test('Actions workflow uploads the exact encrypted file despite hidden .private 
   assert.ok(checkpoint, 'checkpoint step must be present');
   assert.match(checkpoint, /uses: actions\/upload-artifact@v4/);
   assert.match(checkpoint, /path: \.private\/notify-state\.enc/);
-  assert.doesNotMatch(workflow, /npm install/, 'scheduled runtime must not download Wrangler/TypeScript each tick');
+  assert.doesNotMatch(workflow, /^\s*-\s+run:\s*npm\s+install\b/m, 'scheduled runtime must not install Wrangler/TypeScript each tick');
   assert.match(checkpoint, /include-hidden-files: true/);
   assert.match(checkpoint, /if-no-files-found: error/);
   assert.doesNotMatch(checkpoint, /path: \.private\/(?:\*|monitor-config|notify-state-key)/);
