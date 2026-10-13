@@ -8,13 +8,18 @@
 
 1. GitHub でリポジトリをフォークして clone し、Node.js 22 以上を用意。
 2. `npm install`、`npm run check` を実行。
-3. `npm run setup:actions` を実行。コピー先は `.github/workflows/notifier.yml`、購読設定は `.private/monitor-config.json`。どちらも既存ファイルは上書きしません。
+3. `npm run setup:actions` を実行。テンプレート `.github/workflows/notifier.yml`、汎用サンプル `.private/monitor-config.json`、32バイトの乱数鍵 `.private/notify-state-key.txt` を生成します。既存ファイル・鍵は上書きしません。
 4. `.private/monitor-config.json` を編集。これは、公開用 `config/targets.json` と `config/intervals.json` をまとめたオブジェクトです。Wikipedia が不要なら `wikipediaEnabled: false` とし、その ID に対応する間隔も削除。監視 `id` と間隔は必ず整合させます。
 5. GitHub の **Settings → Secrets and variables → Actions** で次の Secrets を追加:
    - **`MONITOR_CONFIG_JSON`** : 上記 JSON 全文
-   - **`NOTIFY_STATE_KEY`** : `node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"` で生成した64桁16進数
+   - **`NOTIFY_STATE_KEY`** : セットアップで生成した `.private/notify-state-key.txt` の64桁16進数
    - **`DISCORD_WEBHOOK_QIITA` / `_ZENN` / `_ARXIV` / `_YOUTUBE` / `_WIKIPEDIA`** : 使用する情報源に対応する Discord Webhook URL
-6. 必要に応じて `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` を使用できます。GitHub CLI は事前に `gh auth login` が必要です。
+6. GitHub CLI があれば `gh auth login` 後、以下で設定を表示せずに2つの Secret を登録できます (Discord Webhook は別途登録してください)。
+
+   ```sh
+   gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
+   gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
+   ```
 7. **Secrets の登録後**、`.github/workflows/notifier.yml` をコミットして push。テンプレートをコピーするまでは通知ワークフローが有効になりません。
 8. GitHub の Actions タブから `Discord notifier (SQLite)` を選び **Run workflow** を1回実行。初回は過去の記事・動画を通知せず基準時刻を記録します。
 
@@ -22,7 +27,7 @@
 
 ## 状態の保存とプライバシー
 
-GitHub-hosted runner のローカルファイルは実行後に消えるため、Node.js `node:sqlite` で作成した DB を **AES-256-GCM で暗号化して** GitHub Actions Artifact `notifier-state` に保存します。次のジョブは最新の Artifact を復元し、復号して実行します。ローカルの平文 DB は Artifact に含めません。
+GitHub-hosted runner のローカルファイルは実行後に消えるため、Node.js `node:sqlite` で作成した DB を **AES-256-GCM で暗号化して** GitHub Actions Artifact `notifier-state` に保存します。次のジョブは最新の Artifact を復元し、復号して実行します。ローカルの平文 DB は Artifact に含めません。アップロード対象は暗号化済み `.private/notify-state.enc` の1ファイルのみです。`actions/upload-artifact@v4` が隠しディレクトリを通常除外するため、テンプレートでは `include-hidden-files: true` を指定しています。
 
 次のチェックポイントのアップロードが成功した後に、以前の Artifact を削除します。アップロードが失敗した場合、旧 Artifact を残すので次回の再実行が可能です。失敗した監視処理でも、再試行時刻や未送信通知を保存した後に Artifact をアップロードします。
 

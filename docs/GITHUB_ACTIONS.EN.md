@@ -7,13 +7,13 @@ This opt-in template reuses the same monitoring, scheduling and Discord delivery
 ## Setup
 
 1. Fork and clone the repository, install Node.js 22+, and run `npm install` and `npm run check`.
-2. Run `npm run setup:actions`. This copies the template to `.github/workflows/notifier.yml` and writes a gitignored `.private/monitor-config.json`. It preserves any existing files.
+2. Run `npm run setup:actions`. It copies the workflow template, creates a gitignored generic `.private/monitor-config.json` and generates a random `.private/notify-state-key.txt`. Existing files and keys are never overwritten.
 3. Edit the private JSON to your desired targets and intervals. Remove unwanted sources, keep every target ID matched to an interval, and set `wikipediaEnabled: false` (and remove its interval) if not wanted.
 4. Open **Settings → Secrets and variables → Actions** in your fork and create:
    - `MONITOR_CONFIG_JSON`: the full contents of the private JSON file.
-   - `NOTIFY_STATE_KEY`: a random 32-byte key as 64 hexadecimal characters, generated with `node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"`.
+   - `NOTIFY_STATE_KEY`: the 64 hex characters in the generated `.private/notify-state-key.txt`. Keep this key unchanged.
    - The relevant `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_YOUTUBE`, `DISCORD_WEBHOOK_WIKIPEDIA` URLs.
-5. If you use GitHub CLI, `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` uploads the private config after `gh auth login`.
+5. With GitHub CLI, run `gh auth login`, then `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` and `gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt`. Set the Discord webhook Secrets separately.
 6. **After secrets are in place**, commit and push `.github/workflows/notifier.yml`. The template in `templates/` is inert until copied into your workflows directory.
 7. Under **Actions → Discord notifier (SQLite)** select **Run workflow** once. This starts the initial silent baseline; old posts are not sent.
 
@@ -21,7 +21,7 @@ The template schedules runs at UTC minutes 07, 17, 27, 37, 47 and 57 (every 10 m
 
 ## How private state works
 
-An Actions hosted runner does not retain files between jobs. This template connects `src/index.ts` and `src/runner.ts` to Node's built-in `node:sqlite`. It encrypts the completed SQLite file using **AES-256-GCM**, stores the ciphertext only in an Action Artifact called `notifier-state`, and decrypts the newest previous artifact on the next run.
+An Actions hosted runner does not retain files between jobs. This template connects `src/index.ts` and `src/runner.ts` to Node's built-in `node:sqlite`. It encrypts the completed SQLite file using **AES-256-GCM**, stores the ciphertext only in an Action Artifact called `notifier-state`, and decrypts the newest previous artifact on the next run. The upload sets `include-hidden-files: true` for the exact encrypted file, because GitHub otherwise ignores files under the hidden `.private/` folder.
 
 After a successful new upload, the previous artifact is deleted to keep the number of retained snapshots bounded. When a provider fails, the D1-compatible retry state is persisted and encrypted before the job reports failure. A failed upload does not remove the previous checkpoint.
 

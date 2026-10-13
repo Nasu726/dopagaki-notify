@@ -55,6 +55,9 @@ jobs:
         with:
           name: notifier-state
           path: .private/notify-state.enc
+          # upload-artifact@v4.4+ excludes paths under dot-directories by
+          # default. This exact ciphertext file is the ONLY upload target.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
       - name: Drop previous checkpoint after replacement is safely uploaded

@@ -82,3 +82,22 @@ test('Actions private configuration works without public monitored preferences',
   }));
   assert.deepEqual(monitors.map((m) => m.id), ['qiita-internal']);
 });
+
+test('Actions workflow uploads the exact encrypted file despite hidden .private directory', () => {
+  const workflow = readFileSync(new URL('../templates/github-actions/notifier.yml', import.meta.url), 'utf8');
+  const checkpoint = workflow.split('name: Save encrypted state even when the source failed')[1]?.split('      - name: Drop previous checkpoint')[0];
+  assert.ok(checkpoint, 'checkpoint step must be present');
+  assert.match(checkpoint, /uses: actions\/upload-artifact@v4/);
+  assert.match(checkpoint, /path: \.private\/notify-state\.enc/);
+  assert.match(checkpoint, /include-hidden-files: true/);
+  assert.match(checkpoint, /if-no-files-found: error/);
+  assert.doesNotMatch(checkpoint, /path: \.private\/(?:\*|monitor-config|notify-state-key)/);
+});
+
+test('Actions setup generates a generic preference-free sample and private key', () => {
+  const setup = readFileSync(new URL('../ops/setup-actions.mjs', import.meta.url), 'utf8');
+  assert.match(setup, /randomBytes\(32\)\.toString\('hex'\)/);
+  assert.match(setup, /id: 'qiita-example'/);
+  assert.match(setup, /wikipediaEnabled: false/);
+  assert.doesNotMatch(setup, /readFileSync\(resolve\(root, 'config\/targets\.json'/);
+});

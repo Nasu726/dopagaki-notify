@@ -175,18 +175,19 @@ If you do not want to use Cloudflare, use the [GitHub Actions notifier template]
 **Setup:**
 
 1. Fork this repository (public or private), clone it and run `npm install`.
-2. Run `npm run setup:actions`. This copies the workflow into `.github/workflows/notifier.yml` and creates a gitignored `.private/monitor-config.json`.
+2. Run `npm run setup:actions`. This copies the workflow, creates a gitignored generic `.private/monitor-config.json`, and generates `.private/notify-state-key.txt` without overwriting existing keys.
 3. Edit the private JSON and add GitHub **Settings → Secrets and variables → Actions** Secrets: `MONITOR_CONFIG_JSON` (entire JSON), `NOTIFY_STATE_KEY` (64 hex characters), and your selected source's `DISCORD_WEBHOOK_*` URLs.
 4. **After adding Secrets**, commit and push `.github/workflows/notifier.yml`.
 5. Open **Actions → Discord notifier (SQLite) → Run workflow** for the initial silent baseline. Scheduled checks then run about every 10 minutes, subject to GitHub delays.
 
-Generate a random 32-byte encryption key as 64 hex characters:
+The encryption key is generated automatically by setup. After `gh auth login`, upload it and the private config without displaying either value:
 
 ```sh
-node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
+gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
+gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-Save the result as the **NOTIFY_STATE_KEY GitHub Secret**. Losing or rotating the key makes previous state artifacts unreadable. To upload private JSON with the GitHub CLI, use `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json`. Never commit these secrets or the database.
+Losing or rotating the key makes previous state artifacts unreadable. Add webhook URLs as separate Secrets. Never commit these files or the database.
 
 GitHub schedules can be delayed or skipped, and artifacts expire. If the state artifact is missing, the workflow **fails closed rather than silently reinitializing**. An intentional reset requires **Run workflow → reset_state** and discards old deduplication records and pending messages. Repository activity is required to keep scheduled workflows enabled on public forks.
 
