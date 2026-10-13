@@ -113,3 +113,16 @@ Updated: 2026-10-13. Current stage: **expanded learning feeds and Wikipedia disc
 **Deferred:** historical Qiita/Zenn recommendations, AI scoring, large tag expansions including testing/performance, global daily notification caps and cross-monitor duplicate suppression. These require measurements and an explicit quality/budget policy. The current topic-based feeds do not guarantee high quality.
 
 **Verify:** real Wikipedia featured category membership, MediaWiki 403 recovery, Worker CPU and D1 rows; GitHub Actions checks and bundle success do not establish successful Cloudflare Builds. The old monitor ID `wikipedia-ja` was replaced with `wikipedia-ja-discovery` to keep old receipts isolated; old pending rows may need manual cleanup if they accumulate.
+
+## 2026-10-13 — Latest-first policies (adopted)
+
+Qiita now considers only the latest three by creation time **within the first
+20 search results**, not all possibly matching articles across pages. Zenn
+does likewise for the newest three RSS items. Already-sent candidates do not
+cause backfill. Obsolete *pending* Qiita/Zenn alerts are pruned on successful
+polls; this explicitly sacrifices complete coverage for timeliness.
+
+YouTube queues all new videos shown in its 15-entry Atom feed and sends three
+per five-minute Cron, persisting any remaining alerts. Reaching RSS's bounded
+capacity is not a scan error. arXiv pagination and Wikipedia discovery remain
+unchanged. Legacy incomplete counters remain in D1 for historical purposes.

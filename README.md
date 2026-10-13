@@ -189,3 +189,30 @@ failing every 5-minute dispatcher tick. Outbox/initial baseline are retained,
 and the scheduled invocation still reports an exception so the incident remains
 visible; the `monitor_failure` log includes the exact `retryAt` timestamp.
 Other YouTube HTTP failures and other sources retain their previous policies.
+
+## Freshness-first notification policy (2026-10-13)
+
+**Qiita:** each target requests only the first API search page (20 candidates)
+and selects the **three newest by creation timestamp** from that page. The
+search API does not guarantee global creation-time ordering, so these are not
+necessarily the newest three among all matches. No second-page catch-up is
+attempted. **Zenn:** select the three newest by publication time among entries
+in its bounded RSS snapshot. Already-sent items occupying the candidate three
+do **not** free additional slots for older entries. On a successful Qiita/Zenn
+poll, older pending messages from previous polls are deleted to prevent a
+backlog; sent receipts remain for deduplication. Failed fetches do not prune.
+
+**YouTube:** queue **every eligible new video present in the available Atom
+feed**, even when it contains the maximum 15 entries. Send at most three
+messages per five-minute Cron tick and retain the remainder in the D1 outbox,
+including across the selected weekday boundary. It cannot recover a video
+already evicted from the upstream bounded feed. The 404 hourly backoff remains.
+
+**arXiv and Wikipedia** retain their previous policies. A full bounded
+Zenn/YouTube RSS is not a scan failure, nor is ignoring Qiita's later pages.
+For these three sources `last_complete_at` records a successfully processed
+snapshot rather than an exhaustive search of all past posts. Historical
+`incomplete_count` values are cumulative and are not reset; no new increments
+are made solely because a feed is full. Existing Qiita scan cursors are
+intentionally cleared after the first successful post-upgrade scan. No D1
+migration or Secret changes are required.
