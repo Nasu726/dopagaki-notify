@@ -118,3 +118,12 @@ test('nested entry channel IDs cannot masquerade as the feed owner', async () =>
   ));
   assert.equal(result.items[0]?.id,'youtube:AbCdEf12345');
 });
+
+test('RSS header identity never derives from an entry having attributes', async () => {
+  const monitor = {...MONITOR,id:'youtube-quizknock',query:'@QuizKnock',
+    youtubeChannelId:'UCQ_MqAw18jFTlBB-f8BP7dw'};
+  await assert.rejects(() => fetchYouTube(monitor, async () => new Response(
+    '<feed><entry xmlns="http://www.w3.org/2005/Atom">'+
+    '<yt:channelId>'+monitor.youtubeChannelId+'</yt:channelId></entry></feed>'
+  )),/channel identity missing for youtube-quizknock/);
+});

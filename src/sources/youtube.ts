@@ -67,7 +67,7 @@ export async function fetchYouTube(
   // Only the feed-level identity is authoritative. An entry may itself
   // contain metadata mentioning another channel; never treat that as the
   // identity of the RSS document. Channel IDs are public, safe diagnostics.
-  const entryStart = /<entry(?:\\s|>)/i.exec(xml)?.index ?? xml.length;
+  const entryStart = /<entry(?:\s|>)/i.exec(xml)?.index ?? xml.length;
   const feedChannelId = tagText(xml.slice(0, entryStart), 'yt:channelId');
   if (feedChannelId && feedChannelId !== channelId)
     throw new Error('YouTube RSS channel mismatch for ' + monitor.id +
