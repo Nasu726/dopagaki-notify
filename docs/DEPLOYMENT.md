@@ -380,3 +380,9 @@ Cloudflare documentation:
 - https://developers.cloudflare.com/workers/wrangler/commands/d1/
 - https://developers.cloudflare.com/workers/configuration/cron-triggers/
 - https://developers.cloudflare.com/workers/platform/limits/
+
+## Discovery deployment (2026-10-13)
+
+- The old `wikipedia-ja` creation-alert monitor is removed from the enabled definitions. Its historical D1 rows are left untouched (no schema change). The new `wikipedia-ja-discovery` monitor, query `ja:discover`, silently initializes on its first successful 120-minute poll and then picks up to one featured and one substantial random article per successful poll. It shares `DISCORD_WEBHOOK_WIKIPEDIA`. Old pending notifications are not sent by any active monitor; prune them deliberately later if needed.
+- Added Qiita `tag:アルゴリズム` (4h) and `tag:設計` (6h); Zenn `topic:algorithm` (4h) and `topic:architecture` (6h). Existing Rust and TypeScript are now at 6h intervals. Settings take effect at each monitor's next completed scan; added monitors have silent first baselines. Source-specific Secrets must be set for them to become active.
+- Monitor the Wikipedia response (Wikimedia 403 is still possible), D1 row metrics, CPU and notification volumes. No live deployment / first-scan claim until Cloudflare is checked.

@@ -4,7 +4,8 @@ export interface ContentItem {
   id: string;
   title: string;
   url: string;
-  publishedAt: number; // creation, not modification time
+  publishedAt: number; // publication time for news; recommendation time for Wikipedia discovery
+  discoveryKind?: 'featured' | 'random'; // transient Wikipedia selection metadata (not persisted)
 }
 export interface Monitor {
   id: string;

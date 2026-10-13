@@ -233,6 +233,35 @@ export async function pruneStaleWikipediaPending(
     "WHERE monitor_id = ? AND status = 'pending' AND published_at <= ? LIMIT 12)"
   ).bind(id, cutoff).run();
 }
+
+// Discovery reads at most 16 IDs, selects one unseen featured article and one
+// unseen random article. No D1 write is made when the selection is exhausted;
+// 10-day sent receipts provide bounded no-repeat behavior without a new table.
+export async function selectWikipediaDiscovery(
+  db: Database, id: string, candidates: readonly ContentItem[], now: number,
+): Promise<ContentItem[]> {
+  const pool = candidates.slice(0, 16);
+  if (!pool.length) return [];
+  const ids = [...new Set(pool.map((item) => item.id))];
+  const seenRows = await db.prepare(
+    'SELECT item_id FROM deliveries WHERE monitor_id = ? AND item_id IN (' +
+    ids.map(() => '?').join(',') + ')'
+  ).bind(id, ...ids).all<{ item_id: string }>();
+  const seen = new Set(seenRows.results.map((row) => row.item_id));
+  const selected: ContentItem[] = [];
+  for (const kind of ['featured', 'random'] as const) {
+    const candidate = pool.find((item) => item.discoveryKind === kind && !seen.has(item.id));
+    if (candidate) {
+      selected.push({ ...candidate,
+        title: (kind === 'featured' ? '【秀逸な記事】' : '【ランダム】') + candidate.title,
+        publishedAt: now,
+      });
+      seen.add(candidate.id); // A random pick must never repeat the featured one.
+    }
+  }
+  return selected;
+}
+
 export async function markSent(db: Database, id: string, itemId: string, now: number): Promise<void> {
   await db.prepare(
     "UPDATE deliveries SET status = 'sent', sent_at = ? WHERE monitor_id = ? AND item_id = ? AND status = 'pending'"

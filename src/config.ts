@@ -53,7 +53,7 @@ export function youtubeMonitorsFromTargets(
 
 const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
   ...queryMonitorsFromTargets('qiita', targets.qiita),
-  { id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: true },
+  { id: 'wikipedia-ja-discovery', source: 'wikipedia', query: 'ja:discover', enabled: true },
   ...targets.arxiv.map((target) => ({
     id: target.id, source: 'arxiv' as const,
     query: arxivCategoryQuery(target.categories), enabled: target.enabled,
@@ -99,6 +99,8 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     }
     if (monitor.enabled && !monitor.query.trim())
       throw new Error('Enabled monitor ' + monitor.id + ' requires a configured query/target');
+    if (monitor.enabled && monitor.source === 'wikipedia' && !/^[a-z]{2,12}(?:-[a-z]{2,12})?(?::discover)?$/.test(monitor.query))
+      throw new Error('Wikipedia monitor requires a language code, optionally :discover');
     if (monitor.enabled && monitor.source === 'zenn') {
       try { zennFeedUrl(monitor.query); }
       catch { throw new Error('Enabled Zenn monitor ' + monitor.id + ': invalid user/topic feed query'); }
