@@ -243,6 +243,16 @@ GitHub schedules can be delayed or skipped, and artifacts expire. If the state a
 - When a webhook has been blocked due to an invalid URL, fixing the Secret alone is insufficient; the source-wide `webhook_source_state` block must also be cleared manually. See the [deployment runbook](docs/DEPLOYMENT.md).
 - Successful CI does not prove that real provider APIs or Discord delivery are working. Monitor Cloudflare errors, CPU time, D1 usage, and actual notifications.
 
+## Manual upstream and Discord smoke tests
+
+Operators can fetch a configured monitor on demand using a local Node CLI. The default performs **no Discord POST and no D1 or outbox writes**:
+
+```sh
+node --experimental-strip-types ops/manual-smoke.mjs --monitor=youtube-quizknock
+```
+
+Only the explicitly confirmed `--send-test --confirm-send` mode sends a single `[TEST]` embed, with the source webhook supplied through a private environment variable. Local success does not prove the deployed Cloudflare Worker is healthy. See the [operator diagnostics guide](docs/MANUAL_SMOKE.md).
+
 ## Development
 
 ```sh

@@ -264,6 +264,16 @@ Actions は実行時刻がずれることがあり、定期実行が欠落する
 - Discord Webhook を交換した際、以前の認証失敗で停止していれば D1 の `webhook_source_state` のブロック解除が必要です。手順は [運用資料](docs/DEPLOYMENT.md) を参照してください。
 - GitHub 上の CI 成功は、実際の通知や API の正常動作を保証しません。Workers の CPU・D1 使用量・通知内容は各自で監視してください。
 
+## 手動取得・通知テスト
+
+Cloudflare の定期実行を待たずに、指定した監視の実際の取得結果をローカルで診断できます。初期設定では **取得のみ、Discord送信なし、D1変更なし** です。
+
+```sh
+node --experimental-strip-types ops/manual-smoke.mjs --monitor=youtube-quizknock
+```
+
+明示的な `--send-test --confirm-send` とローカルのWebhook環境変数がある場合に限り、`[TEST]` 表示の通知を1件送信します。本番Cloudflareでの動作保証ではありません。詳細は [手動診断の手順](docs/MANUAL_SMOKE.md) を参照してください。
+
 ## 開発・カスタマイズ
 
 ```sh
