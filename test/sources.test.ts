@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseArxiv, stableArxivId, fetchArxiv } from '../src/sources/arxiv.ts';
+import { parseQiita } from '../src/sources/qiita.ts';
 import { parseZenn, zennFeedUrl, fetchZenn } from '../src/sources/zenn.ts';
 import { parseYouTube, normalizeChannelReference, extractChannelId, fetchYouTube } from '../src/sources/youtube.ts';
 import { entries, fetchTextBounded, tagText } from '../src/sources/xml.ts';
