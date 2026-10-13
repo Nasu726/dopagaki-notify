@@ -1,0 +1,66 @@
+# Copy to .github/workflows/notifier.yml *after* configuring repository Secrets.
+# This is a standalone runtime option, NOT a Cloudflare deployment workflow.
+name: Discord notifier (SQLite)
+on:
+  workflow_dispatch:
+    inputs:
+      reset_state:
+        description: 'Discard existing notification state and create a fresh silent baseline'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Stagger away from each exact hour; GitHub schedules are best effort.
+    - cron: '7,17,27,37,47,57 * * * *'
+
+permissions:
+  contents: read
+  actions: write # restore/delete private ciphertext artifacts
+
+concurrency:
+  group: notifier-sqlite-state
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NOTIFY_STATE_KEY: ${{ secrets.NOTIFY_STATE_KEY }}
+      MONITOR_CONFIG_JSON: ${{ secrets.MONITOR_CONFIG_JSON }}
+      DISCORD_WEBHOOK_QIITA: ${{ secrets.DISCORD_WEBHOOK_QIITA }}
+      DISCORD_WEBHOOK_ZENN: ${{ secrets.DISCORD_WEBHOOK_ZENN }}
+      DISCORD_WEBHOOK_ARXIV: ${{ secrets.DISCORD_WEBHOOK_ARXIV }}
+      DISCORD_WEBHOOK_YOUTUBE: ${{ secrets.DISCORD_WEBHOOK_YOUTUBE }}
+      DISCORD_WEBHOOK_WIKIPEDIA: ${{ secrets.DISCORD_WEBHOOK_WIKIPEDIA }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts
+      - id: restore
+        name: Restore encrypted SQLite checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESET_NOTIFY_STATE: ${{ inputs.reset_state || 'false' }}
+        run: bash ops/actions/restore-state.sh
+      - id: tick
+        name: Run one notification tick
+        run: node --experimental-strip-types --experimental-sqlite ops/actions/run-once.mjs
+      - id: checkpoint
+        name: Save encrypted state even when the source failed
+        if: ${{ always() && steps.restore.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: notifier-state
+          path: .private/notify-state.enc
+          if-no-files-found: error
+          retention-days: 30
+      - name: Drop previous checkpoint after replacement is safely uploaded
+        if: ${{ always() && steps.checkpoint.outcome == 'success' && steps.restore.outputs.previous_id != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_ARTIFACT_ID: ${{ steps.restore.outputs.previous_id }}
+        run: bash ops/actions/prune-old-artifact.sh
