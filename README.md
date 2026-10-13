@@ -1,218 +1,194 @@
 # dopagaki-notify
 
-**Staging smoke test — not production ready.** Cloudflare Workers + D1 sends alerts to Discord **for newly published content plus curated/random Wikipedia discoveries**. No resident application, public GUI, or GitHub Actions cron. The code lives in GitHub; Cloudflare runs a monitoring Cron and a separate bounded retention Cron.
+**Qiita・Zenn・arXiv・YouTube の新着情報と、日本語 Wikipedia のおすすめ記事を Discord に届ける、シンプルな通知システムです。**
 
-See [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the Japanese product specification and deployment boundaries, and [docs/ROADMAP.md](docs/ROADMAP.md) for the engineering plan and validation gates.
+個人利用を前提とした小さな構成です。Web UI やログイン機能、常駐サーバーはありません。監視対象を JSON で設定し、Cloudflare Workers + D1 にデプロイすれば利用できます。好きな情報源を組み合わせて、フォーク先で自由にカスタマイズすることを想定しています。
 
-For the owner-assisted Cloudflare setup, see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. This is a staging runbook, not an assertion of production readiness.
+**[English](README.EN.md)** · [詳細な運用資料](docs/DEPLOYMENT.md) · [設計資料](PROJECT_BRIEF.md) · [開発記録](docs/ROADMAP.md)
 
-## Current notification policy (2026-10-13, freshness-first release)
+> **実装状況:** Cloudflare Workers 版が本体です。GitHub Actions は現在テスト用 CI のみで、定期通知を実行するワークフローは同梱していません。SQLite などの永続化層を追加すれば移植できる構造ですが、そのまま Actions を有効にするだけでは動作しません。
 
-**Adopted**
-- **Japanese Wikipedia discovery (replaces new-page alerts):** `wikipedia-ja-discovery` selects up to **one featured article** from `Category:秀逸な記事` and **one substantial random article** (main namespace, non-redirect, at least 10 KB) per **120-minute** successful scan. The API returns candidate pools (up to 8 per kind); a single indexed D1 read checks existing receipts, then at most two articles are staged and delivered **only on that scan**, not every 5 minutes. A newly configured monitor starts with a silent baseline; existing `wikipedia-ja` is no longer enabled. Eligible sent receipts provide **10-day per-monitor duplicate suppression**, after which old articles can be recommended again. Pending discoveries older than one interval are pruned in batches of at most 12 on successful scans. Curated recommendations are drawn from at most the first 500 direct article members of the featured category; category membership is Wikipedia's quality decision, **not an AI quality score**. Wikimedia errors propagate rather than silently falling back to stale content.
-- **Qiita learning + practice:** existing Rust `qiita-rust` every 360 minutes; `qiita-algorithms` (`tag:アルゴリズム`, 240 min) and `qiita-design` (`tag:設計`, 360 min). Each poll considers only the newest 3 among the first 20 search results, with no older-article backfill.
-- **Zenn learning + practice:** existing TypeScript `zenn-topic-typescript` every 360 minutes; `zenn-topic-algorithm` (`topic:algorithm`, 240 min) and `zenn-topic-architecture` (`topic:architecture`, 360 min). Each poll considers only the 3 most recently published RSS entries.
-- **arXiv:** `cs.DS` and `cs.AI` every 120 minutes with paginated overlap scans; **YouTube:** same configured channels/weekdays, checking all available feed videos and queueing every eligible new video.
-- **Discord:** sends only 09:00–19:59 JST. Worker Cron checks D1 every 5 minutes, with only one monitor processed per invocation. If a source-specific Discord Secret is absent, that source's monitors remain dormant without D1 polling.
+## できること
 
-**Deferred**
-- Qiita/Zenn recommendations from older highly rated articles, semantic or AI ranking, arbitrary broad tags (including testing/performance), provider-wide de-duplication and strict global daily quotas. These need separate quality/cost policy; current Qiita/Zenn monitors continue to use new-publication feeds and three-per-tick notification dispatch. Article selection is therefore topical, **not a verified relevance/quality ranking**.
+| 情報源 | 検出・通知内容 |
+| --- | --- |
+| Qiita | 検索条件に一致した最初の20件から、作成日時が新しい最大3件を候補にする |
+| Zenn | ユーザー・トピック別 RSS の新しい最大3件を候補にする |
+| arXiv | 指定カテゴリの新着論文をページ単位で取得する |
+| YouTube | 指定チャンネルの RSS にある新着動画をすべて通知対象にする |
+| 日本語 Wikipedia | 「秀逸な記事」から最大1件＋一定以上の長さのランダム記事を最大1件、おすすめする |
 
-**Operational safeguards:** Up to two Wikipedia notifications per successful 2-hour scan; at most 12 scans/day under exact cadence (~24 Wikipedia items/day before the JST delivery window), not a total-account daily cap. Qiita/Zenn discard outdated pending alerts after successful polls; YouTube retains its bounded feed backlog. Inspect Cloudflare D1 rows read/written, Worker CPU, upstream response status and actual Discord volume; deployment metrics must be validated on the deployed version. No new D1 migration or secrets are needed if the old Wikipedia and current platform webhooks are already configured.
+- 記事・動画の **ID で重複通知を抑止**し、初回の正常取得では過去の投稿を送信しません。
+- 監視対象ごとに取得間隔を設定できます。YouTube は日本時間の曜日指定にも対応しています。
+- Discord Webhook は **情報源ごとに1つ**使用します。送信は **日本時間 09:00〜19:59** に限定され、夜間に検出した新着は D1 に保存して後で送ります。
+- 通信失敗や Discord のレート制限には、D1 に保持した再試行時刻・未送信キューで対応します。5分ごとの Cron は、1回につき原則1監視対象、Discord への送信は最大3件です。
+- Qiita・Zenn は **最新を優先**して古い候補を意図的に見送ります。すべての記事を収集・保存するアーカイバーではありません。Qiita の検索結果は必ずしも新着順ではないため、最初の20件に含まれない記事は選べません。
+- YouTube の RSS は掲載件数に上限があり、配信元から消えた動画や外部 API の停止中の投稿は取りこぼす可能性があります。
 
-## Add or change monitors without editing TypeScript
+## 1. 監視対象を設定する
 
-Edit **both** [`config/targets.json`](config/targets.json) and [`config/intervals.json`](config/intervals.json). Monitor IDs are unique globally; intervals are positive integer minutes.
+通常は次の2ファイルだけを編集します。
 
-- `qiita`: `{ "id": "qiita-python", "query": "tag:Python", "enabled": false }` — accepts Qiita search expressions, including tag filters. Disabled examples do not poll. Existing `qiita-rust` stays enabled.
-- `zenn`: `{ "id": "zenn-topic-rust", "query": "topic:rust", "enabled": false }` — use `topic:<slug>` or `user:<slug>`; trend feeds are unsupported because they lack chronological semantics. Existing `zenn-topic-typescript` stays enabled.
-- `arxiv`: one monitor per category group. `arxiv-cs-ai` keeps `cs.AI` and **`arxiv-cs-ds` now independently monitors `cs.DS`**, each every 120 minutes. Papers cross-listed in both categories can be notified twice because outboxes are per monitor.
-- `youtube`: independent ID, `channel`, `enabled`, optional `weekdayJst`; existing selected weekdays remain unchanged.
+- [\`config/targets.json\`](config/targets.json): Qiita の検索式、Zenn のトピック・ユーザー、arXiv のカテゴリ、YouTube チャンネル、各対象の \`enabled\`。
+- [\`config/intervals.json\`](config/intervals.json): 各 \`id\` に対応する **監視間隔(分)**。正の整数を指定します。
 
-To add a new target, insert its object in `targets.json` and matching `"id": minutes` in `intervals.json`. Changing `intervals.json` alone preserves the monitor's D1 baseline and identity. **Do not reuse an initialized ID for a different query, platform, or category group**: that fails closed; use a new ID, which begins with a silent first fetch. Remove or disable the old ID deliberately (old pending items are not delivered while disabled). Different targets retain independent due timestamps, scan cursors, and notification records but share the platform's Discord Webhook and source-wide cooldown. Notification sending remains 09:00–19:59 JST. Adding many targets increases D1 rows scanned on each 5-minute dispatcher and can cause delays (only one monitor is processed per tick); avoid enabling many high-volume searches at once. Both arXiv sources require the already defined `DISCORD_WEBHOOK_ARXIV` secret. No D1 migration is needed.
+例:
 
-## Quick setup
+\`\`\`json
+{
+  "qiita": [{ "id": "qiita-go", "query": "tag:Go", "enabled": true }],
+  "zenn": [{ "id": "zenn-rust", "query": "topic:rust", "enabled": true }],
+  "arxiv": [{ "id": "arxiv-ds", "categories": ["cs.DS"], "enabled": true }],
+  "youtube": [{ "id": "youtube-example", "channel": "@example", "enabled": true, "weekdayJst": "sunday" }]
+}
+\`\`\`
 
-Requires Node.js 22+; the project is written in TypeScript.
+対応する \`intervals.json\`:
 
-```sh
+\`\`\`json
+{
+  "qiita-go": 240,
+  "zenn-rust": 240,
+  "arxiv-ds": 120,
+  "youtube-example": 60,
+  "wikipedia-ja-discovery": 120
+}
+\`\`\`
+
+この例は形式の説明です。ファイル全体を置き換える場合、不要な監視対象を削除して両ファイルの ID を一致させてください。曜日指定付き YouTube には間隔 \`60\` 分を指定します。Wikipedia の推薦は \`src/config.ts\` に定義され、通常の公開設定では有効です。
+
+**重要:** 過去に使用した監視 ID の検索条件や情報源を変更しないでください。D1 が ID と条件の組を記憶しているため、既存 ID の条件変更は安全のため拒否されます。別の対象に切り替えるときは新しい ID を付けてください。間隔の変更だけなら同じ ID を使えます。
+
+公開フォークに自分の興味・購読先を掲載したくない場合は、下記の **「設定を非公開にする」** を利用してください。GitHub 上の公開 JSON を編集する必要はありません。
+
+## 2. Cloudflare Workers に導入する(対応済み)
+
+**必要なもの:** Node.js 22 以上、Cloudflare アカウント、Discord の通知先チャンネルと Webhook。Cloudflare の利用枠と料金条件は事前に確認してください。
+
+\`\`\`sh
+git clone https://github.com/Nasu726/dopagaki-notify.git
+cd dopagaki-notify
 npm install
 npm run check
-npm run bundle:check # Wrangler compiles without deploying
-```
+npx wrangler login
+\`\`\`
 
-**Set monitoring intervals only in [config/intervals.json](config/intervals.json).** Each value is a **positive integer number of minutes**; add an entry for every monitor ID:
+**① 自分の D1 データベースを作成**
 
-```json
+\`\`\`sh
+npx wrangler d1 create dopagaki-notify
+\`\`\`
+
+表示された **自分の** \`database_id\` を \`wrangler.jsonc\` の \`d1_databases[0].database_id\` に設定してください。リポジトリ内の ID は作者の環境の値であり、フォーク先ではそのまま使えません。必要に応じて Worker 名・D1 名も変更します。D1 のバインディング名 \`DB\` は維持してください。
+
+**② D1 のマイグレーションを適用**
+
+\`\`\`sh
+npx wrangler d1 migrations apply dopagaki-notify --remote
+\`\`\`
+
+ここでの \`dopagaki-notify\` は作成した D1 名です。マイグレーションは \`migrations/\` に同梱されています。**クラウド上の D1 には \`--remote\` が必要**です。
+
+**③ Worker をデプロイ**
+
+\`\`\`sh
+npm run deploy
+\`\`\`
+
+\`wrangler.jsonc\` に設定済みの Cron は、監視 \`*/5 * * * *\` と、送信済み履歴の整理 \`10 * * * *\` です。外部公開 HTTP エンドポイントはなく、アクセスしても意図的に 404 を返します。
+
+**④ Discord Webhook を Secret に設定**
+
+Discord で通知先の Webhook URL を発行し、利用する情報源に対応する Secret を登録します。
+
+| 情報源 | Cloudflare Secret 名 |
+| --- | --- |
+| Qiita | \`DISCORD_WEBHOOK_QIITA\` |
+| Zenn | \`DISCORD_WEBHOOK_ZENN\` |
+| arXiv | \`DISCORD_WEBHOOK_ARXIV\` |
+| YouTube | \`DISCORD_WEBHOOK_YOUTUBE\` |
+| Wikipedia | \`DISCORD_WEBHOOK_WIKIPEDIA\` |
+
+\`\`\`sh
+npx wrangler secret put DISCORD_WEBHOOK_QIITA
+\`\`\`
+
+コマンドの入力待ちで Webhook URL を貼り付けます。使用する情報源について繰り返してください。Webhook は **Git に書かない**でください。Secret のない情報源は休止状態になります。同じ情報源内の複数監視対象は1つの Webhook と送信制限を共有します。
+
+**⑤ 動作を確認**
+
+初回の正常取得は無通知で基準化します。新着が無ければ Discord に何も届かないのが正常です。Cloudflare の Workers Logs を見るか、次のコマンドで監視できます。
+
+\`\`\`sh
+npx wrangler tail dopagaki-notify --format pretty
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialized_at,last_complete_at,next_due_at FROM monitor_state ORDER BY id;"
+\`\`\`
+
+\`initialized_at\` が設定されれば、少なくとも初回の取得と基準化が成功しています。新着通知が来たら、Discord と D1 の \`deliveries\` の両方を確認してください。Cloudflare Workers Builds と GitHub を連携すれば、\`main\` の変更からデプロイする運用にもできます。
+
+## 3. 設定を非公開にする(公開フォーク向け)
+
+**フォークを公開したまま、個人の監視対象だけを非公開にする方法**に対応しています。
+
+- 通常: 公開リポジトリの \`config/targets.json\` と \`config/intervals.json\` を使用します。
+- **非公開モード**: Cloudflare Secret **\`MONITOR_CONFIG_JSON\`** が存在すれば、その内容で **全監視設定を置き換えます**。公開 JSON の設定とは混ぜません。
+- Secret が不正なら処理をエラーにして停止します。**作者の公開設定に勝手に戻ることはありません。**
+
+ローカルで雛形を作れます。
+
+\`\`\`sh
+mkdir -p .private
+node ops/export-monitor-config.mjs > .private/monitor-config.json
+\`\`\`
+
+生成された \`.private/monitor-config.json\` を自分の好みに書き換えてください。\`.private/\` は \`.gitignore\` に登録されています。ファイル形式は以下のとおりで、\`targets\` と \`intervals\` は公開 JSON と同じです。Wikipedia が不要なら \`wikipediaEnabled: false\` とし、間隔設定からも省けます。
+
+\`\`\`json
 {
-  "qiita-rust": 360,
-  "qiita-algorithms": 240,
-  "qiita-design": 360,
-  "wikipedia-ja-discovery": 120,
-  "arxiv-cs-ai": 120,
-  "arxiv-cs-ds": 120,
-  "zenn-topic-typescript": 360,
-  "zenn-topic-algorithm": 240,
-  "zenn-topic-architecture": 360,
-  "youtube-yurugengo": 60,
-  "youtube-yurucom": 60,
-  "youtube-3blue1brown-japan": 60
+  "targets": {
+    "qiita": [{ "id": "my-qiita-go", "query": "tag:Go", "enabled": true }],
+    "zenn": [],
+    "arxiv": [],
+    "youtube": []
+  },
+  "intervals": { "my-qiita-go": 360 },
+  "wikipediaEnabled": false
 }
-```
+\`\`\`
 
-The file intentionally holds **interval values only**. Qiita searches, Zenn feeds, arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; Wikipedia remains fixed in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` runs every **360 minutes** and `wikipedia-ja-discovery` recommends up to two articles at **120-minute** intervals; the three explicitly selected YouTube channels are also enabled for hourly checks on their selected JST weekdays; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia discovery monitor's first observation establishes a **silent baseline**. arXiv and Zenn are enabled in configuration and become active after their Discord Webhook Secrets are configured. All YouTube checks and real deliveries are **unverified** in Cloudflare until their first live baselines succeed.
+内容を確認し、**公開リポジトリへコミットする前に** Cloudflare Dashboard の **Worker → Settings → Variables and Secrets** から \`MONITOR_CONFIG_JSON\` を **Secret** として保存します。あるいは \`npx wrangler secret put MONITOR_CONFIG_JSON\` で登録できます。ファイル全文を Secret の値として入力してください。デプロイ済み Worker の Secret 更新は新しい Worker バージョンのデプロイを伴うため、適用後のログを確認してください。
 
-The monitoring Cron Trigger in `wrangler.jsonc` runs every **five minutes** (`*/5 * * * *`), irrespective of these settings. It checks D1 deadlines; it does **not** fetch every API every five minutes. A **second independent Cron** (`10 * * * *`, every hour at minute 10 UTC/JST) deletes at most 20 acknowledged messages per invocation (24 invocations/day; up to 480 sent receipts/day). The previous five-minute cadence was unnecessary overhead. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
+**公開を防ぐための注意:** \`wrangler.jsonc\` の D1 ID はパスワードではありませんが、作者の環境値を自分用に変更してください。Webhook URL、設定 Secret、D1 の配信履歴、公開したくないチャンネル ID や記事の内容はコミットしないでください。公開 GitHub Actions のログ、Issue、PR、公開 Discord チャンネルにも注意してください。すでにコミットした情報は、後で \`.gitignore\` に入れても公開履歴からは消えません。最も確実に非公開にしたい場合は **private リポジトリ**を利用してください。
 
-## arXiv categories and YouTube channels with hourly JST weekday schedules
+## 4. GitHub Actions で実行したい場合(移植ガイド)
 
-Three user-selected YouTube channels are configured and **enabled**:
+**現在の GitHub Actions は型検査・テスト・Wrangler のビルド確認用 CI です。定期通知の実行環境ではありません。**
 
-| Monitor ID | Channel | Check time (JST) | Interval |
-| --- | --- | --- | --- |
-| `youtube-yurugengo` | [ゆる言語学ラジオ](https://www.youtube.com/@yurugengo) | Tuesday, every hour (00:00–23:00) | 60 minutes |
-| `youtube-yurucom` | [ゆるコンピュータ科学ラジオ](https://www.youtube.com/@yurucom) | Sunday, every hour (00:00–23:00) | 60 minutes |
-| `youtube-3blue1brown-japan` | [3Blue1BrownJapan](https://www.youtube.com/@3Blue1BrownJapan) | Sunday, every hour (00:00–23:00) | 60 minutes |
+Cloudflare 以外でも、\`src/runner.ts\` にある監視・重複排除・通知処理を再利用できます。ただし、GitHub-hosted runner は実行ごとに環境が作り直されるため、**SQLite の状態を実行間で永続化する仕組み**が必須です。
 
-Each channel has its **own** D1 identity, first-run baseline, due timestamp and delivery history, and all three share the single `DISCORD_WEBHOOK_YOUTUBE` Secret. Real YouTube fetching, handle resolution and notifications **have not yet been verified in Cloudflare**.
+移植に必要なのは、(1) D1 用 \`Database\` インターフェースを Node.js の SQLite に接続するアダプタ、(2) \`migrations/\` による初期化、(3) 監視・履歴整理を呼び出すエントリポイント、(4) \`schedule\` / \`workflow_dispatch\` の YAML、(5) 永続的な DB 保管場所と同時実行制御、(6) GitHub Actions Secrets からの Webhook・非公開設定の読み込み、です。
 
-The checked-in `config/targets.json` contains these definitions:
+GitHub の \`schedule\` は最短5分間隔ですが、実行が遅れたり省略されたりすることがあります。公開リポジトリでは活動が60日ないと定期実行が無効化される場合もあります。したがって **Cloudflare 版と同じ時間精度・耐障害性を自動的に得られるわけではありません**。公開リポジトリに SQLite DB や個人設定を書き戻す設計は避けてください。
 
-```json
-{
-  "youtube": [
-    { "id": "youtube-yurugengo", "channel": "@yurugengo", "enabled": true, "weekdayJst": "tuesday" },
-    { "id": "youtube-yurucom", "channel": "@yurucom", "enabled": true, "weekdayJst": "sunday" },
-    { "id": "youtube-3blue1brown-japan", "channel": "@3Blue1BrownJapan", "enabled": true, "weekdayJst": "sunday" }
-  ]
-}
-```
+現段階で簡単に動かしたいなら **Cloudflare Workers + D1 を推奨**します。GitHub Actions への移植は、通知ロジックを流用できるものの、別途バックエンド実装・テストが必要です。
 
-The actual file also includes the independently configured arXiv categories (cs.AI, cs.DS), Qiita searches and Zenn topics. All three corresponding keys in `config/intervals.json` have the value `60`; **minute intervals have a single source of truth in that file**.
+## 運用・制約
 
-To add or change channels, edit `config/targets.json` (`id`, `channel`, `enabled`, optional `weekdayJst`) and `config/intervals.json` (matching ID → positive integer minutes). With `weekdayJst` set, only an **hourly interval of 60 minutes** is accepted. Checks happen **only on the named JST weekday, at each hour from 00:00 through 23:00**. Outside that weekday, no YouTube upstream fetch is made; the next D1 due timestamp is advanced to the next selected weekday. Other monitors without `weekdayJst` continue using elapsed-minute intervals. The five-minute dispatcher can add a small delay. A failed on-day fetch may be retried later on that day; if its retry becomes due after midnight, fetching is deferred until the next selected weekday.
+- 送信開始時間は JST 09:00〜19:59。夜間も API の監視は続きます。
+- arXiv はページ追跡しますが、Qiita・Zenn は最新優先で古い記事を追いません。Wikipedia のおすすめは候補からのサンプリングです。
+- YouTube RSS は断続的に 404/500 を返す場合があります。RSS の404には最低60分の再試行間隔を設けています。
+- Discord Webhook を交換した際、以前の認証失敗で停止していれば D1 の \`webhook_source_state\` のブロック解除が必要です。手順は [運用資料](docs/DEPLOYMENT.md) を参照してください。
+- GitHub 上の CI 成功は、実際の通知や API の正常動作を保証しません。Workers の CPU・D1 使用量・通知内容は各自で監視してください。
 
-**Initial activation is intentionally different:** newly added monitors perform their first *silent baseline* on the first eligible dispatcher invocation **on their selected weekday**; existing videos are not sent, and subsequent checks follow hourly slots on the same day. A query/channel change must use a **new monitor ID** rather than reusing an initialized ID. Avoid changing IDs just to change their weekday or interval.
+## 開発・カスタマイズ
 
-The YouTube Atom feed includes only a bounded set of recent uploads (typically about 15). Because this schedule skips the other six days, it can still miss older entries when more than approximately 15 uploads accumulate before the next selected day; choose more frequent days or omit `weekdayJst` when coverage matters. Resolving `@handles` from YouTube public channel pages may be blocked in some execution environments; if a live Worker fails, prefer a direct `UC...` channel ID instead, with a new monitor ID if already initialized.
+\`\`\`sh
+npm install
+npm run check
+npm run bundle:check
+npm run dev
+\`\`\`
 
-## Notification hours, retention and privacy
+情報源を追加する場合は \`src/sources/\` と \`src/runner.ts\` を参照してください。詳細な経緯と内部設計は [PROJECT_BRIEF.md](PROJECT_BRIEF.md)・[docs/ROADMAP.md](docs/ROADMAP.md) に残しています。質問は Issue で受け付けられますが、Webhook URL・非公開の購読先・実運用の機密ログは投稿しないでください。
 
-- **Discord sends only between 09:00 (inclusive) and 20:00 (exclusive), JST** (UTC+9; no DST). Overnight the Worker **still fetches feeds and queues new items**; after 09:00 it drains eligible pending alerts (up to three per run). A network request started just before 20:00 may arrive seconds afterward; this is not a hard Discord arrival deadline.
-- The **hourly** maintenance Cron runs in a **separate Worker invocation**, with a single indexed `DELETE` bounded to **20 entries per run**. Only `sent` deliveries whose `sent_at` is over **10 days** old are removed. `pending` deliveries and `monitor_state` remain untouched; an unsent alert may be retained beyond 10 days.
-- To prevent already deleted receipts from causing repeated alerts, articles with publication times more than 10 days old **at discovery** are not added to the outbox, even if discovered late. This deliberately trades off extremely late discovery for bounded deduplication storage.
-- The owner applied remote migration `0009_delivery_retention.sql`; no additional migration is required for the hourly schedule change. Do not infer stable Free-plan CPU use without observing real maintenance and monitor invocations.
-
-## Discord channel organization
-
-One Discord server with separate channels works as intended. Create one incoming webhook **inside each destination channel**; configure the corresponding source-specific Cloudflare Secret (`DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_ARXIV`, etc.). Multiple monitors using the same source share that webhook and its persistent cooldown/invalid-webhook state in D1. Different sources should receive **different Webhook URLs**. Tokens are never saved in D1 or GitHub.
-
-## GitHub / Cloudflare deployment (staging active)
-
-1. Create a D1 database named `dopagaki-notify`, put its real `database_id` in `wrangler.jsonc`, and apply **all** SQL migrations in the `migrations/` directory (now through `0009_delivery_retention.sql`) in filename order using Wrangler.
-2. Set the corresponding **Cloudflare Secrets** for the enabled sources: `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_WIKIPEDIA`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_YOUTUBE`. Never commit Webhook URLs to Git.
-3. Configure Qiita/Zenn/arXiv/YouTube monitors in `config/targets.json`, and interval minutes in `config/intervals.json` (Wikipedia discovery is currently defined in `src/config.ts`).
-4. Connect GitHub to Cloudflare Workers Builds or deploy with Wrangler. Keep deployment disabled until D1/Secrets are configured.
-5. Test the first silent baseline, later new-item notifications, failure retries, CPU limits and D1 state.
-
-`workers_dev` is disabled and the HTTP handler returns 404. Ownership of a custom domain is not required for a Cron-only Worker.
-
-## Implemented
-
-- Separate monitor and retention Cron Triggers, with per-monitor D1 deadlines, leases, independent identity, and resumable API scan checkpoints.
-- First run creates a **silent baseline**. Unknown older articles and edits are not notified.
-- D1 durable outbox with bounded 12-article insert batches (84 SQL binds, below D1's 100-bind limit), **no baseline/old-article inserts**, and known-ID read-before-write to skip repeated inserts when nothing is new. New monitors are batch-initialized only when first encountered; once initialized, a quiet Cron invocation makes **no D1 INSERT**. Large rosters are read in chunks of at most 40 monitors (83 SQL binds), preserving global due-time priority while respecting D1's 100-bind limit. These are SQL-statement savings, not measured Cloudflare CPU results.
-- Bounded Discord delivery and retry. Source API and Discord 429/503 responses respect `Retry-After` (including HTTP-date or Discord reset-after headers) by persisting cooldowns in D1 instead of sleeping. A Discord 429 stores a **source-wide webhook cooldown in D1**, which also suppresses delivery of newly discovered articles until the cooldown expires. The failed item receives its own retry deadline. This avoids a burst of futile requests and redundant updates of every queued item. For unusable Discord webhooks (401/403/404/410), delivery for **all monitors of that source** is blocked until an operator fixes the Secret and resets the D1 flag; queued items stay intact. Queued deliveries can drain during a source fetch outage; webhook host validation; no arbitrary mentions.
-- **Qiita** JSON API adapter: stable ID and `created_at`, not `updated_at`.
-- **Wikipedia** featured/random *article discovery* (not new-page alerts); Wikimedia-compliant descriptive `User-Agent` and `Api-User-Agent` include the repository as an operator contact. A 403 is retried no sooner than one hour later to avoid hammering a denied endpoint.
-- **arXiv** Atom API: creation date and version-independent paper ID.
-- **Zenn** user/topic RSS: stable GUID and publication date (trend feeds deliberately excluded).
-- **YouTube** channel Atom RSS: stable video ID and publication date; supports channel UC... ID or @handle/channel URL with D1 resolution cache.
-- Automated tests using an in-memory SQLite database executing the same migration SQL.
-
-## Recovering an invalid Discord webhook
-
-If a webhook was deleted, rotated, or loses permission, the source stores `blocked_status` and `blocked_at` in `webhook_source_state`. The Worker **continues detecting new items but does not send or discard the pending queue**. Replace the relevant Cloudflare Webhook Secret, then deliberately clear the block for that source using an authenticated D1 SQL console or Wrangler (substitute your source name):
-
-```sql
-UPDATE webhook_source_state
-SET blocked_status = NULL, blocked_at = NULL
-WHERE source = 'qiita';
-```
-
-Do not clear the block before the Secret is corrected. Avoid publishing the Webhook URL or token in issue reports or logs.
-
-## Limitations
-
-- **arXiv, Zenn and YouTube** adapters have been ported from the Rust reference. Feed parsing is intentionally bounded, preserves literal CDATA content, ignores comment/CDATA markup when locating article boundaries, and rejects missing closing roots or unbalanced Atom/RSS entry tags (rather than silently returning an empty feed), but it is **not a full standards-compliant XML validator**. Actual Cloudflare runtime and source API behavior have not been verified live.
-- YouTube @handle resolution caches the corresponding channel UC... ID in D1 for seven days. The public channel page is fetched only on cache misses or expiry. A raw channel UC... ID needs no resolution.
-- **arXiv** resumes bounded API pages across Cron ticks using D1 cursors, rechecking the head page after an offset scan. **Qiita** deliberately checks one 20-result page without continuation; **Wikipedia** samples discovery candidates without pagination. **Zenn/YouTube** each inspect one bounded feed snapshot.
-- Initial scans establish silent baselines. Follow-up **arXiv** scans retain a 48-hour overlap; **Qiita/Zenn** intentionally limit eligible notifications to the newest three candidates from the available first-page/feed snapshot. A Qiita API response may be relevance-ordered, so global chronological recency is not guaranteed. **Wikipedia** discovery samples at most two articles per completed poll.
-- **Incomplete paginated arXiv scans** are recorded in D1 (`incomplete_count`, `last_incomplete_at`) without advancing `last_complete_at`. For Qiita/Zenn/YouTube, successful bounded feed snapshots *do* advance `last_complete_at`; skipping older posts is intentional and their historical incomplete counters remain cumulative. Late-indexed posts outside arXiv's 48-hour overlap, Qiita posts outside its first 20 returned results, and fixed-length Zenn/YouTube feeds may still be missed. The XML response is read within a fixed byte bound, then parsed.
-- The Worker processes one due monitor per five-minute monitoring Cron invocation and sends at most three notifications per invocation. Wikipedia discovery sends at most two items per 120-minute poll and suppresses pending-only delivery. Only arXiv may require many paginated ticks. Repeated high-frequency checks are best-effort.
-- Cloudflare Workers Free CPU budget is 10 ms per invocation. The owner observed p50 around 1.17 ms and normal p99 around 2.07 ms, with occasional p99 near 19 ms (zero reported errors). These measurements precede the new maintenance Cron and do not establish worst-case compliance. API waiting time is excluded from CPU accounting.
-- Initial baseline and permanently ineligible pre-baseline items are excluded without storing `ignored` outbox rows; existing legacy rows remain compatible.
-- Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.
-- Each persistent monitor ID is pinned to its source and trimmed query (not its interval). **To change a source or query, choose a new monitor ID and add the matching integer interval in `config/intervals.json`.** The new ID creates a separate silent baseline; an unchanged ID with a changed query now fails closed. Interval-only changes require no state migration. Legacy initialized D1 rows that lack identity information fail closed until intentionally migrated or reset.
-- A Cloudflare Worker has been deployed by the owner, and the eight remote D1 migrations and Discord Secrets have been configured by the owner. The Qiita outbound delivery path was confirmed by the owner with a synthetic test item. The configured second staging monitor is Wikipedia new pages; first-run and real upstream ingestion still need inspection. CPU p50 around 1.17 ms and p99 around 2.07 ms were reported, with occasional p99 peaks near 19 ms and zero reported errors. This is **not** proof that all invocations remain within the 10 ms Workers Free CPU limit.
-
-## Prior source code and API references
-
-- [Original dopagaki-board source adapters](https://github.com/Nasu726/dopagaki-board/tree/main/src-tauri/src/sources)
-- [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
-- [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
-- [Cloudflare D1](https://developers.cloudflare.com/d1/)
-
-## Monitoring cadence and actual API usage (2026-10-12)
-
-- The previous one-minute monitoring dispatcher ran 1,440 times/day, mostly idle with only 60-minute Qiita and Wikipedia checks. The new **five-minute** dispatcher runs **288 times/day** (80% fewer scheduler invocations); individual monitor intervals are unchanged and set in `config/intervals.json`.
-- Pending delivery can be processed at the next **five-minute** Cron (during JST 09:00–20:00), instead of waiting for the next 60-minute source check. Multiple pending notifications and multi-page scans are deliberately handled across multiple invocations to stay within the Workers Free 10ms CPU budget. Dropping all but the latest three real new items is **not** an acceptable CPU optimization because it introduces missed notifications.
-- The separate retention Cron remains hourly (`10 * * * *`). The scheduler's 5-minute granularity may add delay to a due scan or retry; it does not alter the source's requested interval. Periodic execution and maximum throughput should be re-evaluated after live CPU results.
-- A MediaWiki HTTP 403 was observed in Cloudflare: the old adapter sent no identifying User-Agent. A descriptive User-Agent was added according to Wikimedia policy; **the fix is not live-verified until the next successful baseline**. Continued 403s require further diagnosis rather than claims of success.
-
-## Diagnosing monitoring errors (2026-10-13)
-
-Monitor failures now emit **one** JSON-formatted `monitor_failure` error log with `monitorId`, `source`, `phase`, `errorType` and `errorMessage`; HTTP failures also include `upstream`, `httpStatus`, `retryAfterMs` (when supplied) and `retryAt` (the actual D1 rescheduled timestamp). Failed Discord sends include `itemId` and retry/block behavior. Every thrown scheduled exception also emits a `cron_failure` entry with the Cron expression and phase, so the same underlying failure can generate **both** logs; do not count these as independent faults. Neither secret URLs nor upstream response bodies or stack traces are intentionally logged by this feature. Generic exception messages redact URLs and common credential formats.
-
-In **Workers → dopagaki-notify → Observability → Logs**, filter by `monitor_failure`, `cron_failure`, `YouTube RSS`, `MediaWiki`, or monitor ID. Investigate the **same invocation/timestamp** before treating HTTP subrequest failures and Cron `outcome: exception` as separate incidents. The original exception is deliberately rethrown after the D1 retry is persisted so Cloudflare still reports `outcome: exception` for failed source scans. **A 404 sent to the Worker's public HTTP handler is intentional** and unrelated to a `YouTube RSS HTTP 404`.
-
-**MediaWiki compatibility fix:** `list=random` identifies articles using `id`, while `list=categorymembers` uses `pageid`. Parser and official-shape regression tests now distinguish these; this removes the deterministic `Malformed MediaWiki discovery page` failure for valid random articles. MediaWiki 4xx responses remain separate issues requiring real HTTP status investigation.
-
-## YouTube RSS intermittent 404 behavior (2026-10-13)
-
-A YouTube channel can remain public while `https://www.youtube.com/feeds/videos.xml`
-intermittently responds with HTTP 404. Unlike an incorrect `@handle` page URL,
-this is treated as an upstream feed outage, not proof that the channel disappeared.
-A `YouTube RSS HTTP 404` now postpones that monitor's fetch for at least
-**60 minutes** (or longer if `Retry-After` asks for it), instead of repeatedly
-failing every 5-minute dispatcher tick. Outbox/initial baseline are retained,
-and the scheduled invocation still reports an exception so the incident remains
-visible; the `monitor_failure` log includes the exact `retryAt` timestamp.
-Other YouTube HTTP failures and other sources retain their previous policies.
-
-## Freshness-first notification policy (2026-10-13)
-
-**Qiita:** each target requests only the first API search page (20 candidates)
-and selects the **three newest by creation timestamp** from that page. The
-search API does not guarantee global creation-time ordering, so these are not
-necessarily the newest three among all matches. No second-page catch-up is
-attempted. **Zenn:** select the three newest by publication time among entries
-in its bounded RSS snapshot. Already-sent items occupying the candidate three
-do **not** free additional slots for older entries. On a successful Qiita/Zenn
-poll, older pending messages from previous polls are deleted to prevent a
-backlog; sent receipts remain for deduplication. Failed fetches do not prune.
-
-**YouTube:** queue **every eligible new video present in the available Atom
-feed**, even when it contains the maximum 15 entries. Send at most three
-messages per five-minute Cron tick and retain the remainder in the D1 outbox,
-including across the selected weekday boundary. It cannot recover a video
-already evicted from the upstream bounded feed. The 404 hourly backoff remains.
-
-**arXiv and Wikipedia** retain their previous policies. A full bounded
-Zenn/YouTube RSS is not a scan failure, nor is ignoring Qiita's later pages.
-For these three sources `last_complete_at` records a successfully processed
-snapshot rather than an exhaustive search of all past posts. Historical
-`incomplete_count` values are cumulative and are not reset; no new increments
-are made solely because a feed is full. Existing Qiita scan cursors are
-intentionally cleared after the first successful post-upgrade scan. No D1
-migration or Secret changes are required.
+> **ライセンスに関する注意:** 現時点では明示的な \`LICENSE\` ファイルがありません。公開フォーク・再配布の条件を明確にするため、メンテナがライセンスを選定する必要があります。
