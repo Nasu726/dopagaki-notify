@@ -2,7 +2,7 @@ import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue } from './
 import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors, resolveNotificationWindowJst } from './config.ts';
 import { logFailure } from './observability.ts';
-import { hasWebhookSecret, notifyDiscord, webhookFor } from './discord.ts';
+import { hasWebhookSecret, notifyDiscordWithArticleThumbnails, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
 import { fetchWikipedia, fetchWikipediaDiscovery } from './sources/wikipedia.ts';
 import { fetchArxiv } from './sources/arxiv.ts';
@@ -60,7 +60,7 @@ const defaults: Dependencies = {
         : fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));
     }
   },
-  send: notifyDiscord,
+  send: notifyDiscordWithArticleThumbnails,
   randomId: () => crypto.randomUUID(),
   clock: () => Date.now(),
 };
