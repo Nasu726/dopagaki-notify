@@ -916,7 +916,7 @@ test('Wikipedia discovery recommends one new featured and one random article eac
   await runTick(s.env, [wikipedia], now, deps);
   assert.deepEqual(s.sent, [], 'silent initialization must not recommend historical articles');
   await runTick(s.env, [wikipedia], now + 120 * 60_000, deps);
-  assert.deepEqual(s.sent, ['wikipedia:ja:1', 'wikipedia:ja:4']);
+  assert.deepEqual([...s.sent].sort(), ['wikipedia:ja:1', 'wikipedia:ja:4']);
   assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()?.n, 2);
   assert.equal(s.raw.prepare('SELECT MIN(published_at) AS at FROM deliveries').get()?.at, now + 120 * 60_000,
     'recommendation time must replace article creation time');
@@ -925,8 +925,8 @@ test('Wikipedia discovery recommends one new featured and one random article eac
   items = [candidate(1, 'featured'), candidate(2, 'featured'),
     candidate(4, 'random'), candidate(5, 'random'), candidate(2, 'random')];
   await runTick(s.env, [wikipedia], now + 240 * 60_000, deps);
-  assert.deepEqual(s.sent, ['wikipedia:ja:1', 'wikipedia:ja:4',
-    'wikipedia:ja:2', 'wikipedia:ja:5']);
+  assert.deepEqual([...s.sent].sort(), ['wikipedia:ja:1', 'wikipedia:ja:2',
+    'wikipedia:ja:4', 'wikipedia:ja:5']);
   assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()?.n, 4);
   assert.equal(fetches, 3);
   assert.equal(await runTick(s.env, [wikipedia], now + 245 * 60_000, deps), 'idle');

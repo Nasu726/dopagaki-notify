@@ -99,8 +99,8 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     }
     if (monitor.enabled && !monitor.query.trim())
       throw new Error('Enabled monitor ' + monitor.id + ' requires a configured query/target');
-    if (monitor.enabled && monitor.source === 'wikipedia' && !/^[a-z]{2,12}(?:-[a-z]{2,12})?:discover$/.test(monitor.query))
-      throw new Error('Wikipedia monitor must use language:discover');
+    if (monitor.enabled && monitor.source === 'wikipedia' && !/^[a-z]{2,12}(?:-[a-z]{2,12})?(?::discover)?$/.test(monitor.query))
+      throw new Error('Wikipedia monitor requires a language code, optionally :discover');
     if (monitor.enabled && monitor.source === 'zenn') {
       try { zennFeedUrl(monitor.query); }
       catch { throw new Error('Enabled Zenn monitor ' + monitor.id + ': invalid user/topic feed query'); }
