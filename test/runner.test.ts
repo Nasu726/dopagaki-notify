@@ -1182,7 +1182,7 @@ test('YouTube announces only the newest video on the very first successful poll,
   const afterRetention = now + 11 * 86400_000;
   await pruneSentDeliveries(s.env.DB, afterRetention);
   assert.equal(s.raw.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE monitor_id=?")
-    .get(monitor.id)?.c, 0, 'expired sent receipt can be pruned');
+    .get(monitor.id)?.c, 1, 'YouTube sent receipts must be retained permanently');
   await runTick(s.env, [monitor], afterRetention, s.deps);
   assert.deepEqual(s.sent, ['youtube:oldNewest01'],
     'once the initial baseline is recorded, pruning must not resend an ancient latest video');
