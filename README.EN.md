@@ -63,10 +63,10 @@ For public forks where your topic choices should **not be visible on GitHub**, u
 
 ## 2. Deploy with Cloudflare Workers (supported)
 
-**Prerequisites:** Node.js 22+, a Cloudflare account, and one or more Discord channels with incoming webhooks. Check your Cloudflare plan's current limits and charges before deployment.
+**Prerequisites:** Node.js 22+, a Cloudflare account, and one or more Discord channels with incoming webhooks. Check your Cloudflare plan's current limits and charges before deployment. Fork this repository on GitHub, then clone your fork. You may instead clone the upstream repository for a local-only installation.
 
 ```sh
-git clone https://github.com/Nasu726/dopagaki-notify.git
+git clone https://github.com/YOUR_USERNAME/dopagaki-notify.git
 cd dopagaki-notify
 npm install
 npm run check

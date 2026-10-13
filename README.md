@@ -63,10 +63,10 @@
 
 ## 2. Cloudflare Workers に導入する(対応済み)
 
-**必要なもの:** Node.js 22 以上、Cloudflare アカウント、Discord の通知先チャンネルと Webhook。Cloudflare の利用枠と料金条件は事前に確認してください。
+**必要なもの:** Node.js 22 以上、Cloudflare アカウント、Discord の通知先チャンネルと Webhook。Cloudflare の利用枠と料金条件は事前に確認してください。まず GitHub 上でこのリポジトリを Fork し、そのフォークを clone します。フォークせずローカルで試す場合は、元リポジトリを clone しても構いません。
 
 ```sh
-git clone https://github.com/Nasu726/dopagaki-notify.git
+git clone https://github.com/YOUR_USERNAME/dopagaki-notify.git
 cd dopagaki-notify
 npm install
 npm run check
