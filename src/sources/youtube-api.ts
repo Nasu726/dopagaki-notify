@@ -40,7 +40,14 @@ export async function fetchYouTubeDataApi(
   const channels = requireRecord(await request(channelUrl)).items;
   if (!Array.isArray(channels) || channels.length !== 1)
     throw new Error('YouTube Data API did not return the requested channel');
-  const details = requireRecord(requireRecord(channels[0]).contentDetails);
+  const channel = requireRecord(channels[0]);
+  // A wrong/poisoned upstream channels.list response must not give access to
+  // some other channel's uploads playlist even if the HTTP request succeeded.
+  const observedChannelId = channel.id;
+  if (typeof observedChannelId !== 'string' || !CHANNEL_ID.test(observedChannelId) ||
+      (CHANNEL_ID.test(channelRef) && observedChannelId !== channelRef))
+    throw new Error('YouTube Data API channel identity mismatch for ' + monitor.id);
+  const details = requireRecord(channel.contentDetails);
   const uploads = requireRecord(details.relatedPlaylists).uploads;
   if (typeof uploads !== 'string' || !/^[A-Za-z0-9_-]{10,80}$/.test(uploads))
     throw new Error('YouTube Data API returned an invalid uploads playlist');
@@ -56,6 +63,12 @@ export async function fetchYouTubeDataApi(
     const status = row.status === undefined ? null : requireRecord(row.status);
     if (status !== null && status.privacyStatus !== 'public') continue;
     const snippet = requireRecord(row.snippet);
+    // Upload-playlist metadata should identify the same immutable owner.
+    // Only check optional fields if present; absence is not a mismatch.
+    for (const owner of [snippet.channelId, snippet.videoOwnerChannelId]) {
+      if (owner !== undefined && owner !== observedChannelId)
+        throw new Error('YouTube Data API playlist item channel mismatch for ' + monitor.id);
+    }
     const content = requireRecord(row.contentDetails);
     const id = content.videoId;
     const title = snippet.title;
