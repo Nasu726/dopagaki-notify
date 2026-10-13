@@ -12,11 +12,27 @@ import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, deferFetchUntil, getPending, getRunnableIds,
   getState, markSent, coolDownPending, blockWebhook, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
-  pruneStaleWikipediaPending, selectWikipediaDiscovery,
+  pruneStaleWikipediaPending, selectWikipediaDiscovery, pruneUnselectedArticlePending,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
 
 const MAX_NOTIFICATIONS_PER_TICK = 3;
+// Only these freshest candidates are eligible; already-sent ones do NOT
+// open replacement slots for older posts.
+export const LATEST_ARTICLES_PER_POLL = 3;
+function latestArticles(items: readonly ContentItem[]): ContentItem[] {
+  const seen = new Set<string>();
+  const selected: ContentItem[] = [];
+  const sorted = [...items].sort((a, b) =>
+    b.publishedAt - a.publishedAt || a.id.localeCompare(b.id));
+  for (const item of sorted) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    selected.push(item);
+    if (selected.length === LATEST_ARTICLES_PER_POLL) break;
+  }
+  return selected;
+}
 const LOOKBACK_MS = 48 * 60 * 60_000;
 // Reserved scan checkpoint; never passed to a provider API.
 const VERIFY_HEAD_CURSOR = '__verify_head__';
@@ -70,6 +86,9 @@ export async function runTick(
     let fetchErrorPhase: string | null = null;
     let wikipediaFetchSucceeded = false;
     const wikipedia = runnable.source === 'wikipedia';
+    const latestOnly = runnable.source === 'qiita' || runnable.source === 'zenn';
+    // arXiv alone continues multi-page scans. Other feeds are snapshots.
+    const paginated = runnable.source === 'arxiv';
     const discovery = wikipedia && runnable.query.endsWith(':discover');
     const wikipediaCutoff = now - runnable.intervalMinutes * 60_000;
     const due = state.next_due_at <= now;
@@ -85,14 +104,17 @@ export async function runTick(
     if (due && onSelectedDay) {
       webhookFor(runnable, env);
       try {
-        const windowStart = state.last_complete_at === null ? null : state.last_complete_at - LOOKBACK_MS;
-        const verifyingHead = !wikipedia && state.scan_cursor === VERIFY_HEAD_CURSOR;
-        const sourceCursor = wikipedia || verifyingHead ? null : state.scan_cursor;
+        const windowStart = paginated && state.last_complete_at !== null
+          ? state.last_complete_at - LOOKBACK_MS : null;
+        const verifyingHead = paginated && state.scan_cursor === VERIFY_HEAD_CURSOR;
+        // An old Qiita checkpoint is intentionally superseded by a fresh page-1
+        // snapshot; completion clears it from D1.
+        const sourceCursor = paginated && !verifyingHead ? state.scan_cursor : null;
         phase = 'fetch_and_parse';
         const result = await deps.fetchItems(runnable, env, sourceCursor, windowStart);
         phase = 'stage_items';
-        if (result.potentiallyTruncated) {
-          console.warn('monitor ' + runnable.id + ': source exhausted its paging limit; coverage incomplete');
+        if (paginated && result.potentiallyTruncated) {
+          console.warn('monitor ' + runnable.id + ': paginated scan hit its limit; coverage incomplete');
         }
         if (wikipedia) {
           await pruneStaleWikipediaPending(env.DB, runnable.id, wikipediaCutoff);
@@ -104,18 +126,23 @@ export async function runTick(
               .sort((a, b) => b.publishedAt - a.publishedAt || a.id.localeCompare(b.id))
               .slice(0, MAX_NOTIFICATIONS_PER_TICK);
           await stage(env.DB, runnable.id, newest, state.initialized_at, now);
+        } else if (latestOnly) {
+          const selected = latestArticles(result.items);
+          // Only successful polls may discard a prior alert backlog.
+          // No refill from outside the top three if one is already sent.
+          await pruneUnselectedArticlePending(env.DB, runnable.id, selected.map((item) => item.id));
+          await stage(env.DB, runnable.id, selected, state.initialized_at, now);
         } else {
+          // YouTube queues every video in the available feed; arXiv retains
+          // its chronological multi-page scan.
           await stage(env.DB, runnable.id, result.items, state.initialized_at, now);
         }
-        // Qiita uses a documented created:>= query filter, but search may be relevance
-        // ordered. Do not stop at a known ID; continue paging the filtered window.
-        const chronologicallyOrdered = runnable.source === 'arxiv' || runnable.source === 'wikipedia';
-        const reachedOverlap = chronologicallyOrdered && state.last_complete_at !== null &&
+        const reachedOverlap = paginated && state.last_complete_at !== null &&
           result.items.some((item) => item.publishedAt <= state.last_complete_at! - LOOKBACK_MS);
         phase = 'save_checkpoint';
-        if (!wikipedia && state.initialized_at !== null && result.nextCursor && !reachedOverlap && !verifyingHead) {
+        if (paginated && state.initialized_at !== null && result.nextCursor && !reachedOverlap && !verifyingHead) {
           await saveScanCursor(env.DB, runnable.id, token, now, state.scan_started_at ?? now, result.nextCursor);
-        } else if (!wikipedia && state.initialized_at !== null && state.scan_cursor !== null &&
+        } else if (paginated && state.initialized_at !== null && state.scan_cursor !== null &&
             !verifyingHead && !result.potentiallyTruncated) {
           // Offset/search pages may shift as new items arrive during a multi-Cron scan.
           // Check the newest page once more before saving the full-scan watermark.
@@ -125,9 +152,10 @@ export async function runTick(
           const nextDueAt = runnable.weeklyJstDay === undefined ? undefined :
             nextHourlyJstWeekdayDue(now, runnable.weeklyJstDay);
           await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes,
-            state.scan_started_at ?? now, !result.potentiallyTruncated, nextDueAt);
+            paginated ? state.scan_started_at ?? now : now,
+            paginated ? !result.potentiallyTruncated : true, nextDueAt);
           if (wikipedia) wikipediaFetchSucceeded = true;
-          if (state.initialized_at === null && !result.potentiallyTruncated)
+          if (state.initialized_at === null && (!paginated || !result.potentiallyTruncated))
             console.log('monitor ' + runnable.id + ': silent baseline initialized');
         }
       } catch (error) {

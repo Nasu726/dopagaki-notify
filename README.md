@@ -6,19 +6,19 @@ See [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the Japanese product specification 
 
 For the owner-assisted Cloudflare setup, see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. This is a staging runbook, not an assertion of production readiness.
 
-## Notification policy (2026-10-13, discovery release)
+## Current notification policy (2026-10-13, freshness-first release)
 
 **Adopted**
 - **Japanese Wikipedia discovery (replaces new-page alerts):** `wikipedia-ja-discovery` selects up to **one featured article** from `Category:秀逸な記事` and **one substantial random article** (main namespace, non-redirect, at least 10 KB) per **120-minute** successful scan. The API returns candidate pools (up to 8 per kind); a single indexed D1 read checks existing receipts, then at most two articles are staged and delivered **only on that scan**, not every 5 minutes. A newly configured monitor starts with a silent baseline; existing `wikipedia-ja` is no longer enabled. Eligible sent receipts provide **10-day per-monitor duplicate suppression**, after which old articles can be recommended again. Pending discoveries older than one interval are pruned in batches of at most 12 on successful scans. Curated recommendations are drawn from at most the first 500 direct article members of the featured category; category membership is Wikipedia's quality decision, **not an AI quality score**. Wikimedia errors propagate rather than silently falling back to stale content.
-- **Qiita learning + practice:** existing Rust `qiita-rust` every 360 minutes; new `qiita-algorithms` (`tag:アルゴリズム`, 240 min) and `qiita-design` (`tag:設計`, 360 min).
-- **Zenn learning + practice:** existing TypeScript `zenn-topic-typescript` every 360 minutes; new `zenn-topic-algorithm` (`topic:algorithm`, 240 min) and `zenn-topic-architecture` (`topic:architecture`, 360 min).
-- **arXiv:** `cs.DS` and `cs.AI` every 120 minutes; **YouTube:** existing configured channels/weekdays unchanged.
+- **Qiita learning + practice:** existing Rust `qiita-rust` every 360 minutes; `qiita-algorithms` (`tag:アルゴリズム`, 240 min) and `qiita-design` (`tag:設計`, 360 min). Each poll considers only the newest 3 among the first 20 search results, with no older-article backfill.
+- **Zenn learning + practice:** existing TypeScript `zenn-topic-typescript` every 360 minutes; `zenn-topic-algorithm` (`topic:algorithm`, 240 min) and `zenn-topic-architecture` (`topic:architecture`, 360 min). Each poll considers only the 3 most recently published RSS entries.
+- **arXiv:** `cs.DS` and `cs.AI` every 120 minutes with paginated overlap scans; **YouTube:** same configured channels/weekdays, checking all available feed videos and queueing every eligible new video.
 - **Discord:** sends only 09:00–19:59 JST. Worker Cron checks D1 every 5 minutes, with only one monitor processed per invocation. If a source-specific Discord Secret is absent, that source's monitors remain dormant without D1 polling.
 
 **Deferred**
 - Qiita/Zenn recommendations from older highly rated articles, semantic or AI ranking, arbitrary broad tags (including testing/performance), provider-wide de-duplication and strict global daily quotas. These need separate quality/cost policy; current Qiita/Zenn monitors continue to use new-publication feeds and three-per-tick notification dispatch. Article selection is therefore topical, **not a verified relevance/quality ranking**.
 
-**Operational safeguards:** Up to two Wikipedia notifications per successful 2-hour scan; at most 12 scans/day under exact cadence (~24 Wikipedia items/day before the JST delivery window), not a total-account daily cap. Many Qiita/Zenn tags can still flood their independent outboxes. Inspect Cloudflare D1 rows read/written, Worker CPU, upstream response status and actual Discord volume; no production metrics have been verified. No new D1 migration or secrets are needed if the old Wikipedia and current platform webhooks are already configured.
+**Operational safeguards:** Up to two Wikipedia notifications per successful 2-hour scan; at most 12 scans/day under exact cadence (~24 Wikipedia items/day before the JST delivery window), not a total-account daily cap. Qiita/Zenn discard outdated pending alerts after successful polls; YouTube retains its bounded feed backlog. Inspect Cloudflare D1 rows read/written, Worker CPU, upstream response status and actual Discord volume; deployment metrics must be validated on the deployed version. No new D1 migration or secrets are needed if the old Wikipedia and current platform webhooks are already configured.
 
 ## Add or change monitors without editing TypeScript
 
@@ -124,7 +124,7 @@ One Discord server with separate channels works as intended. Create one incoming
 - D1 durable outbox with bounded 12-article insert batches (84 SQL binds, below D1's 100-bind limit), **no baseline/old-article inserts**, and known-ID read-before-write to skip repeated inserts when nothing is new. New monitors are batch-initialized only when first encountered; once initialized, a quiet Cron invocation makes **no D1 INSERT**. Large rosters are read in chunks of at most 40 monitors (83 SQL binds), preserving global due-time priority while respecting D1's 100-bind limit. These are SQL-statement savings, not measured Cloudflare CPU results.
 - Bounded Discord delivery and retry. Source API and Discord 429/503 responses respect `Retry-After` (including HTTP-date or Discord reset-after headers) by persisting cooldowns in D1 instead of sleeping. A Discord 429 stores a **source-wide webhook cooldown in D1**, which also suppresses delivery of newly discovered articles until the cooldown expires. The failed item receives its own retry deadline. This avoids a burst of futile requests and redundant updates of every queued item. For unusable Discord webhooks (401/403/404/410), delivery for **all monitors of that source** is blocked until an operator fixes the Secret and resets the D1 flag; queued items stay intact. Queued deliveries can drain during a source fetch outage; webhook host validation; no arbitrary mentions.
 - **Qiita** JSON API adapter: stable ID and `created_at`, not `updated_at`.
-- **Wikipedia** recent *page creations*, not random articles or edits; Wikimedia-compliant descriptive `User-Agent` and `Api-User-Agent` include the repository as an operator contact. A 403 is retried no sooner than one hour later to avoid hammering a denied endpoint.
+- **Wikipedia** featured/random *article discovery* (not new-page alerts); Wikimedia-compliant descriptive `User-Agent` and `Api-User-Agent` include the repository as an operator contact. A 403 is retried no sooner than one hour later to avoid hammering a denied endpoint.
 - **arXiv** Atom API: creation date and version-independent paper ID.
 - **Zenn** user/topic RSS: stable GUID and publication date (trend feeds deliberately excluded).
 - **YouTube** channel Atom RSS: stable video ID and publication date; supports channel UC... ID or @handle/channel URL with D1 resolution cache.
@@ -146,10 +146,10 @@ Do not clear the block before the Secret is corrected. Avoid publishing the Webh
 
 - **arXiv, Zenn and YouTube** adapters have been ported from the Rust reference. Feed parsing is intentionally bounded, preserves literal CDATA content, ignores comment/CDATA markup when locating article boundaries, and rejects missing closing roots or unbalanced Atom/RSS entry tags (rather than silently returning an empty feed), but it is **not a full standards-compliant XML validator**. Actual Cloudflare runtime and source API behavior have not been verified live.
 - YouTube @handle resolution caches the corresponding channel UC... ID in D1 for seven days. The public channel page is fetched only on cache misses or expiry. A raw channel UC... ID needs no resolution.
-- **Qiita, Wikipedia and arXiv now resume bounded API pages across Cron ticks** using D1 checkpointed cursors. Each tick fetches at most one page for its selected monitor. When a non-initial scan has traversed multiple pages, it **rechecks the newest page once** before marking the scan complete, to recover top-of-feed inserts during offset pagination. A broken fetch retries the same page/checkpoint after backoff.
-- The first scan establishes a silent baseline from the newest page only. Follow-up arXiv and MediaWiki scans use a **48-hour overlap** from the preceding completed scan to bound older-page traversal, as those feeds explicitly request creation/submission order. Qiita uses the documented `created:>=YYYY-MM-DD` query operator to restrict subsequent searches to an overlapping date window (preceding completed scan minus 48 hours, and another day for timezone safety). As results may use relevance ordering, it still paginates the filtered subset until exhausted or the API's 100-page limit, rather than stopping at a known ID.
-- **Incomplete scans are now recorded in D1** (`monitor_state.incomplete_count`, `last_incomplete_at`), and do not advance `last_complete_at`. Inspect these fields when diagnosing a busy feed. A truncated page is still eligible to stage genuinely new notifications, but is not counted as a complete sweep. **This is not an absolute no-loss guarantee.** Late-indexed posts older than the 48-hour overlap, Qiita filtered results beyond 100 pages, and fixed-length Zenn/YouTube RSS feeds may leave undiscovered items. Head verification helps with page shifts but cannot guarantee coverage if new articles exceed the first-page capacity during a long scan, or if results reorder within the historical pages. Full RSS/Atom XML is still read within a size bound before individual entries are parsed; HTTP streaming currently bounds response bytes but does not stop after a matching known ID. Watch warnings when a paging limit is reached.
-- The Worker processes one due monitor and one API page per five-minute monitoring Cron invocation and sends at most three notifications per invocation. Wikipedia intentionally samples its latest three creations without paging, and suppresses pending-only delivery between 120-minute checks. A scan that needs many pages can temporarily extend effective monitoring intervals. Repeated high-frequency checks are best-effort.
+- **arXiv** resumes bounded API pages across Cron ticks using D1 cursors, rechecking the head page after an offset scan. **Qiita** deliberately checks one 20-result page without continuation; **Wikipedia** samples discovery candidates without pagination. **Zenn/YouTube** each inspect one bounded feed snapshot.
+- Initial scans establish silent baselines. Follow-up **arXiv** scans retain a 48-hour overlap; **Qiita/Zenn** intentionally limit eligible notifications to the newest three candidates from the available first-page/feed snapshot. A Qiita API response may be relevance-ordered, so global chronological recency is not guaranteed. **Wikipedia** discovery samples at most two articles per completed poll.
+- **Incomplete paginated arXiv scans** are recorded in D1 (`incomplete_count`, `last_incomplete_at`) without advancing `last_complete_at`. For Qiita/Zenn/YouTube, successful bounded feed snapshots *do* advance `last_complete_at`; skipping older posts is intentional and their historical incomplete counters remain cumulative. Late-indexed posts outside arXiv's 48-hour overlap, Qiita posts outside its first 20 returned results, and fixed-length Zenn/YouTube feeds may still be missed. The XML response is read within a fixed byte bound, then parsed.
+- The Worker processes one due monitor per five-minute monitoring Cron invocation and sends at most three notifications per invocation. Wikipedia discovery sends at most two items per 120-minute poll and suppresses pending-only delivery. Only arXiv may require many paginated ticks. Repeated high-frequency checks are best-effort.
 - Cloudflare Workers Free CPU budget is 10 ms per invocation. The owner observed p50 around 1.17 ms and normal p99 around 2.07 ms, with occasional p99 near 19 ms (zero reported errors). These measurements precede the new maintenance Cron and do not establish worst-case compliance. API waiting time is excluded from CPU accounting.
 - Initial baseline and permanently ineligible pre-baseline items are excluded without storing `ignored` outbox rows; existing legacy rows remain compatible.
 - Discord sending and D1 acknowledgement are not atomic. A crash in between may duplicate a notification.
@@ -189,3 +189,30 @@ failing every 5-minute dispatcher tick. Outbox/initial baseline are retained,
 and the scheduled invocation still reports an exception so the incident remains
 visible; the `monitor_failure` log includes the exact `retryAt` timestamp.
 Other YouTube HTTP failures and other sources retain their previous policies.
+
+## Freshness-first notification policy (2026-10-13)
+
+**Qiita:** each target requests only the first API search page (20 candidates)
+and selects the **three newest by creation timestamp** from that page. The
+search API does not guarantee global creation-time ordering, so these are not
+necessarily the newest three among all matches. No second-page catch-up is
+attempted. **Zenn:** select the three newest by publication time among entries
+in its bounded RSS snapshot. Already-sent items occupying the candidate three
+do **not** free additional slots for older entries. On a successful Qiita/Zenn
+poll, older pending messages from previous polls are deleted to prevent a
+backlog; sent receipts remain for deduplication. Failed fetches do not prune.
+
+**YouTube:** queue **every eligible new video present in the available Atom
+feed**, even when it contains the maximum 15 entries. Send at most three
+messages per five-minute Cron tick and retain the remainder in the D1 outbox,
+including across the selected weekday boundary. It cannot recover a video
+already evicted from the upstream bounded feed. The 404 hourly backoff remains.
+
+**arXiv and Wikipedia** retain their previous policies. A full bounded
+Zenn/YouTube RSS is not a scan failure, nor is ignoring Qiita's later pages.
+For these three sources `last_complete_at` records a successfully processed
+snapshot rather than an exhaustive search of all past posts. Historical
+`incomplete_count` values are cumulative and are not reset; no new increments
+are made solely because a feed is full. Existing Qiita scan cursors are
+intentionally cleared after the first successful post-upgrade scan. No D1
+migration or Secret changes are required.

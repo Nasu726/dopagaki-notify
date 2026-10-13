@@ -225,6 +225,20 @@ export async function getPending(
   return rows.results;
 }
 
+// A new high-volume source snapshot replaces the previous candidate window.
+// Discard only pending older articles; preserve sent receipts and retries for
+// articles that remain in the selected window. At most 4 SQL bindings.
+export async function pruneUnselectedArticlePending(
+  db: Database, monitorId: string, selectedIds: readonly string[],
+): Promise<void> {
+  if (selectedIds.length > 3) throw new Error('Latest candidate set exceeds three');
+  const exclusion = selectedIds.length
+    ? ' AND item_id NOT IN (' + selectedIds.map(() => '?').join(',') + ')' : '';
+  await db.prepare(
+    "DELETE FROM deliveries WHERE monitor_id = ? AND status = 'pending'" + exclusion
+  ).bind(monitorId, ...selectedIds).run();
+}
+
 // One bounded delete every successful 2h Wikipedia check (0-12 rows).
 // Old pending messages are intentionally discarded to stop backlog floods.
 export async function pruneStaleWikipediaPending(

@@ -238,9 +238,11 @@ test('Discord allows only webhook host and suppresses mentions', async () => {
 
 test('pagination checkpoint survives the next Cron invocation and completes with correct due time', async () => {
   const s = setup();
+  s.env.DISCORD_WEBHOOK_ARXIV = webhook;
+  const paged: Monitor = { ...qiita, id: 'arxiv-test', source: 'arxiv' };
   const now = Date.parse('2026-10-10T00:00:00Z');
   s.setItems([item('old', now - 1000)]);
-  await runTick(s.env, [qiita], now, s.deps);
+  await runTick(s.env, [paged], now, s.deps);
   const seen: Array<string | null | undefined> = [];
   const paging = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null) => {
     seen.push(cursor);
@@ -248,16 +250,16 @@ test('pagination checkpoint survives the next Cron invocation and completes with
       ? { items: [item('new1', now + 1000)], nextCursor: '2', potentiallyTruncated: false }
       : { items: [item('new2', now + 2000)], nextCursor: null, potentiallyTruncated: false };
   } };
-  assert.equal(await runTick(s.env, [qiita], now + 60 * 60_000, paging), 'processed');
+  assert.equal(await runTick(s.env, [paged], now + 60 * 60_000, paging), 'processed');
   assert.deepEqual(seen, [null]);
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, '2');
   assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state').get()?.next_due_at, now + 61 * 60_000);
   assert.deepEqual(s.sent, ['qiita:new1']);
-  assert.equal(await runTick(s.env, [qiita], now + 61 * 60_000, paging), 'processed');
+  assert.equal(await runTick(s.env, [paged], now + 61 * 60_000, paging), 'processed');
   assert.deepEqual(seen, [null, '2']);
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, '__verify_head__');
   assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state').get()?.next_due_at, now + 62 * 60_000);
-  await runTick(s.env, [qiita], now + 62 * 60_000, paging);
+  await runTick(s.env, [paged], now + 62 * 60_000, paging);
   assert.deepEqual(seen, [null, '2', null], 'verification must refetch page 1 exactly once');
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, null);
   assert.equal(s.raw.prepare('SELECT scan_started_at FROM monitor_state').get()?.scan_started_at, null);
@@ -268,21 +270,23 @@ test('pagination checkpoint survives the next Cron invocation and completes with
 
 test('continuation failure does not lose D1 cursor, or double-notify completed page', async () => {
   const s = setup();
+  s.env.DISCORD_WEBHOOK_ARXIV = webhook;
+  const paged: Monitor = { ...qiita, id: 'arxiv-test', source: 'arxiv' };
   const now = Date.parse('2026-10-10T00:00:00Z');
-  await runTick(s.env, [qiita], now, s.deps);
+  await runTick(s.env, [paged], now, s.deps);
   const paging = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null) => {
     if (cursor) throw new Error('page 2 temporarily unavailable');
     return { items: [item('fresh', now + 100)], nextCursor: '2', potentiallyTruncated: false };
   } };
-  await runTick(s.env, [qiita], now + 60 * 60_000, paging);
-  await assert.rejects(() => runTick(s.env, [qiita], now + 61 * 60_000, paging), /page 2/);
+  await runTick(s.env, [paged], now + 60 * 60_000, paging);
+  await assert.rejects(() => runTick(s.env, [paged], now + 61 * 60_000, paging), /page 2/);
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, '2');
   assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state').get()?.next_due_at, now + 66 * 60_000);
   const resumed = { ...paging, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null) => {
     assert.equal(cursor, '2');
     return { items: [item('fresh2', now + 200)], nextCursor: null, potentiallyTruncated: false };
   } };
-  await runTick(s.env, [qiita], now + 66 * 60_000, resumed);
+  await runTick(s.env, [paged], now + 66 * 60_000, resumed);
   assert.deepEqual(s.sent, ['qiita:fresh', 'qiita:fresh2']);
 });
 
@@ -299,7 +303,7 @@ test('initialization observes first page only and never floods old content', asy
   assert.equal(s.raw.prepare('SELECT initialized_at FROM monitor_state').get()?.initialized_at, now);
 });
 
-test('time-based overlap stops arXiv page scans but not Qiita relevance searches', async () => {
+test('arXiv uses the overlap to end paging while Qiita ignores continuation', async () => {
   const now = Date.parse('2026-10-10T00:00:00Z');
   const old = item('old', now - 4 * 24 * 60 * 60_000);
   const s = setup();
@@ -318,7 +322,7 @@ test('time-based overlap stops arXiv page scans but not Qiita relevance searches
   await runTick(s.env, [qiita], now + 60 * 60_000, { ...s.deps, fetchItems: async () => ({
     items: [old], nextCursor: '2', potentiallyTruncated: false,
   }) });
-  assert.equal(s.raw.prepare("SELECT scan_cursor FROM monitor_state WHERE id='qiita-rust'").get()?.scan_cursor, '2');
+  assert.equal(s.raw.prepare("SELECT scan_cursor FROM monitor_state WHERE id='qiita-rust'").get()?.scan_cursor, null);
 });
 
 test('fetch errors do not starve pending Discord deliveries', async () => {
@@ -392,53 +396,60 @@ test('legacy initialized rows without a semantic identity cannot be silently cla
   assert.equal(s.raw.prepare('SELECT lease_token FROM monitor_state WHERE id = ?').get(qiita.id)?.lease_token, null);
 });
 
-test('Qiita runner supplies previous complete scan time as a stable filtered window', async () => {
+test('Qiita polls only the first search page, even with an old continuation cursor', async () => {
   const s = setup();
   const now = Date.parse('2026-10-10T00:00:00Z');
+  const cursors: Array<string | null | undefined> = [];
   const windows: Array<number | null | undefined> = [];
-  const fetch = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null, window?: number | null) => {
-    windows.push(window);
-    if (windows.length === 1) return { items: [], nextCursor: null, potentiallyTruncated: false };
-    if (windows.length === 2) return { items: [item('new1', now + 1)], nextCursor: '2', potentiallyTruncated: false };
-    assert.equal(cursor, '2');
-    return { items: [item('new2', now + 2)], nextCursor: null, potentiallyTruncated: false };
+  const fetcher = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env,
+    cursor?: string | null, windowStart?: number | null) => {
+    cursors.push(cursor);
+    windows.push(windowStart);
+    return { items: [item('fresh', now + 1000)], nextCursor: '2', potentiallyTruncated: true };
   }};
-  await runTick(s.env, [qiita], now, fetch);
-  await runTick(s.env, [qiita], now + 60 * 60_000, fetch);
-  await runTick(s.env, [qiita], now + 61 * 60_000, fetch);
-  assert.equal(windows[0], null);
-  assert.equal(windows[1], now - 48 * 60 * 60_000);
-  assert.equal(windows[2], windows[1]);
-  assert.deepEqual(s.sent, ['qiita:new1', 'qiita:new2']);
+  await runTick(s.env, [qiita], now, fetcher); // silent baseline
+  s.raw.prepare("UPDATE monitor_state SET scan_cursor='17' WHERE id=?").run(qiita.id);
+  await runTick(s.env, [qiita], now + 60 * 60_000, fetcher);
+  assert.deepEqual(cursors, [null, null]);
+  assert.deepEqual(windows, [null, null]);
+  assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state WHERE id=?')
+    .get(qiita.id)?.scan_cursor, null);
+  assert.equal(s.raw.prepare('SELECT last_complete_at FROM monitor_state WHERE id=?')
+    .get(qiita.id)?.last_complete_at, now + 60 * 60_000);
+  assert.equal(s.raw.prepare('SELECT incomplete_count FROM monitor_state WHERE id=?')
+    .get(qiita.id)?.incomplete_count, 0);
+  assert.deepEqual(s.sent, ['qiita:fresh']);
 });
 
 test('truncated scan records coverage gap without advancing last successful full-scan time', async () => {
   const s = setup();
+  s.env.DISCORD_WEBHOOK_ARXIV = webhook;
+  const paged: Monitor = { ...qiita, id: 'arxiv-test', source: 'arxiv' };
   const now = Date.parse('2026-10-10T00:00:00Z');
   // Initial baseline is silent but, when non-exhaustive, must not be called a complete scan.
-  await runTick(s.env, [qiita], now, { ...s.deps, fetchItems: async () => ({
+  await runTick(s.env, [paged], now, { ...s.deps, fetchItems: async () => ({
     items: [item('old', now - 1000)], potentiallyTruncated: true, nextCursor: null,
   }) });
-  let state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(qiita.id);
+  let state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(paged.id);
   assert.equal(state?.initialized_at, now);
   assert.equal(state?.last_complete_at, null);
   assert.equal(state?.last_incomplete_at, now);
   assert.equal(state?.incomplete_count, 1);
 
   const next = now + 60 * 60_000;
-  await runTick(s.env, [qiita], next, { ...s.deps, fetchItems: async () => ({
+  await runTick(s.env, [paged], next, { ...s.deps, fetchItems: async () => ({
     items: [item('fresh', now + 1000)], potentiallyTruncated: false, nextCursor: null,
   }) });
-  state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(qiita.id);
+  state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(paged.id);
   assert.equal(state?.last_complete_at, next);
   assert.equal(state?.incomplete_count, 1);
   assert.deepEqual(s.sent, ['qiita:fresh']);
 
   const overload = next + 60 * 60_000;
-  await runTick(s.env, [qiita], overload, { ...s.deps, fetchItems: async () => ({
+  await runTick(s.env, [paged], overload, { ...s.deps, fetchItems: async () => ({
     items: [item('fresh2', next + 1000)], potentiallyTruncated: true, nextCursor: null,
   }) });
-  state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(qiita.id);
+  state = s.raw.prepare('SELECT * FROM monitor_state WHERE id=?').get(paged.id);
   assert.equal(state?.last_complete_at, next, 'full scan checkpoint must not advance on exhaustion');
   assert.equal(state?.last_incomplete_at, overload);
   assert.equal(state?.incomplete_count, 2);
@@ -448,8 +459,10 @@ test('truncated scan records coverage gap without advancing last successful full
 
 test('head recheck recovers a new article inserted while offset pagination was in progress', async () => {
   const s = setup();
+  s.env.DISCORD_WEBHOOK_ARXIV = webhook;
+  const paged: Monitor = { ...qiita, id: 'arxiv-test', source: 'arxiv' };
   const now = Date.parse('2026-10-10T00:00:00Z');
-  await runTick(s.env, [qiita], now, s.deps);
+  await runTick(s.env, [paged], now, s.deps);
   const seen: Array<string | null | undefined> = [];
   const fetcher = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null) => {
     seen.push(cursor);
@@ -467,11 +480,11 @@ test('head recheck recovers a new article inserted while offset pagination was i
       nextCursor: '2', potentiallyTruncated: false,
     };
   } };
-  await runTick(s.env, [qiita], now + 60 * 60_000, fetcher);
-  await runTick(s.env, [qiita], now + 61 * 60_000, fetcher);
+  await runTick(s.env, [paged], now + 60 * 60_000, fetcher);
+  await runTick(s.env, [paged], now + 61 * 60_000, fetcher);
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor,
     '__verify_head__');
-  await runTick(s.env, [qiita], now + 62 * 60_000, fetcher);
+  await runTick(s.env, [paged], now + 62 * 60_000, fetcher);
   assert.deepEqual(seen, [null, '2', null]);
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, null);
   assert.deepEqual(s.sent, ['qiita:first', 'qiita:late']);
@@ -479,8 +492,10 @@ test('head recheck recovers a new article inserted while offset pagination was i
 
 test('failed head verification is retried from the head, not marked complete', async () => {
   const s = setup();
+  s.env.DISCORD_WEBHOOK_ARXIV = webhook;
+  const paged: Monitor = { ...qiita, id: 'arxiv-test', source: 'arxiv' };
   const now = Date.parse('2026-10-10T00:00:00Z');
-  await runTick(s.env, [qiita], now, s.deps);
+  await runTick(s.env, [paged], now, s.deps);
   let attempts = 0;
   const fetcher = { ...s.deps, fetchItems: async (_m: Monitor, _e: Env, cursor?: string | null) => {
     attempts++;
@@ -490,11 +505,11 @@ test('failed head verification is retried from the head, not marked complete', a
     if (attempts === 3) throw new Error('head request unavailable');
     return { items: [item('b', now + 2)], nextCursor: null, potentiallyTruncated: false };
   } };
-  await runTick(s.env, [qiita], now + 60 * 60_000, fetcher);
-  await runTick(s.env, [qiita], now + 61 * 60_000, fetcher);
-  await assert.rejects(() => runTick(s.env, [qiita], now + 62 * 60_000, fetcher), /head request/);
+  await runTick(s.env, [paged], now + 60 * 60_000, fetcher);
+  await runTick(s.env, [paged], now + 61 * 60_000, fetcher);
+  await assert.rejects(() => runTick(s.env, [paged], now + 62 * 60_000, fetcher), /head request/);
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, '__verify_head__');
-  await runTick(s.env, [qiita], now + 67 * 60_000, fetcher);
+  await runTick(s.env, [paged], now + 67 * 60_000, fetcher);
   assert.equal(s.raw.prepare('SELECT scan_cursor FROM monitor_state').get()?.scan_cursor, null);
   assert.deepEqual(s.sent, ['qiita:a', 'qiita:b']);
 });
@@ -1017,4 +1032,81 @@ test('YouTube RSS 404 respects Retry-After longer than one hour; other 404s are 
     assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
       .get(m.id)?.next_due_at, now + scenario.expected);
   }
+});
+
+test('Qiita and Zenn select only the newest three candidates without backfilling sent slots', async () => {
+  for (const source of ['qiita', 'zenn'] as const) {
+    const s = setup();
+    if (source === 'zenn') s.env.DISCORD_WEBHOOK_ZENN = webhook;
+    const monitor: Monitor = { id: source + '-latest', source,
+      query: source === 'qiita' ? 'tag:Rust' : 'topic:typescript',
+      enabled: true, intervalMinutes: 60 };
+    const now = Date.parse('2026-10-10T00:00:00Z');
+    await runTick(s.env, [monitor], now, s.deps);
+    const rows = [
+      item('older', now + 1_000), item('top1', now + 5_000),
+      item('top2', now + 4_000), item('top3', now + 3_000),
+      item('outside', now + 2_000),
+    ];
+    s.setItems(rows);
+    const fresh = now + 60 * 60_000;
+    await runTick(s.env, [monitor], fresh, s.deps);
+    assert.deepEqual([...s.sent].sort(), ['qiita:top1', 'qiita:top2', 'qiita:top3']);
+    assert.equal(s.raw.prepare('SELECT COUNT(*) AS count FROM deliveries WHERE monitor_id=?')
+      .get(monitor.id)?.count, 3);
+    // Repeat exactly these candidates: already-sent articles cannot cause
+    // older rows to be promoted to the notification list.
+    await runTick(s.env, [monitor], fresh + 60 * 60_000, s.deps);
+    assert.equal(s.sent.length, 3);
+  }
+});
+
+test('Qiita drops obsolete pending alerts but keeps the current fresh window', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  await runTick(s.env, [qiita], now, s.deps);
+  s.setItems([item('old', now + 1000), item('older', now + 900)]);
+  s.fail(true);
+  const original = console.error;
+  console.error = () => {};
+  try {
+    await runTick(s.env, [qiita], now + 60 * 60_000, s.deps);
+  } finally { console.error = original; }
+  assert.equal(s.raw.prepare("SELECT COUNT(*) AS n FROM deliveries WHERE status='pending'").get()?.n, 2);
+  s.fail(false);
+  s.setItems([item('new3', now + 4000), item('new1', now + 6000),
+    item('new2', now + 5000), item('old', now + 1000)]);
+  await runTick(s.env, [qiita], now + 120 * 60_000, s.deps);
+  assert.deepEqual([...s.sent].sort(), ['qiita:new1', 'qiita:new2', 'qiita:new3']);
+  assert.equal(s.raw.prepare("SELECT COUNT(*) AS n FROM deliveries WHERE item_id IN ('qiita:old','qiita:older')").get()?.n, 0);
+});
+
+test('YouTube stages all fifteen feed videos, then drains the durable queue in batches', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitor: Monitor = { id: 'youtube-fifteen', source: 'youtube',
+    query: '@example', enabled: true, intervalMinutes: 60 };
+  const now = Date.parse('2026-10-10T00:00:00Z'); // 09:00 JST
+  await runTick(s.env, [monitor], now, s.deps);
+  s.setItems(Array.from({ length: 15 }, (_, i) =>
+    item('video-' + i, now + 1000 + i * 1000)));
+  const snap = { ...s.deps, fetchItems: async () => ({
+    items: Array.from({ length: 15 }, (_, i) =>
+      item('video-' + i, now + 1000 + i * 1000)),
+    potentiallyTruncated: true,
+    nextCursor: 'ignored',
+  }) };
+  await runTick(s.env, [monitor], now + 60 * 60_000, snap);
+  assert.equal(s.sent.length, 3);
+  assert.equal(s.raw.prepare("SELECT COUNT(*) AS n FROM deliveries WHERE monitor_id=?")
+    .get(monitor.id)?.n, 15);
+  assert.equal(s.raw.prepare("SELECT last_complete_at FROM monitor_state WHERE id=?")
+    .get(monitor.id)?.last_complete_at, now + 60 * 60_000);
+  assert.equal(s.raw.prepare("SELECT incomplete_count FROM monitor_state WHERE id=?")
+    .get(monitor.id)?.incomplete_count, 0);
+  for (let i = 1; i <= 4; i++) {
+    await runTick(s.env, [monitor], now + 60 * 60_000 + i * 5 * 60_000, snap);
+  }
+  assert.equal(s.sent.length, 15);
+  assert.equal(new Set(s.sent).size, 15);
 });
