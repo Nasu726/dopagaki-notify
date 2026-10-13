@@ -22,7 +22,9 @@ export async function fetchYouTubeDataApi(
 ): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean }> {
   if (!apiKey || apiKey.length > 512 || /\s/.test(apiKey))
     throw new Error('Invalid YOUTUBE_API_KEY');
-  const channelRef = normalizeChannelReference(monitor.query);
+  // Pinned IDs prevent a fork's page parser or stale cache from crossing
+  // channels, and work equally well with the official Data API.
+  const channelRef = monitor.youtubeChannelId ?? normalizeChannelReference(monitor.query);
   const channelUrl = new URL('https://www.googleapis.com/youtube/v3/channels');
   channelUrl.searchParams.set('part', 'contentDetails');
   channelUrl.searchParams.set(CHANNEL_ID.test(channelRef) ? 'id' : 'forHandle', channelRef);

@@ -16,11 +16,11 @@ Built for personal use and for people who want to fork and tailor a simple notif
 | Zenn | Up to 3 newest entries in a topic or user RSS feed |
 | arXiv | Newly submitted papers in selected categories, with paginated scanning |
 | OpenAlex | Papers by search terms, topic ID, or author ID; bounded to the most recent 25 works published within seven days |
-| YouTube | Always notify the latest available video if unseen, regardless of age; also notify normal new uploads. Optional YouTube Data API alternative to RSS |
+| YouTube | Always notify the latest available video if unseen, regardless of age; also notify normal new uploads. Optional Data API and pinned `channelId` to prevent cross-channel resolution. Notifications include thumbnails |
 | Japanese Wikipedia | Up to 1 featured article and 1 sufficiently substantial random article per recommendation poll |
 
 - Stable item IDs prevent repeated notifications. The first successful poll normally establishes a **silent baseline**, except for **YouTube**, which notifies the newest video whenever it is not already acknowledged, even if it was published before the initial baseline. YouTube sent IDs are kept permanently to prevent repeated historical notifications; newer videos are still detected.
-- Each monitor has its own polling interval. YouTube monitors may run only on a chosen day of the week in Japan Standard Time.
+- Each monitor has its own polling interval. YouTube monitors may run only on a chosen day of the week in Japan Standard Time. YouTube Discord embeds include the video's thumbnail.
 - One Discord webhook **per source** (shared by monitors of that source). **Notifications are enabled around the clock by default**. An optional JST delivery window can defer messages while source polling continues.
 - The 5-minute dispatcher polls one due monitor at a time and sends up to three queued notifications per invocation. D1 tracks pending items, retries, webhook cooldowns, and deduplication state.
 - Qiita and Zenn deliberately **prioritize freshness over completeness**; this is not a content archive. Qiita search results are not necessarily chronological, so posts outside the first 20 results cannot be selected.
@@ -255,3 +255,7 @@ See `src/sources/` and `src/runner.ts` for adding integrations. The [design brie
 ## License
 
 [MIT License](LICENSE) (Copyright (c) 2026 nasu). Modification, redistribution and commercial use are permitted provided the copyright notice and license terms are included.
+
+### YouTube handle identity
+
+For YouTube monitor targets, specify an optional `channelId` alongside `channel`, e.g. `{"id":"youtube-example","channel":"@example","channelId":"UC1234567890123456789012","enabled":true}`. The pinned immutable channel ID bypasses page scraping and cached handle resolution (in RSS and official API mode). Without a pinned ID, the app accepts only the channel page's ownership metadata, never related-channel links or arbitrary page JSON IDs. An RSS channel ID mismatch causes a retryable error instead of a wrong notification. The Discord YouTube embed also includes a thumbnail image.

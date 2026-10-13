@@ -54,13 +54,15 @@
       "id": "youtube-yurugengo",
       "channel": "@yurugengo",
       "enabled": true,
-      "weekdayJst": "tuesday"
+      "weekdayJst": "tuesday",
+      "channelId": "UCmpkIzF3xFzhPez7gXOyhVg"
     },
     {
       "id": "youtube-yurucom",
       "channel": "@yurucom",
       "enabled": true,
-      "weekdayJst": "sunday"
+      "weekdayJst": "sunday",
+      "channelId": "UCpLu0KjNy616-E95gPx7LZg"
     },
     {
       "id": "youtube-3blue1brown-japan",

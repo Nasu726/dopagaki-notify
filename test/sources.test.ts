@@ -5,7 +5,7 @@ import { parseZenn, zennFeedUrl, fetchZenn } from '../src/sources/zenn.ts';
 import { parseYouTube, normalizeChannelReference, extractChannelId, fetchYouTube } from '../src/sources/youtube.ts';
 import { entries, fetchTextBounded, tagText } from '../src/sources/xml.ts';
 import { MONITORS, arxivCategoryQuery, queryMonitorsFromTargets, youtubeMonitorsFromTargets, withIntervals, validateMonitors } from '../src/config.ts';
-import { webhookFor } from '../src/discord.ts';
+import { webhookFor, notifyDiscord } from '../src/discord.ts';
 import type { Env, Monitor } from '../src/types.ts';
 
 const base = (source: Monitor['source'], query: string): Monitor => ({
@@ -81,13 +81,13 @@ test('YouTube preserves video identity and published timestamp despite updates',
 });
 
 test('YouTube @handle resolves through public channel page before RSS fetch', async () => {
-  assert.equal(extractChannelId('{"channelId":"UC1234567890123456789012"}'), 'UC1234567890123456789012');
+  assert.equal(extractChannelId('<meta itemprop="channelId" content="UC1234567890123456789012">'), 'UC1234567890123456789012');
   let count = 0;
   await fetchYouTube(base('youtube', '@example'), async (input) => {
     count++;
     if (count === 1) {
       assert.equal(String(input), 'https://www.youtube.com/@example');
-      return new Response('{"channelId":"UC1234567890123456789012"}');
+      return new Response('<meta itemprop="channelId" content="UC1234567890123456789012">');
     }
     assert.equal(new URL(String(input)).searchParams.get('channel_id'), 'UC1234567890123456789012');
     return new Response(youtubeXml);
@@ -270,4 +270,49 @@ test('multiple YouTube channels have independently configured intervals and flag
   assert.throws(() => validateMonitors(withIntervals(youtubeMonitorsFromTargets([
     { id: 'youtube-invalid', channel: 'https://evil.example/x', enabled: true },
   ]), { 'youtube-invalid': 60 })), /invalid channel reference/);
+});
+
+test('YouTube handle lookup refuses incidental IDs from related channels', () => {
+  const yurucom = 'UCpLu0KjNy616-E95gPx7LZg';
+  const yurugengo = 'UCmpkIzF3xFzhPez7gXOyhVg';
+  const page = '<script>{"channelId":"' + yurucom +
+    '","externalId":"' + yurucom + '"}</script>' +
+    '<a href="/channel/' + yurucom + '">related</a>' +
+    '<meta content="' + yurugengo + '" itemprop="channelId">';
+  assert.equal(extractChannelId(page), yurugengo,
+    'only owner metadata may resolve a channel, even if content precedes itemprop');
+  assert.throws(() => extractChannelId(
+    '<script>{"channelId":"' + yurucom + '"}</script><a href="/channel/' + yurucom + '">sister</a>'
+  ), /Could not identify YouTube channel owner/);
+});
+
+test('pinned YouTube targets retain handle monitor identity but bypass unreliable channel page/cache', () => {
+  const target = youtubeMonitorsFromTargets([{
+    id:'youtube-yurugengo', channel:'@yurugengo', channelId:'UCmpkIzF3xFzhPez7gXOyhVg',
+    weekdayJst:'tuesday', enabled:true,
+  }])[0]!;
+  const monitor = withIntervals([target],{'youtube-yurugengo':60})[0]!;
+  assert.equal(monitor.query, '@yurugengo');
+  assert.equal(monitor.youtubeChannelId,'UCmpkIzF3xFzhPez7gXOyhVg');
+  assert.doesNotThrow(() => validateMonitors([monitor]));
+  assert.throws(() => validateMonitors([{
+    ...monitor,youtubeChannelId:'UCpLu0KjNy616-E95gPx7LZg', query:'UCmpkIzF3xFzhPez7gXOyhVg',
+  }]),/Pinned YouTube channel ID does not match query/);
+});
+
+test('Discord YouTube embeds include a video thumbnail while other sources remain unchanged', async () => {
+  const payloads: unknown[] = [];
+  const post: typeof fetch = async (_url, options) => {
+    payloads.push(JSON.parse(String(options?.body)));
+    return Response.json({id:'ok'});
+  };
+  const discordWebhook='https://discord.com/api/webhooks/1234/token';
+  const video = { id: 'youtube:XkD2XZSerCg', title: 'Video',
+    url:'https://www.youtube.com/watch?v=XkD2XZSerCg',publishedAt:Date.now() };
+  await notifyDiscord(discordWebhook,'youtube',video,post);
+  await notifyDiscord(discordWebhook,'qiita',{...video,id:'qiita:abcd'},post);
+  const yt = payloads[0] as {embeds: {image?:{url:string}}[]};
+  const qiita = payloads[1] as {embeds:{image?:{url:string}}[]};
+  assert.equal(yt.embeds[0]?.image?.url,'https://i.ytimg.com/vi/XkD2XZSerCg/hqdefault.jpg');
+  assert.equal(qiita.embeds[0]?.image,undefined);
 });

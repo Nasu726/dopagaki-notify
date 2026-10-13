@@ -31,11 +31,14 @@ export async function notifyDiscord(
 ): Promise<void> {
   const url = new URL(webhook);
   url.searchParams.set('wait', 'true');
+  const youtubeId = source === 'youtube'
+    ? /^youtube:([A-Za-z0-9_-]{11})$/.exec(item.id)?.[1] : undefined;
   const payload = {
     embeds: [{
       title: item.title.slice(0, 256),
       url: item.url,
       description: source + ' · ' + new Date(item.publishedAt).toISOString(),
+      ...(youtubeId ? { image: { url: 'https://i.ytimg.com/vi/' + youtubeId + '/hqdefault.jpg' } } : {}),
     }],
     allowed_mentions: { parse: [] },
   };

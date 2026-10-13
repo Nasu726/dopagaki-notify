@@ -37,7 +37,7 @@ test('YouTube handle resolution uses D1 cache and refreshes only after seven day
     const url = new URL(String(input));
     if (url.pathname === '/@sample') {
       channelPageRequests++;
-      return new Response('{"channelId":"' + ID + '"}');
+      return new Response('<meta itemprop="channelId" content="' + ID + '">');
     }
     assert.equal(url.searchParams.get('channel_id'), ID);
     rssRequests++;
@@ -61,4 +61,30 @@ test('Raw YouTube channel ID bypasses lookup/cache entirely', async () => {
   }, d1ChannelCache(db));
   assert.equal(result.items[0]?.id, 'youtube:AbCdEf12345');
   assert.equal(seen, 1);
+});
+
+test('pinned channel ID overrides a poisoned cached @handle mapping', async () => {
+  const db = createDB();
+  const yurugengo = 'UCmpkIzF3xFzhPez7gXOyhVg';
+  const yurucom = 'UCpLu0KjNy616-E95gPx7LZg';
+  await d1ChannelCache(db).set('@yurugengo',yurucom);
+  let requests = 0;
+  const monitor = {...MONITOR,id:'youtube-yurugengo',query:'@yurugengo',youtubeChannelId:yurugengo};
+  const items = await fetchYouTube(monitor,async (url) => {
+    requests++;
+    const source = new URL(String(url));
+    assert.equal(source.pathname,'/feeds/videos.xml');
+    assert.equal(source.searchParams.get('channel_id'),yurugengo);
+    return new Response('<feed><yt:channelId>'+yurugengo+'</yt:channelId><entry>'+
+      '<id>yt:video:AbCdEf12345</id><published>2026-10-10T00:00:00Z</published>'+
+      '<title>Video</title></entry></feed>');
+  },d1ChannelCache(db));
+  assert.equal(requests,1,'no metadata fetch or cached wrong ID should be used');
+  assert.equal(items.items[0]?.id,'youtube:AbCdEf12345');
+  await assert.rejects(() => fetchYouTube(monitor,async ()=>
+    new Response('<feed><yt:channelId>'+yurucom+'</yt:channelId></feed>')),
+    /YouTube RSS channel ID differs from requested/);
+  await assert.rejects(() => fetchYouTube(monitor,async ()=>
+    new Response('<feed><entry><id>yt:video:AbCdEf12345</id></entry></feed>')),
+    /YouTube RSS has no verified channel ID/);
 });

@@ -14,6 +14,7 @@ export interface Monitor {
   intervalMinutes: number;
   enabled: boolean;
   weeklyJstDay?: string; // optional fixed weekday for weekly YouTube polling
+  youtubeChannelId?: string; // optional pinned UC... ID, preserving query/monitor identity
 }
 export interface D1Prepared {
   bind(...parameters: unknown[]): D1Prepared;

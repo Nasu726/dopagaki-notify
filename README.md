@@ -20,7 +20,7 @@
 | 日本語 Wikipedia | 「秀逸な記事」から最大1件＋一定以上の長さのランダム記事を最大1件、おすすめする |
 
 - 記事・動画の **ID で重複通知を抑止**します。Qiita・Zenn・arXiv・Wikipedia は初回の正常取得では過去の投稿を送信しません。**YouTube だけは最新動画を公開日時にかかわらず未通知なら通知**します。既に初期化済みの監視も対象です。以降の新着動画も通知します。YouTube の送信済みIDだけは永続保存し、過去動画を何度も通知しないようにします。
-- 監視対象ごとに取得間隔を設定できます。YouTube は日本時間の曜日指定にも対応しています。
+- 監視対象ごとに取得間隔を設定できます。YouTube は日本時間の曜日指定にも対応しています。YouTube の通知はサムネイルを Embed に表示します。
 - Discord Webhook は **情報源ごとに1つ**使用します。**既定では24時間通知**します。必要な人だけ送信可能な時間帯(JST)を設定できます。時間帯外でも監視を続け、未送信通知は D1 に保持します。
 - 通信失敗や Discord のレート制限には、D1 に保持した再試行時刻・未送信キューで対応します。5分ごとの Cron は、1回につき原則1監視対象、Discord への送信は最大3件です。
 - Qiita・Zenn は **最新を優先**して古い候補を意図的に見送ります。すべての記事を収集・保存するアーカイバーではありません。Qiita の検索結果は必ずしも新着順ではないため、最初の20件に含まれない記事は選べません。
@@ -42,7 +42,7 @@
   "zenn": [{ "id": "zenn-rust", "query": "topic:rust", "enabled": true }],
   "arxiv": [{ "id": "arxiv-ds", "categories": ["cs.DS"], "enabled": true }],
   "openalex": [{ "id": "oa-graph", "query": "search:graph algorithms", "enabled": true }],
-  "youtube": [{ "id": "youtube-example", "channel": "@example", "enabled": true, "weekdayJst": "sunday" }]
+  "youtube": [{ "id": "youtube-example", "channel": "@example", "channelId": "UC1234567890123456789012", "enabled": true, "weekdayJst": "sunday" }]
 }
 ```
 
@@ -59,7 +59,7 @@
 }
 ```
 
-この例は形式の説明です。`config/targets.json` の `notificationWindowJst` は既定値 `null` (時間帯制限なし)です。ファイル全体を置き換える場合、不要な監視対象を削除して両ファイルの ID を一致させてください。曜日指定付き YouTube には間隔 `60` 分を指定します。Wikipedia の推薦は `src/config.ts` に定義され、通常の公開設定では有効です。
+この例は形式の説明です。YouTube の `channelId` は任意ですが、分かる場合は指定を推奨します。`UC...` 形式の固定IDを使い、HTMLの `@handle` 解決とキャッシュに依存せず正しいチャンネルを取得します。指定しない場合は `@handle` ページの所有者メタデータから自動解決し、不確実な場合は異なるチャンネルを通知するのではなくエラーにします。`config/targets.json` の `notificationWindowJst` は既定値 `null` (時間帯制限なし)です。ファイル全体を置き換える場合、不要な監視対象を削除して両ファイルの ID を一致させてください。曜日指定付き YouTube には間隔 `60` 分を指定します。Wikipedia の推薦は `src/config.ts` に定義され、通常の公開設定では有効です。
 
 **重要:** 過去に使用した監視 ID の検索条件や情報源を変更しないでください。D1 が ID と条件の組を記憶しているため、既存 ID の条件変更は安全のため拒否されます。別の対象に切り替えるときは新しい ID を付けてください。間隔の変更だけなら同じ ID を使えます。
 
