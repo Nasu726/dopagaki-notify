@@ -142,7 +142,7 @@ test('Wikipedia discovery requests a bounded featured pool and substantial rando
     assert.equal(url.searchParams.get('rnminsize'), '10000');
     assert.equal(url.searchParams.get('rnlimit'), '8');
     return Response.json({ query: { random: Array.from({ length: 8 }, (_, i) => ({
-      ns: 0, pageid: i + 1, title: 'Random ' + i,
+      ns: 0, id: i + 1, title: 'Random ' + i,
     })) } });
   };
   const monitor = makeMonitor('wikipedia', 'ja:discover');
@@ -166,6 +166,26 @@ test('Wikipedia discovery rejects empty and malformed curated/random results, no
     Response.json({ query: { categorymembers: [], random: [] } })), /empty/);
   await assert.rejects(() => fetchWikipediaDiscovery(m, async (input) =>
     Response.json(new URL(String(input)).searchParams.get('list') === 'random'
-      ? { query: { random: [{ ns: 6, pageid: 8, title: 'File' }] } }
+      ? { query: { random: [{ ns: 6, id: 8, title: 'File' }] } }
       : { query: { categorymembers: [{ ns: 0, pageid: 1, title: 'Featured' }] } })), /Malformed/);
+});
+
+test('Wikipedia random API uses id, not categorymembers pageid', async () => {
+  const m = makeMonitor('wikipedia', 'ja:discover');
+  const fetcher: typeof fetch = async (input) => {
+    const source = new URL(String(input)).searchParams.get('list');
+    return Response.json(source === 'random'
+      ? { query: { random: [{ id: 98765, ns: 0, title: 'Random page' }] } }
+      : { query: { categorymembers: [{ pageid: 12345, ns: 0, title: 'Featured page' }] } });
+  };
+  const { items } = await fetchWikipediaDiscovery(m, fetcher);
+  assert.deepEqual(items.map((item) => item.id), ['wikipedia:ja:12345', 'wikipedia:ja:98765']);
+  assert.deepEqual(items.map((item) => item.url), [
+    'https://ja.wikipedia.org/?curid=12345', 'https://ja.wikipedia.org/?curid=98765',
+  ]);
+  await assert.rejects(() => fetchWikipediaDiscovery(m, async (input) =>
+    Response.json(new URL(String(input)).searchParams.get('list') === 'random'
+      ? { query: { random: [{ pageid: 98765, ns: 0, title: 'Wrong field' }] } }
+      : { query: { categorymembers: [{ pageid: 12345, ns: 0, title: 'Featured page' }] } })),
+  /Malformed MediaWiki discovery page \(random\)/);
 });

@@ -1,6 +1,7 @@
 import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue } from './schedule.ts';
 import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors } from './config.ts';
+import { logFailure } from './observability.ts';
 import { hasWebhookSecret, notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
 import { fetchWikipedia, fetchWikipediaDiscovery } from './sources/wikipedia.ts';
@@ -54,12 +55,19 @@ export async function runTick(
     .map((id) => enabled.get(id)).find(Boolean);
   if (!runnable) return 'idle';
   const token = deps.randomId();
-  if (!await claim(env.DB, runnable.id, runnable.source, token, now)) return 'busy';
+  let claimed = false;
+  let phase = 'claim';
+  let retryAt: number | null = null;
   try {
+    claimed = await claim(env.DB, runnable.id, runnable.source, token, now);
+    if (!claimed) return 'busy';
+    phase = 'load_state';
     const state = await getState(env.DB, runnable.id, runnable.source);
+    phase = 'check_identity';
     await assertMonitorIdentity(env.DB, runnable.id, token, runnable.source,
       runnable.query, state.config_identity, state.initialized_at);
     let fetchError: unknown;
+    let fetchErrorPhase: string | null = null;
     let wikipediaFetchSucceeded = false;
     const wikipedia = runnable.source === 'wikipedia';
     const discovery = wikipedia && runnable.query.endsWith(':discover');
@@ -70,6 +78,7 @@ export async function runTick(
     if (due && !onSelectedDay && runnable.weeklyJstDay !== undefined) {
       // A newly enabled monitor (or a retry interrupted across midnight)
       // must not fetch outside its specified JST weekday.
+      phase = 'defer_weekday_fetch';
       await deferFetchUntil(env.DB, runnable.id, token,
         nextHourlyJstWeekdayDue(now, runnable.weeklyJstDay));
     }
@@ -79,7 +88,9 @@ export async function runTick(
         const windowStart = state.last_complete_at === null ? null : state.last_complete_at - LOOKBACK_MS;
         const verifyingHead = !wikipedia && state.scan_cursor === VERIFY_HEAD_CURSOR;
         const sourceCursor = wikipedia || verifyingHead ? null : state.scan_cursor;
+        phase = 'fetch_and_parse';
         const result = await deps.fetchItems(runnable, env, sourceCursor, windowStart);
+        phase = 'stage_items';
         if (result.potentiallyTruncated) {
           console.warn('monitor ' + runnable.id + ': source exhausted its paging limit; coverage incomplete');
         }
@@ -101,6 +112,7 @@ export async function runTick(
         const chronologicallyOrdered = runnable.source === 'arxiv' || runnable.source === 'wikipedia';
         const reachedOverlap = chronologicallyOrdered && state.last_complete_at !== null &&
           result.items.some((item) => item.publishedAt <= state.last_complete_at! - LOOKBACK_MS);
+        phase = 'save_checkpoint';
         if (!wikipedia && state.initialized_at !== null && result.nextCursor && !reachedOverlap && !verifyingHead) {
           await saveScanCursor(env.DB, runnable.id, token, now, state.scan_started_at ?? now, result.nextCursor);
         } else if (!wikipedia && state.initialized_at !== null && state.scan_cursor !== null &&
@@ -125,11 +137,14 @@ export async function runTick(
         const serverDelay = suggestedRetryDelay(error);
         const delay = error instanceof HttpStatusError && error.source === 'MediaWiki' &&
           error.status === 403 ? Math.max(60 * 60_000, serverDelay ?? 0) : serverDelay;
-        await postponeFetch(env.DB, runnable.id, token, now, delay);
+        fetchErrorPhase = phase;
+        phase = 'schedule_fetch_retry';
+        retryAt = await postponeFetch(env.DB, runnable.id, token, now, delay);
         // A source outage must not block already queued Discord notifications.
         fetchError = error;
       }
     }
+    phase = 'prepare_delivery';
     const webhook = webhookFor(runnable, env);
     // Continue polling sources at night, but leave outgoing notifications
     // queued until the next 09:00-20:00 JST delivery window.
@@ -140,32 +155,55 @@ export async function runTick(
         wikipedia ? wikipediaCutoff : undefined);
     for (const item of pending) {
       // A slow upstream fetch may have crossed 20:00 JST since the tick began.
-      // Check again immediately before posting, not only at tick selection.
       if (!isJstNotificationTime(deps.clock?.() ?? now)) break;
+      phase = 'discord_send';
       try {
         await deps.send(webhook, runnable.source, {
           id: item.item_id, title: item.title, url: item.url, publishedAt: item.published_at,
         });
-        await markSent(env.DB, runnable.id, item.item_id, now);
       } catch (error) {
         if (isWebhookInvalid(error)) {
+          phase = 'block_invalid_webhook';
           await blockWebhook(env.DB, runnable.source, error.status, now);
-          console.error('Discord webhook disabled for monitor ' + runnable.id +
-            ' after HTTP ' + error.status + '; replace secret and explicitly reset source-level D1 block');
+          logFailure({ event: 'monitor_failure', source: runnable.source, monitorId: runnable.id,
+            phase: 'discord_send', itemId: item.item_id }, error);
           break;
         }
-        await retryLater(env.DB, runnable.id, item.item_id, item.attempts, now, suggestedRetryDelay(error));
-        console.error('Discord delivery failed for ' + runnable.id + '/' + item.item_id + '; retry scheduled');
+        phase = 'schedule_delivery_retry';
+        const nextAttempt = await retryLater(env.DB, runnable.id, item.item_id,
+          item.attempts, now, suggestedRetryDelay(error));
+        logFailure({ event: 'monitor_failure', source: runnable.source, monitorId: runnable.id,
+          phase: 'discord_send', itemId: item.item_id, retryAt: nextAttempt }, error);
         // All items for this monitor share a webhook; a 429 must stop the burst.
         if (isRateLimited(error)) {
+          phase = 'cooldown_webhook';
           await coolDownPending(env.DB, runnable.source, now, suggestedRetryDelay(error));
           break;
         }
+        continue;
+      }
+      // Sending succeeded; a D1 acknowledgement failure must not be logged as
+      // a Discord failure. The pending receipt is retained for recovery.
+      phase = 'ack_delivery';
+      await markSent(env.DB, runnable.id, item.item_id, now);
+    }
+    if (fetchError !== undefined) {
+      phase = fetchErrorPhase ?? 'fetch_and_parse';
+      throw fetchError;
+    }
+    return 'processed';
+  } catch (error) {
+    logFailure({ event: 'monitor_failure', source: runnable.source, monitorId: runnable.id,
+      phase, retryAt }, error);
+    throw error;
+  } finally {
+    if (claimed) {
+      try { await release(env.DB, runnable.id, token); }
+      catch (error) {
+        logFailure({ event: 'monitor_failure', source: runnable.source, monitorId: runnable.id,
+          phase: 'release_lease' }, error);
+        throw error;
       }
     }
-    if (fetchError !== undefined) throw fetchError;
-    return 'processed';
-  } finally {
-    await release(env.DB, runnable.id, token);
   }
 }
