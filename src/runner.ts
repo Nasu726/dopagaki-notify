@@ -6,6 +6,7 @@ import { hasWebhookSecret, notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
 import { fetchWikipedia, fetchWikipediaDiscovery } from './sources/wikipedia.ts';
 import { fetchArxiv } from './sources/arxiv.ts';
+import { fetchOpenAlex, OPENALEX_LOOKBACK_MS } from './sources/openalex.ts';
 import { fetchZenn } from './sources/zenn.ts';
 import { fetchYouTube } from './sources/youtube.ts';
 import { fetchYouTubeDataApi } from './sources/youtube-api.ts';
@@ -14,6 +15,7 @@ import {
   claim, completeFetch, deferFetchUntil, getPending, getRunnableIds,
   getState, markSent, coolDownPending, blockWebhook, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
   pruneStaleWikipediaPending, selectWikipediaDiscovery, pruneUnselectedArticlePending,
+  stageInitialIgnored,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
 
@@ -51,6 +53,7 @@ const defaults: Dependencies = {
         fetchWikipediaDiscovery(monitor, fetch, env.WIKIMEDIA_CONTACT_URL) :
         fetchWikipedia(monitor, fetch, cursor, env.WIKIMEDIA_CONTACT_URL);
       case 'arxiv': return fetchArxiv(monitor, fetch, cursor);
+      case 'openalex': return fetchOpenAlex(monitor, env.OPENALEX_API_KEY);
       case 'zenn': return fetchZenn(monitor);
       case 'youtube': return env.YOUTUBE_API_KEY
         ? fetchYouTubeDataApi(monitor, env.YOUTUBE_API_KEY)
@@ -133,6 +136,16 @@ export async function runTick(
               .sort((a, b) => b.publishedAt - a.publishedAt || a.id.localeCompare(b.id))
               .slice(0, MAX_NOTIFICATIONS_PER_TICK);
           await stage(env.DB, runnable.id, newest, state.initialized_at, now);
+        } else if (runnable.source === 'openalex') {
+          // OpenAlex's publication_date lacks hour-level precision.
+          // Persist initial IDs as 'ignored' to avoid a first-run flood, then
+          // dedup by ID within a seven-day publication window. Later same-day
+          // additions must not be discarded by the exact initial fetch hour.
+          if (state.initialized_at === null)
+            await stageInitialIgnored(env.DB, runnable.id, result.items, now);
+          else
+            await stage(env.DB, runnable.id, result.items,
+              now - OPENALEX_LOOKBACK_MS, now);
         } else if (latestOnly) {
           const selected = latestArticles(result.items);
           // Only successful polls may discard a prior alert backlog.

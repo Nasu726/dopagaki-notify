@@ -1,6 +1,6 @@
 # dopagaki-notify
 
-**A small, customizable Discord notifier for Qiita, Zenn, arXiv, YouTube, and Japanese Wikipedia article recommendations.**
+**A small, customizable Discord notifier for Qiita, Zenn, arXiv, OpenAlex, YouTube, and Japanese Wikipedia article recommendations.**
 
 Built for personal use and for people who want to fork and tailor a simple notification service. There is no web dashboard, account system, or continuously running server. Configure the topics you care about and deploy the Cloudflare Workers + D1 application.
 
@@ -15,6 +15,7 @@ Built for personal use and for people who want to fork and tailor a simple notif
 | Qiita | Up to 3 most recently created posts among the first 20 search results |
 | Zenn | Up to 3 newest entries in a topic or user RSS feed |
 | arXiv | Newly submitted papers in selected categories, with paginated scanning |
+| OpenAlex | Papers by search terms, topic ID, or author ID; bounded to the most recent 25 works published within seven days |
 | YouTube | Always notify the latest available video if unseen, regardless of age; also notify normal new uploads. Optional YouTube Data API alternative to RSS |
 | Japanese Wikipedia | Up to 1 featured article and 1 sufficiently substantial random article per recommendation poll |
 
@@ -81,6 +82,12 @@ For Cloudflare Workers, create the ordinary **Variable** `WIKIMEDIA_CONTACT_URL`
 
 An existing original deployment continues to use the original contact by default. The GitHub Actions template derives the contact URL from the fork's `GITHUB_REPOSITORY` if no override is set.
 
+### OpenAlex paper monitoring (optional)
+
+Add monitors in `config/targets.json` under `openalex`, e.g. `{"id":"oa-graph","query":"search:graph algorithms","enabled":true}`. Supported query forms are `search:terms`, `topic:T12345`, and `author:A12345`. Resolve IDs at <https://openalex.org/>; add corresponding intervals to `config/intervals.json`. Add a dedicated Discord Webhook Secret `DISCORD_WEBHOOK_OPENALEX`.
+
+A low-volume installation can use the OpenAlex Works API **without a key**; an optional free `OPENALEX_API_KEY` Cloudflare Secret increases the daily budget. The source reads up to 25 results published within the last seven days. OpenAlex supplies publication **dates**, not precise times: the initial results are saved as ignored IDs so newly appearing works with the same publication date can be notified on subsequent polls. This is a snapshot, not exhaustive historical coverage. Existing private monitor configs may omit `openalex` for backwards compatibility.
+
 ### Optional YouTube Data API
 
 The default uses YouTube RSS without any API key. For more reliable access, enable **YouTube Data API v3** in Google Cloud and register an optional **`YOUTUBE_API_KEY` Cloudflare Secret**:
@@ -142,6 +149,7 @@ Create an incoming webhook for each Discord destination you want to use. Save th
 | Qiita | `DISCORD_WEBHOOK_QIITA` |
 | Zenn | `DISCORD_WEBHOOK_ZENN` |
 | arXiv | `DISCORD_WEBHOOK_ARXIV` |
+| OpenAlex | `DISCORD_WEBHOOK_OPENALEX` |
 | YouTube | `DISCORD_WEBHOOK_YOUTUBE` |
 | Wikipedia | `DISCORD_WEBHOOK_WIKIPEDIA` |
 
@@ -187,6 +195,7 @@ Example **private** Secret value:
     "qiita": [{ "id": "my-qiita-go", "query": "tag:Go", "enabled": true }],
     "zenn": [],
     "arxiv": [],
+    "openalex": [],
     "youtube": []
   },
   "intervals": { "my-qiita-go": 360 },

@@ -64,3 +64,8 @@ GitHub Actions Secret は定期実行で参照できます。フォーク後に�
 ## 任意の YouTube Data API
 
 RSS の代わりに公式 API を使う場合は、Google Cloud で YouTube Data API v3 を有効にして API キーを作成し、GitHub Actions **Secret `YOUTUBE_API_KEY`** に設定してください。未設定なら従来どおり RSS を利用します。API モードでは `channels.list` と `playlistItems.list` を使用し、同じ動画ID・通知履歴を共有します。API の失敗は RSS に黙ってフォールバックせず再試行します。YouTube の送信済みIDは長期間経過しても重複通知しないよう、削除せず保管します。
+
+
+## OpenAlex 対応
+
+`.private/monitor-config.json` の `targets.openalex` に `{"id":"oa-graph","query":"search:graph algorithms","enabled":true}` を追加し、`intervals` にその ID に対応する監視間隔(分)を設定します。GitHub Actions **Secret `DISCORD_WEBHOOK_OPENALEX`** は必要です。**`OPENALEX_API_KEY` は任意の Secret** で、未設定なら API のキーなし利用枠を使用します。初回の検索結果は無通知で記録し、以降に見つかった新しいIDを通知します。対象は過去7日・最大25件です。

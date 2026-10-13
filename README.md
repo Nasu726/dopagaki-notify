@@ -1,6 +1,6 @@
 # dopagaki-notify
 
-**Qiita・Zenn・arXiv・YouTube の新着情報と、日本語 Wikipedia のおすすめ記事を Discord に届ける、シンプルな通知システムです。**
+**Qiita・Zenn・arXiv・OpenAlex・YouTube の新着情報と、日本語 Wikipedia のおすすめ記事を Discord に届ける、シンプルな通知システムです。**
 
 個人利用を前提とした小さな構成です。Web UI やログイン機能、常駐サーバーはありません。監視対象を JSON で設定し、Cloudflare Workers + D1 にデプロイすれば利用できます。好きな情報源を組み合わせて、フォーク先で自由にカスタマイズすることを想定しています。
 
@@ -15,6 +15,7 @@
 | Qiita | 検索条件に一致した最初の20件から、作成日時が新しい最大3件を候補にする |
 | Zenn | ユーザー・トピック別 RSS の新しい最大3件を候補にする |
 | arXiv | 指定カテゴリの新着論文をページ単位で取得する |
+| OpenAlex | **検索語・トピックID・著者ID**に一致する論文を監視 (直近7日間、最新25件まで) |
 | YouTube | 最新動画は公開日時が古くても未通知なら通知。通常の新着動画も通知。RSS または任意の公式 Data API に対応 |
 | 日本語 Wikipedia | 「秀逸な記事」から最大1件＋一定以上の長さのランダム記事を最大1件、おすすめする |
 
@@ -23,13 +24,14 @@
 - Discord Webhook は **情報源ごとに1つ**使用します。**既定では24時間通知**します。必要な人だけ送信可能な時間帯(JST)を設定できます。時間帯外でも監視を続け、未送信通知は D1 に保持します。
 - 通信失敗や Discord のレート制限には、D1 に保持した再試行時刻・未送信キューで対応します。5分ごとの Cron は、1回につき原則1監視対象、Discord への送信は最大3件です。
 - Qiita・Zenn は **最新を優先**して古い候補を意図的に見送ります。すべての記事を収集・保存するアーカイバーではありません。Qiita の検索結果は必ずしも新着順ではないため、最初の20件に含まれない記事は選べません。
+- OpenAlex の公開日は日付単位であり、検索結果は最新25件のみ取得します。直近7日の対象が多い検索では取りこぼす場合があります。API はキー無しでも少量利用できますが、検索APIの利用枠を確認してください。
 - YouTube の RSS は掲載件数に上限があり、配信元から消えた動画や外部 API の停止中の投稿は取りこぼす可能性があります。取得失敗後でも、次回成功時に取得できた最新動画が未通知なら通知対象です。RSS が正しい動画を返さなかった場合まで検出を保証するものではありません。
 
 ## 1. 監視対象を設定する
 
 通常は次の2ファイルだけを編集します。
 
-- [`config/targets.json`](config/targets.json): Qiita の検索式、Zenn のトピック・ユーザー、arXiv のカテゴリ、YouTube チャンネル、各対象の `enabled`。
+- [`config/targets.json`](config/targets.json): Qiita の検索式、Zenn のトピック・ユーザー、arXiv のカテゴリ、OpenAlex の検索語・ID、YouTube チャンネル、各対象の `enabled`。
 - [`config/intervals.json`](config/intervals.json): 各 `id` に対応する **監視間隔(分)**。正の整数を指定します。
 
 例:
@@ -39,6 +41,7 @@
   "qiita": [{ "id": "qiita-go", "query": "tag:Go", "enabled": true }],
   "zenn": [{ "id": "zenn-rust", "query": "topic:rust", "enabled": true }],
   "arxiv": [{ "id": "arxiv-ds", "categories": ["cs.DS"], "enabled": true }],
+  "openalex": [{ "id": "oa-graph", "query": "search:graph algorithms", "enabled": true }],
   "youtube": [{ "id": "youtube-example", "channel": "@example", "enabled": true, "weekdayJst": "sunday" }]
 }
 ```
@@ -50,6 +53,7 @@
   "qiita-go": 240,
   "zenn-rust": 240,
   "arxiv-ds": 120,
+  "oa-graph": 360,
   "youtube-example": 60,
   "wikipedia-ja-discovery": 120
 }
@@ -80,6 +84,24 @@ Wikipedia の API は自動アクセス元のアプリ名と、運用者へ連�
 Cloudflare Workers の **Settings → Variables and Secrets** で通常の Variable `WIKIMEDIA_CONTACT_URL` を追加し、値に `https://github.com/YOUR_USERNAME/dopagaki-notify` などの公開 HTTPS URL を指定します。メールアドレス・API キーは不要です。この値から `User-Agent` と `Api-User-Agent` の両方を自動構築します。
 
 既存の作者環境では未設定でも元の連絡先が使われ、動作は変わりません。GitHub Actions 版は、指定が無い場合、自分のフォークの `GITHUB_REPOSITORY` から連絡先 URL を自動設定します。
+
+### OpenAlex で論文を監視する (任意)
+
+`config/targets.json` の `openalex` に、次の監視条件を追加できます。
+
+```json
+"openalex": [
+  { "id": "oa-search", "query": "search:graph algorithms", "enabled": true },
+  { "id": "oa-topic", "query": "topic:T12345", "enabled": false },
+  { "id": "oa-author", "query": "author:A12345", "enabled": false }
+]
+```
+
+`search:` は論文の全文検索、`topic:T...` は OpenAlex トピックID、`author:A...` は著者IDを指定します。トピック・著者のIDは <https://openalex.org/> で探してください。各監視IDに対して `config/intervals.json` に間隔(例:360分)を登録し、Discord Webhook の Secret `DISCORD_WEBHOOK_OPENALEX` を設定します。
+
+**OpenAlex の API キーは任意**です。設定しなくても低頻度監視できますが、無料の API キーを取得すると利用枠が拡大します。使う場合は `OPENALEX_API_KEY` を Cloudflare Secret として登録してください (GitHub へは記載しません)。
+
+OpenAlex は公開日時が日付単位なので、初回に見つけた論文IDを「通知しない履歴」として保存します。2回目以降は、公開日が同じでも初回になかったIDなら通知できます。ただし検索結果は最新25件、公開日は直近7日以内に制限するため、完全な網羅は保証しません。既存の非公開設定 JSON は `openalex` を省略しても動きます。
 
 ### YouTube Data API を使う (任意)
 
@@ -144,6 +166,7 @@ Discord で通知先の Webhook URL を発行し、利用する情報源に対�
 | Qiita | `DISCORD_WEBHOOK_QIITA` |
 | Zenn | `DISCORD_WEBHOOK_ZENN` |
 | arXiv | `DISCORD_WEBHOOK_ARXIV` |
+| OpenAlex | `DISCORD_WEBHOOK_OPENALEX` |
 | YouTube | `DISCORD_WEBHOOK_YOUTUBE` |
 | Wikipedia | `DISCORD_WEBHOOK_WIKIPEDIA` |
 
@@ -187,6 +210,7 @@ node ops/export-monitor-config.mjs > .private/monitor-config.json
     "qiita": [{ "id": "my-qiita-go", "query": "tag:Go", "enabled": true }],
     "zenn": [],
     "arxiv": [],
+    "openalex": [],
     "youtube": []
   },
   "intervals": { "my-qiita-go": 360 },

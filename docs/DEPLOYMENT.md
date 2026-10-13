@@ -396,3 +396,8 @@ Cloudflare documentation:
 - Filter Worker Observability logs for `monitor_failure` (includes monitor ID, source, phase, sanitized exception type/message, HTTP provider/status, and D1 retry timestamp). Filter `cron_failure` for scheduled invocations that threw; both entries can refer to one failure. `YouTube RSS HTTP 404` should now name the failing `youtube-*` monitor, enabling source-specific investigation.
 - Outbound Discord failures are logged with monitor ID, item ID and retryAt; failed D1 acknowledgements are separately classified `ack_delivery` and must not be confused with unsuccessful Discord HTTP requests. Generic messages redact URLs/credentials; log no Webhook Secrets.
 - Preserve current retry, 403 cooldown and Worker `outcome: exception` behavior. No schema migration required. Confirm real Worker deployment and HTTP API behavior independently of GitHub CI.
+
+
+## OpenAlex optional source (2026-10-13)
+
+OpenAlex works can be monitored independently from arXiv. Configure `openalex` query targets in `config/targets.json` and intervals in `config/intervals.json`, or within private `MONITOR_CONFIG_JSON`. Add `DISCORD_WEBHOOK_OPENALEX` as a distinct source Secret. `OPENALEX_API_KEY` is optional; free keyless API access has a smaller daily usage budget. The Works adapter requests 25 records ordered by publication date, limited to the last seven days, and stores initial records as ignored receipts to handle date-only publication precision. No migration is needed; older private Secrets omitting the `openalex` source remain compatible. The source does not silently refill older pages and is not a complete academic archive.

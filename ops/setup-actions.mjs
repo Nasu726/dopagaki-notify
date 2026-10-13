@@ -21,7 +21,7 @@ if (!existsSync(privatePath)) {
   // Do not silently copy the original author's enabled topics/channels.
   const targets = {
     qiita: [{ id: 'qiita-example', query: 'tag:Python', enabled: true }],
-    zenn: [], arxiv: [], youtube: [],
+    zenn: [], arxiv: [], openalex: [], youtube: [],
   };
   const intervals = { 'qiita-example': 240 };
   writeFileSync(privatePath,

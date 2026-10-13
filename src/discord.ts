@@ -5,6 +5,7 @@ function webhookSecretValue(monitor: Monitor, env: Env): string | undefined {
   return monitor.source === 'qiita' ? env.DISCORD_WEBHOOK_QIITA :
     monitor.source === 'wikipedia' ? env.DISCORD_WEBHOOK_WIKIPEDIA :
     monitor.source === 'arxiv' ? env.DISCORD_WEBHOOK_ARXIV :
+    monitor.source === 'openalex' ? env.DISCORD_WEBHOOK_OPENALEX :
     monitor.source === 'zenn' ? env.DISCORD_WEBHOOK_ZENN :
     monitor.source === 'youtube' ? env.DISCORD_WEBHOOK_YOUTUBE : undefined;
 }

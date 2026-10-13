@@ -69,5 +69,6 @@
       "weekdayJst": "sunday"
     }
   ],
-  "notificationWindowJst": null
+  "notificationWindowJst": null,
+  "openalex": []
 }

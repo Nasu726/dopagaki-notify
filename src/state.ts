@@ -121,6 +121,27 @@ export async function release(db: Database, id: string, token: string): Promise<
 }
 // D1 supports up to 100 bound parameters; each row binds 7 (12 * 7 = 84).
 const OUTBOX_INSERT_BATCH = 12;
+/** Suppress initial OpenAlex search results by ID, not publication clock time.
+ * Date-only timestamps would otherwise drop later additions from the same day.
+ * At most 12 INSERT binds per batch (=84 D1 parameters).
+ */
+export async function stageInitialIgnored(
+  db: Database, monitorId: string, items: readonly ContentItem[], now: number,
+): Promise<void> {
+  const unique = [...new Map(items.map(item => [item.id, item])).values()];
+  for (let offset = 0; offset < unique.length; offset += OUTBOX_INSERT_BATCH) {
+    const chunk = unique.slice(offset, offset + OUTBOX_INSERT_BATCH);
+    const vals: unknown[] = [];
+    for (const item of chunk) {
+      vals.push(monitorId, item.id, 'ignored', item.title, item.url, item.publishedAt, now);
+    }
+    await db.prepare(
+      'INSERT OR IGNORE INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at) VALUES ' +
+      chunk.map(() => '(?,?,?,?,?,?,?)').join(',')
+    ).bind(...vals).run();
+  }
+}
+
 export async function stage(
   db: Database, monitorId: string, items: readonly ContentItem[], baselineAt: number | null, now: number,
   options: { allowHistoricalFirstItem?: boolean } = {},

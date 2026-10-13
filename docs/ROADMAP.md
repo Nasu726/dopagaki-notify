@@ -126,3 +126,10 @@ YouTube queues all new videos shown in its 15-entry Atom feed and sends three
 per five-minute Cron, persisting any remaining alerts. Reaching RSS's bounded
 capacity is not a scan error. arXiv pagination and Wikipedia discovery remain
 unchanged. Legacy incomplete counters remain in D1 for historical purposes.
+
+
+### OpenAlex Works source added (2026-10-13)
+
+- Independently configurable optional `openalex` work monitors: `search:...`, `topic:T...`, `author:A...`; separate Discord webhook and optional API key. Public defaults have no OpenAlex target. Existing private JSON without `openalex` remains backwards compatible.
+- One page of up to 25 recently published (7-day lookback) works per poll; initial IDs persisted as `ignored` receipts to correctly detect later same-day additions despite date-only publication timestamps.
+- Cloudflare and GitHub Actions share the same source adapter. Monitor error/retry handling follows the existing scheduler; check real API responses and quotas before claiming production verification.
