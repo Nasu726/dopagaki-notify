@@ -13,7 +13,9 @@
     "setup:actions": "node ops/setup-actions.mjs",
     "setup:cloudflare": "node ops/setup-cloudflare.mjs",
     "config:check": "node --experimental-strip-types ops/config-preflight.mjs",
-    "predeploy": "npm run config:check"
+    "predeploy": "npm run config:check",
+    "smoke": "node --experimental-strip-types ops/manual-smoke.mjs",
+    "inspect:discord": "node ops/inspect-discord-embed.mjs"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

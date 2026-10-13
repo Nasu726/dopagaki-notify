@@ -1,152 +1,156 @@
 # dopagaki-notify
 
-**A small, customizable Discord notifier for Qiita, Zenn, arXiv, OpenAlex, YouTube, and Japanese Wikipedia article recommendations.**
+**A small, self-hosted Discord notifier for the sources you follow.**
 
-Built for personal use and for people who want to fork and tailor a simple notification service. There is no web dashboard, account system, or continuously running server. Configure the topics you care about and deploy the Cloudflare Workers + D1 application.
+Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using Cloudflare Workers + D1. No web UI, app login, or always-running personal computer. Configure your own subscriptions and run it in your account.
 
-**[日本語](README.md)** · [Historical deployment notes](docs/DEPLOYMENT.md) · [Design brief (Japanese)](PROJECT_BRIEF.md) · [Development roadmap](docs/ROADMAP.md)
+[日本語](README.md) · [Features & delivery policy](#features-and-delivery-policy) · [Commands](#operations-and-troubleshooting) · [MIT License](LICENSE)
 
-> **Availability:** Cloudflare Workers + D1 is the primary, deployed runtime. An **opt-in** [GitHub Actions + SQLite notification template](templates/github-actions/notifier.yml) is now included, sharing the same polling logic. The Actions template has automated integration tests but is not yet long-term production-verified; its scheduling and persistence guarantees differ from Cloudflare.
+> **Status:** Cloudflare Workers + D1 is the primary, production-used runtime. GitHub Actions + SQLite is an optional template and does not have equivalent scheduling or state-restoration guarantees. QuizKnock's **regular-video-only RSS → Discord** delivery has been verified in production. YouTube thumbnails currently fail to render in Discord and are a non-blocking, [deferred issue (#64)](https://github.com/Nasu726/dopagaki-notify/issues/64).
 
-**Always-on YouTube test monitor:** `youtube-quizknock` (`@QuizKnock`, pinned `UCQ_MqAw18jFTlBB-f8BP7dw`) now polls **hourly every day** without a weekday restriction, sharing `DISCORD_WEBHOOK_YOUTUBE`. Its first successful poll can notify the latest available video. Deployments using a complete `MONITOR_CONFIG_JSON` override must add the new target to that private configuration too.
+## Choose your path
 
-## Features
-
-| Source | Notification selection |
+| Goal | Start here |
 | --- | --- |
-| Qiita | Up to 3 most recently created posts among the first 20 search results |
-| Zenn | Up to 3 newest entries in a topic or user RSS feed |
-| arXiv | Newly submitted papers in selected categories, with paginated scanning |
-| OpenAlex | Papers by search terms, topic ID, or author ID; bounded to the most recent 25 works published within seven days |
-| YouTube | Always notify the latest available video if unseen, regardless of age; also notify normal new uploads. Optional Data API and pinned `channelId` to prevent cross-channel resolution. Notifications include thumbnails |
-| Japanese Wikipedia | Up to 1 featured article and 1 sufficiently substantial random article per recommendation poll |
+| First deployment with Cloudflare | [1. Choose monitors](#1-choose-your-monitors) → [2. Deploy with Cloudflare](#2-deploy-with-cloudflare) |
+| Keep personal subscriptions private in a public fork | [Private monitor configuration](#keep-your-monitors-private) |
+| Change settings on an existing deployment | [Preflight and delivery hours](#validate-settings-and-choose-delivery-hours) |
+| Test a source immediately or diagnose images | [Safe diagnostic commands](#safe-diagnostic-commands) |
+| Run without Cloudflare | [GitHub Actions + SQLite](#3-github-actions--sqlite-optional) |
 
-- Stable item IDs prevent repeated notifications. The first successful poll normally establishes a **silent baseline**, except for **YouTube**, which notifies the newest video whenever it is not already acknowledged, even if it was published before the initial baseline. YouTube sent IDs are kept permanently to prevent repeated historical notifications; newer videos are still detected.
-- Each monitor has its own polling interval. YouTube monitors may run only on a chosen day of the week in Japan Standard Time. Qiita, Zenn, and YouTube Discord embeds support thumbnails.
-- One Discord webhook **per source** (shared by monitors of that source). **Notifications are enabled around the clock by default**. An optional JST delivery window can defer messages while source polling continues.
-- The 5-minute dispatcher polls one due monitor at a time and sends up to three queued notifications per invocation. D1 tracks pending items, retries, webhook cooldowns, and deduplication state.
-- Qiita and Zenn deliberately **prioritize freshness over completeness**; this is not a content archive. Qiita search results are not necessarily chronological, so posts outside the first 20 results cannot be selected.
-- YouTube's RSS feed holds a limited number of videos. An extended source outage or videos that have already fallen out of its feed may cause gaps.
+**Command reference** (repository root, Node.js 22+):
 
-## 1. Choose sources and polling intervals
+| Command | Purpose / side effects |
+| --- | --- |
+| `npm install` | Install dependencies |
+| `npm run config:check` | Validate local configuration; no sends or D1 writes |
+| `npm run check` | TypeScript typecheck and all tests |
+| `npm run deploy` | Config preflight, then **deploy production Worker** |
+| `npm run smoke -- --monitor=youtube-quizknock` | Fetch one upstream snapshot; no D1 or Discord changes |
+| `npm run inspect:discord -- --help` | Read-only diagnostics for an **existing** Discord message |
+| `npm run dev` | Start the local development Worker |
 
-For a normal, repository-configured installation, edit two files:
+## Features and delivery policy
 
-- [`config/targets.json`](config/targets.json): Qiita search terms, Zenn topics/users, arXiv categories, YouTube channels, and each target's `enabled` flag.
-- [`config/intervals.json`](config/intervals.json): positive integer polling intervals **in minutes**, indexed by monitor `id`.
+| Source | What is monitored | Coverage |
+| --- | --- | --- |
+| Qiita | Articles matching search queries | Newest three from the first 20 API results |
+| Zenn | User/topic RSS feeds | Newest three items |
+| arXiv | Research paper categories | Bounded paginated scans |
+| OpenAlex | Search terms, topic IDs, author IDs | Last seven days, at most 25 results |
+| YouTube | Chosen video channels | The latest unseen video is eligible even if old |
+| Japanese Wikipedia | Featured and random articles | Up to two recommendations per poll |
 
-Example `config/targets.json`:
+**Deduplication:** D1 stores notification receipts, pending deliveries and retry times. Most sources establish a **silent baseline** on their first successful fetch. YouTube exceptionally sends its newest unseen video even on the first poll, regardless of publication age. YouTube sent IDs persist indefinitely; ordinary sent receipts for other sources normally expire after ten days. Qiita and Zenn favor freshness over exhaustive archiving.
+
+**Scheduling:** The Worker runs every five minutes and normally handles one due monitor per invocation. Per-monitor intervals indicate when a fetch becomes eligible, not an exact execution time. It sends at most three items per invocation. Polling and queuing continue **outside allowed notification hours**.
+
+**Images:** Qiita and Zenn can show RSS/OGP images (Qiita may fall back to author avatar). YouTube generates a thumbnail URL from the video ID, but **its rendering in Discord is still unresolved**. Missing images never block title/link delivery.
+
+## 1. Choose your monitors
+
+[Fork this repository](https://github.com/Nasu726/dopagaki-notify/fork), then clone your fork:
+
+```sh
+git clone https://github.com/YOUR_USERNAME/dopagaki-notify.git
+cd dopagaki-notify
+npm install
+```
+
+Choose **checked-in public JSON** or a **private Cloudflare Secret**:
+
+- [`config/targets.json`](config/targets.json): Sources, targets, `enabled` flags, and the public `notificationWindowJst`.
+- [`config/intervals.json`](config/intervals.json): Positive integer intervals **in minutes**, keyed by monitor `id`.
+- A private `MONITOR_CONFIG_JSON` **replaces the whole public roster**; it does not merge with it. Use it when subjects should not appear in your public fork.
+
+Sample target fragment (a complete `targets.json` must include all source categories):
 
 ```json
 {
   "qiita": [{ "id": "qiita-go", "query": "tag:Go", "enabled": true }],
   "zenn": [{ "id": "zenn-rust", "query": "topic:rust", "enabled": true }],
   "arxiv": [{ "id": "arxiv-ds", "categories": ["cs.DS"], "enabled": true }],
-  "youtube": [{ "id": "youtube-example", "channel": "@example", "enabled": true, "weekdayJst": "sunday" }]
+  "openalex": [{ "id": "oa-graph", "query": "search:graph algorithms", "enabled": true }],
+  "youtube": [{
+    "id": "youtube-example",
+    "channel": "@example",
+    "channelId": "UC1234567890123456789012",
+    "videoType": "videos",
+    "enabled": true
+  }],
+  "notificationWindowJst": null
 }
 ```
 
-Matching `config/intervals.json`:
+Provide intervals for the IDs above and for `wikipedia-ja-discovery` if using the standard Wikipedia monitor. Weekday-restricted YouTube monitors (`weekdayJst`) require an interval of 60 minutes.
 
-```json
-{
-  "qiita-go": 240,
-  "zenn-rust": 240,
-  "arxiv-ds": 120,
-  "youtube-example": 60,
-  "wikipedia-ja-discovery": 120
-}
+**Monitor identity:** Do not reuse an existing `id` for a different provider/query/channel. D1 pins it to its original source/query identity to protect historical receipts. For a changed subject, create a new `id`. Changing intervals is safe.
+
+**Exclude YouTube Shorts:** Set `"videoType": "videos"` **and a pinned `channelId`** to use the undocumented `UULF` RSS playlist for regular videos only (also excludes live streams). Omitted or `"all"` means all uploads. This URL is **not an officially supported YouTube API contract**; if it fails, the monitor does **not** silently fall back to a Shorts-inclusive feed. Only QuizKnock opts in in the checked-in sample. Videos-only monitors use RSS even if `YOUTUBE_API_KEY` is present; other YouTube monitors can use the optional [YouTube Data API v3](https://developers.google.com/youtube/v3).
+
+**OpenAlex:** Query formats are `search:graph algorithms`, `topic:T12345`, `author:A12345`. Optional `OPENALEX_API_KEY` increases API allowance. See the [deployment runbook](docs/DEPLOYMENT.md) for details.
+
+### Keep your monitors private
+
+To avoid publishing your personal subscriptions in a public fork, create a local gitignored file:
+
+```sh
+mkdir -p .private
+node ops/export-monitor-config.mjs > .private/monitor-config.json
 ```
 
-These are illustrative **complete** files. Set the optional top-level `notificationWindowJst` field in `config/targets.json` to `null` for unrestricted delivery (the default), or a time range as described below. Remove any example targets you do not want, and ensure every target ID has an interval. YouTube monitors with `weekdayJst` must use a `60`-minute interval. The Japanese Wikipedia discovery monitor is defined in `src/config.ts` and enabled in normal checked-in configuration.
+Edit `targets`, `intervals` and `wikipediaEnabled` there. The entire JSON is stored as the **`MONITOR_CONFIG_JSON`** Cloudflare Secret (Dashboard → Worker → Settings → Variables and Secrets). It is not combined with the public target list.
 
-**Important:** Never reuse an initialized monitor ID for a different query, platform, or category set. D1 pins IDs to their original source/query identity and will reject changes to avoid mixing histories. Choose a new ID when changing the monitored subject. Updating the interval alone is safe.
+```sh
+npm run config:check -- --private-config-file=.private/monitor-config.json
+npx wrangler secret put MONITOR_CONFIG_JSON
+```
 
-### Optional notification delivery hours (JST)
+Paste the JSON content in the interactive Secret prompt. **Never post secrets or private subscriptions in source control, chat, issues or CI logs.** Deployed Cloudflare Secrets cannot be read back, so verify the intended value locally before setting it.
 
-Notifications are sent **at all hours by default**. Set `"notificationWindowJst": "09:00-20:00"` in `config/targets.json` to restrict starts of Discord sends to 09:00 through 19:59 JST. The end is **exclusive**. Overnight ranges such as `"22:00-06:00"` are supported. Leave the setting `null` for no restriction; identical start/end times are invalid. Polling and durable queueing continue even when delivery is paused.
+### Validate settings and choose delivery hours
 
-For a public fork with personal notification hours, register a private deployment Secret instead:
+`npm run config:check` validates checked-in settings and any private configuration in the local environment with the same parser used by the Worker. To validate private files:
+
+```sh
+npm run config:check -- --private-config-file=.private/monitor-config.json
+npm run config:check -- --notification-window-file=.private/notification-window.txt
+```
+
+Time windows use **JST, start inclusive / end exclusive**. For example, `08:00-20:00` allows Discord sends from 08:00 to 19:59. The Worker still fetches and queues outside that range. `00:00-24:00` is **invalid**. For 24-hour sends, leave the `NOTIFICATION_WINDOW_JST` Secret unset and use `null` in config.
+
+Set a private Cloudflare delivery window using:
 
 ```sh
 npx wrangler secret put NOTIFICATION_WINDOW_JST
 ```
 
-Enter `09:00-20:00` (or your preferred range) into the prompt. You can also include `"notificationWindowJst": "09:00-20:00"` in your private `MONITOR_CONFIG_JSON`. Precedence: **dedicated Secret → private monitor JSON → checked-in `config/targets.json`**. No database migration or new monitor IDs are needed.
+Enter `08:00-20:00` (or your choice) into the prompt. Precedence: **dedicated Secret > window in private `MONITOR_CONFIG_JSON` > checked-in `targets.json`**.
 
-For public forks where your topic choices should **not be visible on GitHub**, use the private configuration described in [Section 3](#3-keep-your-interests-private-public-forks) instead of committing your target list.
+> **Operator-specific example:** The project's current production Cloudflare Secret is `08:00-20:00`. The **checked-in default is still `null` (unrestricted, 24-hour sending)** and forks do not inherit the operator's Secret.
 
-### Wikimedia identification (for forks)
+[Config preflight reference](docs/CONFIG_PREFLIGHT.md).
 
-Wikimedia expects automated API clients to identify the software and provide a way to contact the **operator**. The default header identifies this application and links to the original repository. **If you fork and enable Wikipedia, set your own contact URL** rather than continuing to identify the original author as your operator.
+## 2. Deploy with Cloudflare
 
-For Cloudflare Workers, create the ordinary **Variable** `WIKIMEDIA_CONTACT_URL` under **Worker → Settings → Variables and Secrets**, e.g. `https://github.com/YOUR_USERNAME/dopagaki-notify`. The app constructs the `User-Agent` and `Api-User-Agent` headers automatically. No Wikimedia API key or account registration is required.
+**Prerequisites:** Node.js 22+, Cloudflare account, one or more Discord incoming webhooks, and your chosen monitors. Check your plan's applicable limits and prices.
 
-An existing original deployment continues to use the original contact by default. The GitHub Actions template derives the contact URL from the fork's `GITHUB_REPOSITORY` if no override is set.
-
-### OpenAlex paper monitoring (optional)
-
-Add monitors in `config/targets.json` under `openalex`, e.g. `{"id":"oa-graph","query":"search:graph algorithms","enabled":true}`. Supported query forms are `search:terms`, `topic:T12345`, and `author:A12345`. Resolve IDs at <https://openalex.org/>; add corresponding intervals to `config/intervals.json`. Add a dedicated Discord Webhook Secret `DISCORD_WEBHOOK_OPENALEX`.
-
-A low-volume installation can use the OpenAlex Works API **without a key**; an optional free `OPENALEX_API_KEY` Cloudflare Secret increases the daily budget. The source reads up to 25 results published within the last seven days. OpenAlex supplies publication **dates**, not precise times: the initial results are saved as ignored IDs so newly appearing works with the same publication date can be notified on subsequent polls. This is a snapshot, not exhaustive historical coverage. Existing private monitor configs may omit `openalex` for backwards compatibility.
-
-### Optional YouTube Data API
-
-The default uses YouTube RSS without any API key. For more reliable access, enable **YouTube Data API v3** in Google Cloud and register an optional **`YOUTUBE_API_KEY` Cloudflare Secret**:
+### 2.1 Provision your own D1 and Worker
 
 ```sh
-npx wrangler secret put YOUTUBE_API_KEY
-```
-
-When set, the adapter uses `channels.list` and `playlistItems.list` (1 quota unit each) to read up to 50 uploads. API errors are logged and retried; the code does not silently fall back to RSS. Both adapters use the same video IDs and persisted sent history. Unlike other sources' ten-day sent receipts, **YouTube sent receipts are retained indefinitely** so an ancient newest upload cannot re-notify after history pruning. This uses additional D1/SQLite storage over time.
-
-## 2. Deploy with Cloudflare Workers (supported)
-
-**Prerequisites:** Node.js 22+, a Cloudflare account, and one or more Discord channels with incoming webhooks. Check your Cloudflare plan's current limits and charges before deployment. Fork this repository on GitHub, then clone your fork. You may instead clone the upstream repository for a local-only installation.
-
-```sh
-git clone https://github.com/YOUR_USERNAME/dopagaki-notify.git
-cd dopagaki-notify
-npm install
-npm run check
 npx wrangler login
-```
-
-**① Create your own D1 database**
-
-```sh
 npx wrangler d1 create dopagaki-notify
-```
-
-Paste the **new UUID from your Cloudflare account** into this helper, which updates `wrangler.jsonc`:
-
-```sh
 npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID
-```
-
-The checked-in UUID belongs to the original author's environment and must not be reused. If you change the Worker/D1 name in `wrangler.jsonc`, also adjust the following commands to match. Keep the database binding named `DB`.
-
-**② Apply the bundled migrations to the remote database**
-
-```sh
 npx wrangler d1 migrations apply dopagaki-notify --remote
 ```
 
-The name is the D1 database name you created. The schema migrations live in `migrations/`. Do not use `--local` when preparing your deployed database.
+Use the **new UUID from your own account**, not the original developer's database ID in `wrangler.jsonc`. Change the Worker/D1 name in subsequent commands if you rename them, but keep the D1 binding named `DB`.
 
-**③ Deploy the Worker**
+### 2.2 Configure Discord Secrets
 
-```sh
-npm run deploy
-```
+Create a Discord incoming webhook for each destination, then configure the Cloudflare Secret matching the source:
 
-`wrangler.jsonc` already defines the polling Cron (`*/5 * * * *`) and hourly retention Cron (`10 * * * *`). There is no public HTTP API; a direct GET intentionally returns 404.
-
-**④ Register Discord webhook Secrets**
-
-Create an incoming webhook for each Discord destination you want to use. Save the URL as a **Cloudflare Secret**, not in your repository.
-
-| Source | Secret name |
+| Source | Secret |
 | --- | --- |
 | Qiita | `DISCORD_WEBHOOK_QIITA` |
 | Zenn | `DISCORD_WEBHOOK_ZENN` |
@@ -156,131 +160,96 @@ Create an incoming webhook for each Discord destination you want to use. Save th
 | Wikipedia | `DISCORD_WEBHOOK_WIKIPEDIA` |
 
 ```sh
-npx wrangler secret put DISCORD_WEBHOOK_QIITA
+npx wrangler secret put DISCORD_WEBHOOK_YOUTUBE
 ```
 
-Paste the webhook URL into the interactive prompt; repeat for the sources you enable. Monitors without a webhook Secret remain dormant. Several monitors within one source share that source's webhook and its cooldown/block state.
+Repeat for enabled sources. Several monitors of the same source share one webhook and source-wide cooldown. Monitors without matching webhook Secrets remain dormant.
 
-**⑤ Verify the installation**
+If enabling Wikipedia in a fork, set the ordinary Cloudflare Variable `WIKIMEDIA_CONTACT_URL` to **your own public contact URL**, such as the fork's GitHub URL. Do not identify the original author as the operator of your fork.
 
-The first successful poll creates a baseline without sending old posts. No new content means no Discord message.
+### 2.3 Deploy and verify
 
 ```sh
+npm run config:check
+npm run check
+npm run deploy
 npx wrangler tail dopagaki-notify --format pretty
+```
+
+`npm run deploy` invokes the config preflight. Direct `npx wrangler deploy` and Cloudflare Workers Builds **may bypass preflight**. GitHub CI cannot inspect the Secret values already deployed to Cloudflare.
+
+The Worker has a monitoring Cron (`*/5 * * * *`) and receipt cleanup Cron (`10 * * * *`). Direct HTTP requests intentionally return 404; there is no public API.
+
+Verify production D1 (read-only):
+
+```sh
 npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialized_at,last_complete_at,next_due_at FROM monitor_state ORDER BY id;"
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT monitor_id,item_id,status,sent_at FROM deliveries ORDER BY discovered_at DESC LIMIT 10;"
 ```
 
-A non-null `initialized_at` indicates the first poll and baseline completed. To verify delivery, look for a genuinely new message in Discord and its acknowledgement in D1's `deliveries` table. For automated Cloudflare deployments, you can connect GitHub to Cloudflare Workers Builds after configuring the database and Secrets.
+`initialized_at` / `last_complete_at` track completed upstream scans. A `sent` receipt means Discord accepted the webhook, **not** that it displayed remote images. No new content generally means no Discord message. YouTube can send one older latest unseen upload on its first poll.
 
-## 3. Keep your interests private (public forks)
+If Workers Builds is enabled, verify the live deployment is actually the intended `main` revision.
 
-You can keep a public fork of the code **without publicly committing your personal monitoring subjects**.
+## 3. GitHub Actions + SQLite (optional)
 
-- **Default:** The Worker uses the checked-in `config/targets.json` and `config/intervals.json`.
-- **Private override:** Set the Cloudflare Secret **`MONITOR_CONFIG_JSON`**. It completely **replaces** the checked-in monitor roster; it never merges in public default subjects.
-- Invalid JSON or an invalid monitor definition **fails closed** rather than silently falling back to the public list.
-
-Create a locally ignored configuration file from the example defaults:
+The alternative [GitHub Actions template](templates/github-actions/notifier.yml) runs on GitHub-hosted runners with SQLite state stored in **encrypted Actions Artifacts**. Scheduled workflows can be delayed/skipped and state artifacts can expire; Cloudflare is the primary recommendation.
 
 ```sh
-mkdir -p .private
-node ops/export-monitor-config.mjs > .private/monitor-config.json
-```
-
-Edit `.private/monitor-config.json` to suit your interests. The `.private/` directory is gitignored. `targets` and `intervals` have the same shapes as the public files; to disable Wikipedia, specify `wikipediaEnabled: false` and omit its interval entry.
-
-Example **private** Secret value:
-
-```json
-{
-  "targets": {
-    "qiita": [{ "id": "my-qiita-go", "query": "tag:Go", "enabled": true }],
-    "zenn": [],
-    "arxiv": [],
-    "openalex": [],
-    "youtube": []
-  },
-  "intervals": { "my-qiita-go": 360 },
-  "wikipediaEnabled": false,
-  "notificationWindowJst": null
-}
-```
-
-After checking your local file, open **Cloudflare Dashboard → Worker → Settings → Variables and Secrets** and create **`MONITOR_CONFIG_JSON`** with type **Secret**. Paste the entire JSON file as its value. Alternatively, use `npx wrangler secret put MONITOR_CONFIG_JSON` and its interactive prompt. Updating a deployed Worker's Secret deploys a new Worker version; inspect logs after it takes effect.
-
-**Privacy considerations:** Avoid committing webhook URLs, personal target lists, D1 delivery history, and private credentials. The checked-in D1 UUID is not a password, but replace the author's account-specific value. Personal subjects can also leak through public Actions logs, issues, pull requests, or public Discord channels. Adding a file to `.gitignore` **after** committing it does not erase existing Git history. If hiding project usage and metadata matters too, use a **private repository**.
-
-## 4. Run with GitHub Actions + SQLite (opt-in template)
-
-If you do not want to use Cloudflare, use the [GitHub Actions notifier template](templates/github-actions/notifier.yml). It uses Node.js SQLite instead of D1 and stores the database between workflow runs as an **AES-256-GCM encrypted GitHub Actions artifact**. Neither your plaintext database nor your subscriptions need to be committed.
-
-**Setup:**
-
-1. Fork this repository (public or private), clone it and run `npm install`.
-2. Run `npm run setup:actions`. This copies the workflow, creates a gitignored generic `.private/monitor-config.json`, and generates `.private/notify-state-key.txt` without overwriting existing keys.
-3. Edit the private JSON and add GitHub **Settings → Secrets and variables → Actions** Secrets: `MONITOR_CONFIG_JSON` (entire JSON), `NOTIFY_STATE_KEY` (64 hex characters), and your selected source's `DISCORD_WEBHOOK_*` URLs.
-4. **After adding Secrets**, commit and push `.github/workflows/notifier.yml`.
-5. Open **Actions → Discord notifier (SQLite) → Run workflow** for the initial silent baseline. Scheduled checks then run about every 10 minutes, subject to GitHub delays.
-
-The encryption key is generated automatically by setup. After `gh auth login`, upload it and the private config without displaying either value:
-
-```sh
+npm run setup:actions
+npm run config:check -- --private-config-file=.private/monitor-config.json
+gh auth login
 gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
 gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-Losing or rotating the key makes previous state artifacts unreadable. Add webhook URLs as separate Secrets. Never commit these files or the database.
+Add the required `DISCORD_WEBHOOK_*` GitHub Actions Secrets. Then commit/push **only** the generated `.github/workflows/notifier.yml` and select **Actions → Discord notifier (SQLite) → Run workflow** to establish the initial state. Do **not** lose or rotate your state encryption key without a planned reset.
 
-GitHub schedules can be delayed or skipped, and artifacts expire. If the state artifact is missing, the workflow **fails closed rather than silently reinitializing**. An intentional reset requires **Run workflow → reset_state** and discards old deduplication records and pending messages. Repository activity is required to keep scheduled workflows enabled on public forks.
+[GitHub Actions guide (English)](docs/GITHUB_ACTIONS.EN.md) · [日本語](docs/GITHUB_ACTIONS.md).
 
-**[Detailed GitHub Actions deployment and recovery guide](docs/GITHUB_ACTIONS.EN.md)**
+## Operations and troubleshooting
 
-## Operations and limitations
-
-- **Delivery is unrestricted by default (24 hours)**. You may enable a JST delivery window in configuration or a private Secret; monitoring continues regardless.
-- arXiv continues bounded paginated scans; Qiita/Zenn intentionally skip older candidates; Wikipedia uses sampled recommendations.
-- The YouTube RSS endpoint sometimes returns HTTP 404/500. A YouTube RSS 404 is retried after at least 60 minutes.
-- When a webhook has been blocked due to an invalid URL, fixing the Secret alone is insufficient; the source-wide `webhook_source_state` block must also be cleared manually. See the [deployment runbook](docs/DEPLOYMENT.md).
-- Successful CI does not prove that real provider APIs or Discord delivery are working. Monitor Cloudflare errors, CPU time, D1 usage, and actual notifications.
-
-## Manual upstream and Discord smoke tests
-
-Operators can fetch a configured monitor on demand using a local Node CLI. The default performs **no Discord POST and no D1 or outbox writes**:
+| Symptom | Check first |
+| --- | --- |
+| No Discord alert | Enabled target, `DISCORD_WEBHOOK_*` Secret, initial silent baseline, delivery hours |
+| Upstream scan stalls | Cloudflare Logs, `last_complete_at` / `next_due_at`, current Secret validity |
+| Shorts still sent | `videoType` + pinned `channelId`, complete private `MONITOR_CONFIG_JSON` override |
+| Missing images | Keep notifications working; inspect Discord's saved embed and proxy metadata |
+| Secret fixed, webhook still blocked | Source-wide blocked state; see [runbook](docs/DEPLOYMENT.md) |
 
 ```sh
-node --experimental-strip-types ops/manual-smoke.mjs --monitor=youtube-quizknock
+# Read-only configuration validation
+npm run config:check
+# Follow deployed Worker logs
+npx wrangler tail dopagaki-notify --format pretty
+# Fetch one source locally without sending or writing D1
+npm run smoke -- --monitor=youtube-quizknock
 ```
 
-Only the explicitly confirmed `--send-test --confirm-send` mode sends a single `[TEST]` embed, with the source webhook supplied through a private environment variable. Local success does not prove the deployed Cloudflare Worker is healthy. See the [operator diagnostics guide](docs/MANUAL_SMOKE.md).
+### Safe diagnostic commands
 
-## Development
+**One-off fetch:** `npm run smoke -- --monitor=ID` fetches a real snapshot **from your local machine**, not the deployed Cloudflare runtime. Default mode does not access D1 or send Discord messages. Both `--send-test --confirm-send` must be supplied to send one explicitly labeled `[TEST]` notification using your local webhook Secret. See [manual smoke guide](docs/MANUAL_SMOKE.md).
+
+**Discord thumbnail investigation:** Supply the private `DISCORD_WEBHOOK_YOUTUBE` to your local environment, then inspect the **link of an already delivered** Discord notification:
+
+```sh
+npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image
+```
+
+The tool uses **GET only**; no notification replay or D1 writes. It reports saved `image` / `thumbnail`, Discord image-proxy presence and dimensions, with sanitized output. Never share the webhook URL or token. [Diagnostic guide](docs/DISCORD_THUMBNAIL_DIAG.md).
+
+## Development and design
 
 ```sh
 npm install
+npm run config:check
 npm run check
 npm run bundle:check
 npm run dev
 ```
 
-See `src/sources/` and `src/runner.ts` for adding integrations. The [design brief](PROJECT_BRIEF.md) and [development roadmap](docs/ROADMAP.md) preserve architecture and implementation history. Do not post webhook URLs, private subscriptions, or operational secrets in issues or PRs.
+[Architecture](PROJECT_BRIEF.md) · [Roadmap/history](docs/ROADMAP.md) · [Detailed Cloudflare runbook](docs/DEPLOYMENT.md).
 
 ## License
 
-[MIT License](LICENSE) (Copyright (c) 2026 nasu). Modification, redistribution and commercial use are permitted provided the copyright notice and license terms are included.
-
-### YouTube handle identity
-
-For YouTube monitor targets, specify an optional `channelId` alongside `channel`, e.g. `{"id":"youtube-example","channel":"@example","channelId":"UC1234567890123456789012","enabled":true}`. The pinned immutable channel ID bypasses page scraping and cached handle resolution (in RSS and official API mode). Without a pinned ID, the app accepts only the channel page's ownership metadata, never related-channel links or arbitrary page JSON IDs. An RSS channel ID mismatch causes a retryable error instead of a wrong notification. The Discord YouTube embed also includes a thumbnail image.
-
-
-### Qiita and Zenn article thumbnails
-
-Zenn thumbnails now come **first from the original RSS `enclosure`**, with no extra HTTP request when a newly fetched article is delivered in the same tick. For queued notifications, the sender looks for the matching article in the author's Zenn RSS, falling back to its article HTML OGP only if the feed has no suitable image. Qiita prioritizes its article HTML `og:image` / `twitter:image`. If that is unavailable or its URL is too long for a Discord embed, Qiita can instead show the **author's profile icon** as a small thumbnail, obtained from the existing Items API response. The avatar is not the article's original OGP image. There is **no additional API key or D1 migration**, and existing pending deliveries gain the feature. If the publisher blocks the request, no suitable image is found, or the image cannot be displayed by Discord, the text/link notification still works. Qiita adds at most one page fetch per notification; a delayed Zenn notification may require one RSS request and one HTML fallback. RSS and HTML requests are bounded and image failures never block the notification.
-
-### Optional YouTube videos-only feed (exclude Shorts)
-
-Set `"videoType": "videos"` on a YouTube target with an explicitly **pinned `channelId`** to use YouTube's **undocumented** `playlist_id=UULF...` RSS feed for regular videos only (also excludes live streams). Omitted or `"all"` retains the current mixed uploads feed. Only `youtube-quizknock` opts in initially.
-
-Since this URL is not an official YouTube API contract, it can fail or change without notice. The monitor **does not silently fall back** to the Shorts-inclusive feed when it fails. Since the official Data API has no dedicated Shorts flag, the videos-only monitor intentionally uses RSS even when `YOUTUBE_API_KEY` is configured; other monitors keep their current API behavior.
-
-Existing monitor IDs, initial checkpoints, and sent receipts are unchanged. The first poll after changing the feed may notify the newest **previously unseen regular video even if old**, per the established latest-unseen policy. Already-sent Shorts receipts are preserved. Private `MONITOR_CONFIG_JSON` overrides must explicitly include the new `videoType` field. Live Cloudflare validation is required beyond CI.
+[MIT](LICENSE) (Copyright (c) 2026 nasu). You may modify, redistribute and use commercially, retaining the copyright and license notice.
