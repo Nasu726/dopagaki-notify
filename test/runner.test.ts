@@ -1113,3 +1113,48 @@ test('YouTube stages all fifteen feed videos, then drains the durable queue in b
   assert.equal(s.sent.length, 15);
   assert.equal(new Set(s.sent).size, 15);
 });
+
+test('notification hours default to unrestricted, support overnight windows and reject invalid windows', () => {
+  const jst = (time: string) => Date.parse(time);
+  const overnight = parseNotificationWindowJst('22:00-06:00');
+  const daytime = parseNotificationWindowJst('09:00-20:00');
+  assert.equal(isJstNotificationTime(jst('2026-10-13T14:00:00Z')), true, 'no window -> 24h');
+  assert.equal(isJstNotificationTime(jst('2026-10-13T14:00:00Z'), overnight), true); // 23 JST
+  assert.equal(isJstNotificationTime(jst('2026-10-13T20:59:59Z'), overnight), true); // 05:59 JST
+  assert.equal(isJstNotificationTime(jst('2026-10-13T21:00:00Z'), overnight), false); // 06:00 JST
+  assert.equal(isJstNotificationTime(jst('2026-10-13T12:59:59Z'), overnight), false); // 21:59 JST
+  assert.equal(isJstNotificationTime(jst('2026-10-13T13:00:00Z'), overnight), true); // 22:00 JST
+  assert.equal(isJstNotificationTime(jst('2026-10-13T11:00:00Z'), daytime), false);
+  assert.equal(parseNotificationWindowJst(null), null);
+  assert.equal(parseNotificationWindowJst(undefined), null);
+  assert.deepEqual(parseNotificationWindowJst(' 09:00-20:00\n'), daytime);
+  for (const invalid of ['', '09:00', '24:00-01:00', '09:60-20:00',
+    '09:00-09:00', 'foo', 100, {}, '9:00-20:00']) {
+    assert.throws(() => parseNotificationWindowJst(invalid), undefined, String(invalid));
+  }
+});
+
+test('without a delivery window, a new item is sent at night immediately', async () => {
+  const s = setup();
+  const start = Date.parse('2026-10-13T11:00:00Z'); // 20:00 JST
+  await runTick(s.env, [qiita], start, s.deps);
+  s.setItems([item('night-unrestricted', start + 120_000)]);
+  assert.equal(await runTick(s.env, [qiita], start + 60 * 60_000, s.deps), 'processed');
+  assert.deepEqual(s.sent, ['qiita:night-unrestricted']);
+});
+
+test('optional private delivery window suppresses nightly sends and keeps pending for later', async () => {
+  const s = setup();
+  s.env.NOTIFICATION_WINDOW_JST = '22:00-06:00';
+  const start = Date.parse('2026-10-13T10:00:00Z'); // 19:00 JST
+  await runTick(s.env, [qiita], start, s.deps);
+  s.setItems([item('overnight-only', start + 60_000)]);
+  const outside = start + 60 * 60_000; // 20 JST, not inside 22-06
+  await runTick(s.env, [qiita], outside, s.deps);
+  assert.deepEqual(s.sent, []);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:overnight-only'").get()?.status, 'pending');
+  assert.deepEqual(await getRunnableIds(s.env.DB, outside + 60_000, [qiita], parseNotificationWindowJst('22:00-06:00')), []);
+  const inside = Date.parse('2026-10-13T13:00:00Z'); // 22 JST
+  assert.equal(await runTick(s.env, [qiita], inside, s.deps), 'processed');
+  assert.deepEqual(s.sent, ['qiita:overnight-only']);
+});

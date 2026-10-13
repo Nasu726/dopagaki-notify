@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { loadRuntimeMonitors, MONITORS } from '../src/config.ts';
+import { loadRuntimeMonitors, MONITORS, resolveNotificationWindowJst } from '../src/config.ts';
 
 const privateTargets = {
   targets: {
@@ -86,4 +86,21 @@ test('bad Secret fails closed without leaking the provided configuration', () =>
       return true;
     });
   }
+});
+
+test('notification time preference is optional and can be private or deployment-specific', () => {
+  assert.equal(resolveNotificationWindowJst(undefined, undefined), null);
+  assert.equal(resolveNotificationWindowJst(JSON.stringify(privateTargets), undefined), null);
+  const privateWindow = JSON.stringify({ ...privateTargets, notificationWindowJst: '09:00-20:00' });
+  assert.deepEqual(resolveNotificationWindowJst(privateWindow, undefined),
+    { startMinutes: 540, endMinutes: 1200 });
+  assert.deepEqual(resolveNotificationWindowJst(privateWindow, '22:00-06:00'),
+    { startMinutes: 1320, endMinutes: 360 }, 'deployment Secret takes precedence');
+  assert.throws(() => resolveNotificationWindowJst(privateWindow, '09:00-09:00'), /start and end/);
+});
+
+test('invalid private window fails closed, even when monitor settings are valid', () => {
+  const invalid = JSON.stringify({ ...privateTargets, notificationWindowJst: '09:00-09:00' });
+  assert.throws(() => resolveNotificationWindowJst(invalid, undefined), /invalid notificationWindowJst/);
+  assert.throws(() => resolveNotificationWindowJst(undefined, '00:00-00:00'), /start and end/);
 });

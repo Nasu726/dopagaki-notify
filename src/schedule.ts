@@ -11,7 +11,7 @@ export interface NotificationWindowJst {
 export function parseNotificationWindowJst(value: unknown): NotificationWindowJst | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'string') throw new Error('Notification window must be HH:MM-HH:MM or null');
-  const match = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  const match = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
   if (!match) throw new Error('Notification window must be HH:MM-HH:MM (JST)');
   const startMinutes = Number(match[1]) * 60 + Number(match[2]);
   const endMinutes = Number(match[3]) * 60 + Number(match[4]);
