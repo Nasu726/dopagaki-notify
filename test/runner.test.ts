@@ -1325,3 +1325,24 @@ test('Zenn sends a freshly fetched RSS enclosure without waiting for a second HT
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE monitor_id=?")
     .get(monitor.id)?.status,'sent');
 });
+
+
+test('Qiita API author icon is forwarded to Discord in the same polling tick', async () => {
+  const s=setup();
+  const monitor:Monitor={id:'qiita-avatar-test',source:'qiita',query:'tag:Rust',
+    intervalMinutes:60,enabled:true};
+  const now=Date.parse('2026-10-13T00:00:00Z');
+  await runTick(s.env,[monitor],now,s.deps);
+  s.setItems([{
+    id:'qiita:new-icon',title:'New Rust',url:'https://qiita.com/test/items/new',
+    publishedAt:now+1_000,thumbnailUrl:'https://image.example.org/qiita-user.png',
+  }]);
+  const notified:ContentItem[]=[];
+  await runTick(s.env,[monitor],now+60*60_000,{
+    ...s.deps,send:async(_hook,_source,article)=>{notified.push(article);},
+  });
+  assert.equal(notified.length,1);
+  assert.equal(notified[0]?.thumbnailUrl,'https://image.example.org/qiita-user.png');
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE monitor_id=?")
+    .get(monitor.id)?.status,'sent');
+});

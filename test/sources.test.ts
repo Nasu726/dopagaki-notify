@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseArxiv, stableArxivId, fetchArxiv } from '../src/sources/arxiv.ts';
+import { parseQiita } from '../src/sources/qiita.ts';
 import { parseZenn, zennFeedUrl, fetchZenn } from '../src/sources/zenn.ts';
 import { parseYouTube, normalizeChannelReference, extractChannelId, fetchYouTube } from '../src/sources/youtube.ts';
 import { entries, fetchTextBounded, tagText } from '../src/sources/xml.ts';
@@ -358,4 +359,27 @@ test('Zenn RSS enclosure URL is used as a validated article thumbnail', () => {
   const fake = prefix +
     '<!-- <enclosure url="https://example.com/false.png" /> -->' + finish;
   assert.equal(parseZenn(fake)[0]?.imageUrl, undefined);
+});
+
+
+test('Qiita Items API author icon supplies a validated thumbnail fallback without article HTML', () => {
+  const now='2026-10-13T09:00:00Z';
+  const article='https://qiita.com/test/items/12345678901234567890';
+  const base={id:'12345678901234567890', title:'Qiita Rust', url:article, created_at:now};
+  const image='https://s3-ap-northeast-1.amazonaws.com/qiita-image-store/0/example.png';
+  assert.deepEqual(parseQiita([{...base,user:{profile_image_url:image}}]),[{
+    id:'qiita:12345678901234567890',title:'Qiita Rust',url:article,
+    publishedAt:Date.parse(now),thumbnailUrl:image,
+  }]);
+  for(const invalid of [
+    'http://images.example.com/unsafe.png',
+    'https://127.0.0.1/unsafe.png',
+    'https://attacker:pass@example.org/image.png',
+    'https://example.org/'+'a'.repeat(2200),
+  ]) {
+    assert.equal(parseQiita([{...base,user:{profile_image_url:invalid}}])[0]?.thumbnailUrl,
+      undefined, invalid);
+  }
+  assert.equal(parseQiita([base])[0]?.thumbnailUrl,undefined,
+    'existing API fixtures without user field remain backward compatible');
 });

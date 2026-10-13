@@ -98,6 +98,7 @@ export async function runTick(
     // Images from this exact RSS poll can be used immediately without D1
     // schema changes or a second article-page request.
     const fetchedImages = new Map<string, string>();
+    const fetchedThumbnails = new Map<string, string>();
     const wikipedia = runnable.source === 'wikipedia';
     const latestOnly = runnable.source === 'qiita' || runnable.source === 'zenn';
     // arXiv alone continues multi-page scans. Other feeds are snapshots.
@@ -125,9 +126,10 @@ export async function runTick(
         const sourceCursor = paginated && !verifyingHead ? state.scan_cursor : null;
         phase = 'fetch_and_parse';
         const result = await deps.fetchItems(runnable, env, sourceCursor, windowStart);
-        if (runnable.source === 'zenn') {
+        if (runnable.source === 'zenn' || runnable.source === 'qiita') {
           for (const article of result.items) {
             if (article.imageUrl) fetchedImages.set(article.id, article.imageUrl);
+            if (article.thumbnailUrl) fetchedThumbnails.set(article.id, article.thumbnailUrl);
           }
         }
         phase = 'stage_items';
@@ -231,6 +233,8 @@ export async function runTick(
         await deps.send(webhook, runnable.source, {
           id: item.item_id, title: item.title, url: item.url, publishedAt: item.published_at,
           ...(fetchedImages.has(item.item_id) ? { imageUrl: fetchedImages.get(item.item_id)! } : {}),
+          ...(fetchedThumbnails.has(item.item_id)
+            ? { thumbnailUrl: fetchedThumbnails.get(item.item_id)! } : {}),
         });
       } catch (error) {
         if (isWebhookInvalid(error)) {

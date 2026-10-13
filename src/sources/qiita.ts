@@ -1,5 +1,6 @@
 import { requireSuccess } from '../http.ts';
 import type { ContentItem, Monitor } from '../types.ts';
+import { safeImageUrl } from '../article-thumbnail.ts';
 
 const ENDPOINT = 'https://qiita.com/api/v2/items';
 const PER_PAGE = 20;
@@ -11,10 +12,12 @@ interface QiitaRow {
   url: string;
   created_at: string;
   updated_at?: string;
+  user?: { profile_image_url?: string };
 }
 
 // Port of the original dopagaki-board Qiita adapter: preserve stable ID and
-// creation timestamp. Likes, UI score, and thumbnail enrichment are omitted.
+// creation timestamp. Qiita supplies no article OGP field in the Items API,
+// but its author icon provides a reliable fallback when HTML/OGP is blocked.
 export function parseQiita(body: unknown): ContentItem[] {
   if (!Array.isArray(body)) throw new Error('Qiita response is not an array');
   return body.map((raw: unknown) => {
@@ -28,7 +31,12 @@ export function parseQiita(body: unknown): ContentItem[] {
     if (!Number.isFinite(publishedAt) || url.protocol !== 'https:' || url.hostname !== 'qiita.com') {
       throw new Error('Invalid Qiita published time or article URL');
     }
-    return { id: 'qiita:' + item.id, title: item.title, url: url.href, publishedAt };
+    const avatar = typeof item.user?.profile_image_url === 'string'
+      ? safeImageUrl(item.user.profile_image_url, url) : null;
+    return {
+      id: 'qiita:' + item.id, title: item.title, url: url.href, publishedAt,
+      ...(avatar ? { thumbnailUrl: avatar } : {}),
+    };
   });
 }
 

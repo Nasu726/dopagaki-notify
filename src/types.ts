@@ -6,6 +6,7 @@ export interface ContentItem {
   url: string;
   publishedAt: number; // publication time for news; recommendation time for Wikipedia discovery
   imageUrl?: string; // optional RSS/OG image, enriched at delivery; not stored in D1
+  thumbnailUrl?: string; // Qiita author icon fallback when article OGP is unavailable (transient)
   discoveryKind?: 'featured' | 'random'; // transient Wikipedia selection metadata (not persisted)
 }
 export interface Monitor {
