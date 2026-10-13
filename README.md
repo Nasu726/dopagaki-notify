@@ -177,3 +177,15 @@ Monitor failures now emit **one** JSON-formatted `monitor_failure` error log wit
 In **Workers → dopagaki-notify → Observability → Logs**, filter by `monitor_failure`, `cron_failure`, `YouTube RSS`, `MediaWiki`, or monitor ID. Investigate the **same invocation/timestamp** before treating HTTP subrequest failures and Cron `outcome: exception` as separate incidents. The original exception is deliberately rethrown after the D1 retry is persisted so Cloudflare still reports `outcome: exception` for failed source scans. **A 404 sent to the Worker's public HTTP handler is intentional** and unrelated to a `YouTube RSS HTTP 404`.
 
 **MediaWiki compatibility fix:** `list=random` identifies articles using `id`, while `list=categorymembers` uses `pageid`. Parser and official-shape regression tests now distinguish these; this removes the deterministic `Malformed MediaWiki discovery page` failure for valid random articles. MediaWiki 4xx responses remain separate issues requiring real HTTP status investigation.
+
+## YouTube RSS intermittent 404 behavior (2026-10-13)
+
+A YouTube channel can remain public while `https://www.youtube.com/feeds/videos.xml`
+intermittently responds with HTTP 404. Unlike an incorrect `@handle` page URL,
+this is treated as an upstream feed outage, not proof that the channel disappeared.
+A `YouTube RSS HTTP 404` now postpones that monitor's fetch for at least
+**60 minutes** (or longer if `Retry-After` asks for it), instead of repeatedly
+failing every 5-minute dispatcher tick. Outbox/initial baseline are retained,
+and the scheduled invocation still reports an exception so the incident remains
+visible; the `monitor_failure` log includes the exact `retryAt` timestamp.
+Other YouTube HTTP failures and other sources retain their previous policies.
