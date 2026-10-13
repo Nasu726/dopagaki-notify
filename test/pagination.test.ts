@@ -34,7 +34,7 @@ test('Qiita uses a bounded page cursor, not an entire feed in a single invocatio
   await assert.rejects(() => fetchQiita(monitor, fetcher, '101'), /Invalid Qiita/);
 });
 
-test('Wikipedia persists both rccontinue and continue tokens', async () => {
+test('Wikipedia samples at most three newest pages, ignoring old continuation cursors', async () => {
   let attempts = 0;
   const fetcher: typeof fetch = async (input, init) => {
     const req = new URL(String(input));
@@ -42,30 +42,27 @@ test('Wikipedia persists both rccontinue and continue tokens', async () => {
     assert.equal(headers.get('User-Agent'), WIKIMEDIA_USER_AGENT);
     assert.equal(headers.get('Api-User-Agent'), WIKIMEDIA_USER_AGENT);
     assert.match(WIKIMEDIA_USER_AGENT, /dopagaki-notify\/0\.1 \(https:\/\/github\.com\/Nasu726\/dopagaki-notify\)/);
+    assert.equal(req.searchParams.get('rclimit'), '3');
+    assert.equal(req.searchParams.get('rccontinue'), null);
+    assert.equal(req.searchParams.get('continue'), null);
     attempts++;
-    if (attempts === 1) {
-      assert.equal(req.searchParams.get('rccontinue'), null);
-      return Response.json({
-        continue: { continue: '-||', rccontinue: '20261010000000|1234' },
-        query: { recentchanges: [{ type: 'new', ns: 0, pageid: 12,
-          title: 'First', timestamp: '2026-10-10T00:00:00Z' }] },
-      });
-    }
-    assert.equal(req.searchParams.get('continue'), '-||');
-    assert.equal(req.searchParams.get('rccontinue'), '20261010000000|1234');
     return Response.json({
-      query: { recentchanges: [{ type: 'new', ns: 0, pageid: 11,
-        title: 'Second', timestamp: '2026-10-09T23:00:00Z' }] },
+      continue: { continue: '-||', rccontinue: '20261010000000|1234' },
+      query: { recentchanges: Array.from({ length: 5 }, (_, i) => ({
+        type: 'new', ns: 0, pageid: 12-i, title: 'Page ' + (12-i),
+        timestamp: '2026-10-10T00:00:00Z',
+      })) },
     });
   };
   const monitor = makeMonitor('wikipedia', 'ja');
   const first = await fetchWikipedia(monitor, fetcher);
-  assert.ok(first.nextCursor);
-  const second = await fetchWikipedia(monitor, fetcher, first.nextCursor);
-  assert.equal(second.items[0]?.id, 'wikipedia:ja:11');
-  assert.equal(second.nextCursor, null);
-  await assert.rejects(() => fetchWikipedia(monitor, fetcher, '{"continue":{}}'),
-    /Invalid MediaWiki cursor/);
+  assert.equal(first.items.length, 3);
+  assert.deepEqual(first.items.map((entry) => entry.id),
+    ['wikipedia:ja:12', 'wikipedia:ja:11', 'wikipedia:ja:10']);
+  assert.equal(first.nextCursor, null);
+  assert.equal(first.potentiallyTruncated, false);
+  await fetchWikipedia(monitor, fetcher, '{"continue":"-||","rccontinue":"legacy"}');
+  assert.equal(attempts, 2, 'an old D1 cursor must never cause an extra page read');
 });
 
 test('arXiv uses submittedDate offset pages and rejects unbounded offsets', async () => {
