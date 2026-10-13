@@ -42,6 +42,8 @@ async function main() {
     DISCORD_WEBHOOK_QIITA: process.env.DISCORD_WEBHOOK_QIITA,
     DISCORD_WEBHOOK_ZENN: process.env.DISCORD_WEBHOOK_ZENN,
     DISCORD_WEBHOOK_ARXIV: process.env.DISCORD_WEBHOOK_ARXIV,
+    DISCORD_WEBHOOK_OPENALEX: process.env.DISCORD_WEBHOOK_OPENALEX,
+    OPENALEX_API_KEY: process.env.OPENALEX_API_KEY,
     DISCORD_WEBHOOK_YOUTUBE: process.env.DISCORD_WEBHOOK_YOUTUBE,
     YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
     DISCORD_WEBHOOK_WIKIPEDIA: process.env.DISCORD_WEBHOOK_WIKIPEDIA,
@@ -50,6 +52,7 @@ async function main() {
     (m.source === 'qiita' && env.DISCORD_WEBHOOK_QIITA) ||
     (m.source === 'zenn' && env.DISCORD_WEBHOOK_ZENN) ||
     (m.source === 'arxiv' && env.DISCORD_WEBHOOK_ARXIV) ||
+    (m.source === 'openalex' && env.DISCORD_WEBHOOK_OPENALEX) ||
     (m.source === 'youtube' && env.DISCORD_WEBHOOK_YOUTUBE) ||
     (m.source === 'wikipedia' && env.DISCORD_WEBHOOK_WIKIPEDIA)
   ))) throw new Error('No enabled monitor has a corresponding Discord Webhook Secret');

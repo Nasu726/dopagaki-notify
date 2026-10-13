@@ -3,6 +3,7 @@ import targets from '../config/targets.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
 import { normalizeChannelReference } from './sources/youtube.ts';
 import { zennFeedUrl } from './sources/zenn.ts';
+import { openAlexQuery } from './sources/openalex.ts';
 import { isWeeklyJstDay, parseNotificationWindowJst } from './schedule.ts';
 import type { NotificationWindowJst } from './schedule.ts';
 
@@ -58,6 +59,10 @@ const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
   ...targets.arxiv.map((target) => ({
     id: target.id, source: 'arxiv' as const,
     query: arxivCategoryQuery(target.categories), enabled: target.enabled,
+  })),
+  ...targets.openalex.map((target) => ({
+    id: target.id, source: 'openalex' as const,
+    query: target.query.trim(), enabled: target.enabled,
   })),
   ...queryMonitorsFromTargets('zenn', targets.zenn),
   ...youtubeMonitorsFromTargets(targets.youtube),
@@ -128,12 +133,14 @@ export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[
     throw new Error('MONITOR_CONFIG_JSON wikipediaEnabled must be boolean');
   }
   const targetConfig = raw.targets;
-  const allowed = ['qiita', 'zenn', 'arxiv', 'youtube'];
+  const allowed = ['qiita', 'zenn', 'arxiv', 'youtube', 'openalex'];
   if (Object.keys(targetConfig).some((key) => !allowed.includes(key)))
     throw new Error('MONITOR_CONFIG_JSON targets contains an unknown source');
   const targetsBySource: Record<string, Record<string, unknown>[]> = {};
   for (const source of allowed) {
-    const entries: unknown = targetConfig[source];
+    // Older private Secrets remain valid when a new optional provider is added.
+    const entries: unknown = source === 'openalex' && targetConfig[source] === undefined
+      ? [] : targetConfig[source];
     if (!Array.isArray(entries) || entries.length > 100 || !entries.every(objectRecord)) {
       throw new Error('MONITOR_CONFIG_JSON targets.' + source + ' must be an array of objects (max 100)');
     }
@@ -142,7 +149,7 @@ export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[
       if (typeof target.id !== 'string' || typeof target.enabled !== 'boolean') {
         throw new Error('MONITOR_CONFIG_JSON targets require string id and boolean enabled');
       }
-      if ((source === 'qiita' || source === 'zenn') && typeof target.query !== 'string') {
+      if ((source === 'qiita' || source === 'zenn' || source === 'openalex') && typeof target.query !== 'string') {
         throw new Error('MONITOR_CONFIG_JSON query targets require string query');
       }
       if (source === 'youtube' && (
@@ -169,6 +176,10 @@ export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[
         id: target.id as string, source: 'arxiv' as const,
         query: arxivCategoryQuery(target.categories as string[]),
         enabled: target.enabled as boolean,
+      })),
+      ...(targetsBySource.openalex ?? []).map((target) => ({
+        id: target.id as string, source: 'openalex' as const,
+        query: (target.query as string).trim(), enabled: target.enabled as boolean,
       })),
       ...queryMonitorsFromTargets('zenn', targetsBySource.zenn as unknown as QueryTarget[]),
       ...youtubeMonitorsFromTargets(targetsBySource.youtube as unknown as YouTubeTarget[]),
@@ -201,6 +212,10 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
       throw new Error('Enabled monitor ' + monitor.id + ' requires a configured query/target');
     if (monitor.enabled && monitor.source === 'wikipedia' && !/^[a-z]{2,12}(?:-[a-z]{2,12})?(?::discover)?$/.test(monitor.query))
       throw new Error('Wikipedia monitor requires a language code, optionally :discover');
+    if (monitor.enabled && monitor.source === 'openalex') {
+      try { openAlexQuery(monitor.query); }
+      catch { throw new Error('Enabled OpenAlex monitor ' + monitor.id + ': invalid query'); }
+    }
     if (monitor.enabled && monitor.source === 'zenn') {
       try { zennFeedUrl(monitor.query); }
       catch { throw new Error('Enabled Zenn monitor ' + monitor.id + ': invalid user/topic feed query'); }

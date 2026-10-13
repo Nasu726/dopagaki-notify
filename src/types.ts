@@ -1,4 +1,4 @@
-export type SourceName = 'qiita' | 'wikipedia' | 'arxiv' | 'zenn' | 'youtube'; // arXiv, Zenn, YouTube follow.
+export type SourceName = 'qiita' | 'wikipedia' | 'arxiv' | 'openalex' | 'zenn' | 'youtube'; // arXiv, Zenn, YouTube follow.
 
 export interface ContentItem {
   id: string;
@@ -35,6 +35,9 @@ export interface Env {
   DISCORD_WEBHOOK_QIITA?: string;
   DISCORD_WEBHOOK_WIKIPEDIA?: string;
   DISCORD_WEBHOOK_ARXIV?: string;
+  DISCORD_WEBHOOK_OPENALEX?: string;
+  /** Optional free OpenAlex API key; keyless quota works for small monitoring. */
+  OPENALEX_API_KEY?: string;
   DISCORD_WEBHOOK_ZENN?: string;
   DISCORD_WEBHOOK_YOUTUBE?: string;
   /** Optional official YouTube Data API key. Absent = RSS; present = Data API. */
