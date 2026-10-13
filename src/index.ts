@@ -1,5 +1,5 @@
 import { pruneSentDeliveries } from './maintenance.ts';
-import { loadRuntimeMonitors } from './config.ts';
+import { loadRuntimeMonitors, validateMonitors, resolveNotificationWindowJst } from './config.ts';
 import { runTick } from './runner.ts';
 import { logFailure } from './observability.ts';
 import type { Env } from './types.ts';
@@ -20,12 +20,29 @@ export default {
         return;
       }
       if (event.cron !== '*/5 * * * *') return;
+      // Validate both monitor roster and private delivery-window Secrets
+      // before touching D1, so a bad deployment fails closed with one
+      // actionable, secret-free configuration event per Cron invocation.
+      phase = 'monitor_config';
+      const monitors = loadRuntimeMonitors(env.MONITOR_CONFIG_JSON);
+      validateMonitors(monitors);
+      phase = 'delivery_window_config';
+      resolveNotificationWindowJst(env.MONITOR_CONFIG_JSON, env.NOTIFICATION_WINDOW_JST);
       phase = 'monitor_tick';
-      const status = await runTick(env, loadRuntimeMonitors(env.MONITOR_CONFIG_JSON));
+      const status = await runTick(env, monitors);
       console.log('cron: ' + status);
     } catch (error) {
       // Complement monitor-specific failures with one Cron-level record.
       // Rethrow to preserve Cloudflare's outcome=exception signal.
+      if (phase === 'monitor_config' || phase === 'delivery_window_config') {
+        // Never log an untrusted private Secret or detailed validation error.
+        // Retain outcome=exception so failures remain observable to Cloudflare.
+        logFailure({ event: 'runtime_config_failure', phase, cron: event.cron },
+          new Error(phase === 'delivery_window_config'
+            ? 'Invalid notification window. Run npm run config:check -- --notification-window=HH:MM-HH:MM locally, then update Cloudflare Secret.'
+            : 'Invalid monitor configuration. Run npm run config:check with the intended local private config.'));
+        throw new Error('Invalid runtime configuration; check Cloudflare Secrets and configuration preflight');
+      }
       logFailure({ event: 'cron_failure', phase, cron: event.cron }, error);
       throw error;
     }

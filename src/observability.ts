@@ -4,7 +4,7 @@ import type { SourceName } from './types.ts';
 // Error-only structured logs: no query strings, fetched content, stack traces,
 // Webhook URLs or upstream response bodies are written to application logs.
 export interface FailureContext {
-  event: 'monitor_failure' | 'cron_failure';
+  event: 'monitor_failure' | 'cron_failure' | 'runtime_config_failure';
   phase: string;
   monitorId?: string;
   source?: SourceName;

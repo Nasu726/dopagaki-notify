@@ -115,6 +115,8 @@ Paste the JSON content in the interactive Secret prompt. **Never post secrets or
 ```sh
 npm run config:check -- --private-config-file=.private/monitor-config.json
 npm run config:check -- --notification-window-file=.private/notification-window.txt
+# Validate the precise intended Cloudflare Secret value before updating
+npm run config:check -- --notification-window=08:00-20:00
 ```
 
 Time windows use **JST, start inclusive / end exclusive**. For example, `08:00-20:00` allows Discord sends from 08:00 to 19:59. The Worker still fetches and queues outside that range. `00:00-24:00` is **invalid**. For 24-hour sends, leave the `NOTIFICATION_WINDOW_JST` Secret unset and use `null` in config.

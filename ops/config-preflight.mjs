@@ -31,17 +31,19 @@ export function validateRuntimeConfiguration(privateJson, windowSecret) {
 
 export function parsePreflightArgs(args) {
   if (args.length === 1 && args[0] === '--help') return { help: true };
-  const parsed = { help: false, configFile: null, windowFile: null };
+  const parsed = { help: false, configFile: null, windowFile: null, windowValue: null };
   for (const arg of args) {
     if (arg.startsWith('--private-config-file=') && !parsed.configFile) {
       parsed.configFile = arg.slice('--private-config-file='.length);
-    } else if (arg.startsWith('--notification-window-file=') && !parsed.windowFile) {
+    } else if (arg.startsWith('--notification-window-file=') && !parsed.windowFile && parsed.windowValue === null) {
       parsed.windowFile = arg.slice('--notification-window-file='.length);
+    } else if (arg.startsWith('--notification-window=') && !parsed.windowFile && parsed.windowValue === null) {
+      parsed.windowValue = arg.slice('--notification-window='.length);
     } else {
       throw new Error('Unknown or repeated preflight option');
     }
   }
-  if (parsed.configFile === '' || parsed.windowFile === '')
+  if (parsed.configFile === '' || parsed.windowFile === '' || parsed.windowValue === '')
     throw new Error('Missing preflight file path');
   return parsed;
 }
@@ -52,6 +54,7 @@ async function main() {
     console.log([
       'Usage: npm run config:check -- [--private-config-file=.private/monitor-config.json]',
       '      [--notification-window-file=.private/notification-window.txt]',
+      '      [--notification-window=08:00-20:00]',
       'Without options, checks public committed configuration and any private',
       'MONITOR_CONFIG_JSON / NOTIFICATION_WINDOW_JST already in local environment.',
       'No D1 access, no API requests and no secrets written or echoed.',
@@ -60,12 +63,13 @@ async function main() {
     return;
   }
   if ((args.configFile && process.env.MONITOR_CONFIG_JSON !== undefined) ||
-      (args.windowFile && process.env.NOTIFICATION_WINDOW_JST !== undefined))
+      ((args.windowFile || args.windowValue !== null) && process.env.NOTIFICATION_WINDOW_JST !== undefined))
     throw new Error('Choose environment or local file for each private setting, not both');
   const config = args.configFile
     ? readFileSync(args.configFile, 'utf8') : process.env.MONITOR_CONFIG_JSON;
   const window = args.windowFile
-    ? readFileSync(args.windowFile, 'utf8').trim() : process.env.NOTIFICATION_WINDOW_JST;
+    ? readFileSync(args.windowFile, 'utf8').trim()
+    : args.windowValue !== null ? args.windowValue : process.env.NOTIFICATION_WINDOW_JST;
   console.log(JSON.stringify(validateRuntimeConfiguration(config, window)));
 }
 
