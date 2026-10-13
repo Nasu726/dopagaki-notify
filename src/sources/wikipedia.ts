@@ -1,6 +1,10 @@
 import { requireSuccess } from '../http.ts';
 import type { ContentItem, Monitor } from '../types.ts';
 
+// Sample only the newest page creations; exhaustive pagination is intentionally
+// disabled for Wikipedia to bound both alerts and D1 operations.
+export const WIKIPEDIA_SAMPLE_SIZE = 3;
+
 // Wikimedia requires a descriptive bot User-Agent with contact information.
 // This repository's issue tracker is the publicly reachable operator contact.
 export const WIKIMEDIA_USER_AGENT =
@@ -36,7 +40,7 @@ export function parseNewPages(raw: unknown, language: string): ContentItem[] {
 }
 
 export async function fetchWikipedia(
-  monitor: Monitor, fetcher: typeof fetch = fetch, cursor?: string | null,
+  monitor: Monitor, fetcher: typeof fetch = fetch, _cursor?: string | null,
 ): Promise<{ items: ContentItem[]; potentiallyTruncated: boolean; nextCursor?: string | null }> {
   const language = monitor.query.trim().toLowerCase();
   if (!/^[a-z]{2,12}(?:-[a-z]{2,12})?$/.test(language))
@@ -44,31 +48,16 @@ export async function fetchWikipedia(
   const url = new URL('https://' + language + '.wikipedia.org/w/api.php');
   for (const [key, value] of Object.entries({
     action: 'query', list: 'recentchanges', format: 'json', formatversion: '2',
-    rctype: 'new', rcnamespace: '0', rcdir: 'older', rcprop: 'title|ids|timestamp', rclimit: '50',
+    rctype: 'new', rcnamespace: '0', rcdir: 'older', rcprop: 'title|ids|timestamp',
+    rclimit: String(WIKIPEDIA_SAMPLE_SIZE),
   })) url.searchParams.set(key, value);
-  if (cursor != null) {
-    if (cursor.length > 512) throw new Error('Invalid MediaWiki cursor');
-    let parsed: unknown;
-    try { parsed = JSON.parse(cursor); } catch { throw new Error('Invalid MediaWiki cursor'); }
-    if (!parsed || typeof parsed !== 'object') throw new Error('Invalid MediaWiki cursor');
-    const continuation = parsed as Record<string, unknown>;
-    if (typeof continuation.rccontinue !== 'string' ||
-        typeof continuation.continue !== 'string' || continuation.rccontinue.length > 256 ||
-        continuation.continue.length > 64) throw new Error('Invalid MediaWiki cursor');
-    url.searchParams.set('rccontinue', continuation.rccontinue);
-    url.searchParams.set('continue', continuation.continue);
-  }
+  // Ignore legacy pagination cursors; always use the current newest page.
+
   const response = await fetcher(url, {
     headers: { Accept: 'application/json', 'User-Agent': WIKIMEDIA_USER_AGENT,
       'Api-User-Agent': WIKIMEDIA_USER_AGENT }, signal: AbortSignal.timeout(15_000),
   });
   requireSuccess(response, 'MediaWiki');
-  const raw = await response.json() as { continue?: unknown };
-  const items = parseNewPages(raw, language);
-  const continuation = raw.continue as Record<string, unknown> | undefined;
-  const nextCursor = continuation && typeof continuation.rccontinue === 'string' &&
-    typeof continuation.continue === 'string'
-    ? JSON.stringify({ continue: continuation.continue, rccontinue: continuation.rccontinue }) : null;
-  if (continuation && !nextCursor) throw new Error('Malformed MediaWiki continuation');
-  return { items, potentiallyTruncated: false, nextCursor };
+  const raw = await response.json();
+  return { items: parseNewPages(raw, language).slice(0, WIKIPEDIA_SAMPLE_SIZE), potentiallyTruncated: false, nextCursor: null };
 }

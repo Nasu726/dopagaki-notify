@@ -1,7 +1,7 @@
 import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue } from './schedule.ts';
 import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors } from './config.ts';
-import { notifyDiscord, webhookFor } from './discord.ts';
+import { hasWebhookSecret, notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
 import { fetchWikipedia } from './sources/wikipedia.ts';
 import { fetchArxiv } from './sources/arxiv.ts';
@@ -11,6 +11,7 @@ import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, deferFetchUntil, getPending, getRunnableIds,
   getState, markSent, coolDownPending, blockWebhook, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
+  pruneStaleWikipediaPending,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
 
@@ -43,7 +44,10 @@ export async function runTick(
   env: Env, monitors: readonly Monitor[], now = Date.now(), deps: Dependencies = defaults,
 ): Promise<'idle' | 'processed' | 'busy'> {
   validateMonitors(monitors);
-  const enabled = new Map(monitors.filter((monitor) => monitor.enabled).map((monitor) => [monitor.id, monitor]));
+  // An enabled monitor without its Cloudflare Discord Secret remains dormant:
+  // no D1 initialization or recurrent failing lease attempts.
+  const enabled = new Map(monitors.filter((monitor) => monitor.enabled && hasWebhookSecret(monitor, env))
+    .map((monitor) => [monitor.id, monitor]));
   if (!enabled.size) return 'idle';
   const runnable = (await getRunnableIds(env.DB, now, [...enabled.values()]))
     .map((id) => enabled.get(id)).find(Boolean);
@@ -55,6 +59,9 @@ export async function runTick(
     await assertMonitorIdentity(env.DB, runnable.id, token, runnable.source,
       runnable.query, state.config_identity, state.initialized_at);
     let fetchError: unknown;
+    let wikipediaFetchSucceeded = false;
+    const wikipedia = runnable.source === 'wikipedia';
+    const wikipediaCutoff = now - runnable.intervalMinutes * 60_000;
     const due = state.next_due_at <= now;
     const onSelectedDay = runnable.weeklyJstDay === undefined ||
       isJstWeekday(now, runnable.weeklyJstDay);
@@ -68,21 +75,30 @@ export async function runTick(
       webhookFor(runnable, env);
       try {
         const windowStart = state.last_complete_at === null ? null : state.last_complete_at - LOOKBACK_MS;
-        const verifyingHead = state.scan_cursor === VERIFY_HEAD_CURSOR;
-        const sourceCursor = verifyingHead ? null : state.scan_cursor;
+        const verifyingHead = !wikipedia && state.scan_cursor === VERIFY_HEAD_CURSOR;
+        const sourceCursor = wikipedia || verifyingHead ? null : state.scan_cursor;
         const result = await deps.fetchItems(runnable, env, sourceCursor, windowStart);
         if (result.potentiallyTruncated) {
           console.warn('monitor ' + runnable.id + ': source exhausted its paging limit; coverage incomplete');
         }
-        await stage(env.DB, runnable.id, result.items, state.initialized_at, now);
+        if (wikipedia) {
+          await pruneStaleWikipediaPending(env.DB, runnable.id, wikipediaCutoff);
+          const newest = result.items
+            .filter((item) => item.publishedAt > wikipediaCutoff && item.publishedAt <= now)
+            .sort((a, b) => b.publishedAt - a.publishedAt || a.id.localeCompare(b.id))
+            .slice(0, MAX_NOTIFICATIONS_PER_TICK);
+          await stage(env.DB, runnable.id, newest, state.initialized_at, now);
+        } else {
+          await stage(env.DB, runnable.id, result.items, state.initialized_at, now);
+        }
         // Qiita uses a documented created:>= query filter, but search may be relevance
         // ordered. Do not stop at a known ID; continue paging the filtered window.
         const chronologicallyOrdered = runnable.source === 'arxiv' || runnable.source === 'wikipedia';
         const reachedOverlap = chronologicallyOrdered && state.last_complete_at !== null &&
           result.items.some((item) => item.publishedAt <= state.last_complete_at! - LOOKBACK_MS);
-        if (state.initialized_at !== null && result.nextCursor && !reachedOverlap && !verifyingHead) {
+        if (!wikipedia && state.initialized_at !== null && result.nextCursor && !reachedOverlap && !verifyingHead) {
           await saveScanCursor(env.DB, runnable.id, token, now, state.scan_started_at ?? now, result.nextCursor);
-        } else if (state.initialized_at !== null && state.scan_cursor !== null &&
+        } else if (!wikipedia && state.initialized_at !== null && state.scan_cursor !== null &&
             !verifyingHead && !result.potentiallyTruncated) {
           // Offset/search pages may shift as new items arrive during a multi-Cron scan.
           // Check the newest page once more before saving the full-scan watermark.
@@ -93,6 +109,7 @@ export async function runTick(
             nextHourlyJstWeekdayDue(now, runnable.weeklyJstDay);
           await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes,
             state.scan_started_at ?? now, !result.potentiallyTruncated, nextDueAt);
+          if (wikipedia) wikipediaFetchSucceeded = true;
           if (state.initialized_at === null && !result.potentiallyTruncated)
             console.log('monitor ' + runnable.id + ': silent baseline initialized');
         }
@@ -113,8 +130,9 @@ export async function runTick(
     // queued until the next 09:00-20:00 JST delivery window.
     const deliveryNow = deps.clock?.() ?? now;
     const pending = !isJstNotificationTime(deliveryNow) || state.webhook_cooldown_until > now ||
-      state.webhook_blocked_status !== null
-      ? [] : await getPending(env.DB, runnable.id, now, MAX_NOTIFICATIONS_PER_TICK);
+      state.webhook_blocked_status !== null || (wikipedia && !wikipediaFetchSucceeded)
+      ? [] : await getPending(env.DB, runnable.id, now, MAX_NOTIFICATIONS_PER_TICK,
+        wikipedia ? wikipediaCutoff : undefined);
     for (const item of pending) {
       // A slow upstream fetch may have crossed 20:00 JST since the tick began.
       // Check again immediately before posting, not only at tick selection.

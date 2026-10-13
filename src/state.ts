@@ -76,7 +76,8 @@ export async function getRunnableIds(
     const rows = await db.prepare(
       'WITH enabled(id, source) AS (VALUES ' + inputs + ') ' +
       'SELECT e.id AS id, m.id AS existing_id, m.next_due_at, m.lease_until, ' +
-      'CASE WHEN ? = 1 AND COALESCE(w.cooldown_until, 0) <= ? AND w.blocked_status IS NULL THEN ' +
+      "CASE WHEN e.source <> 'wikipedia' AND ? = 1 " +
+      'AND COALESCE(w.cooldown_until, 0) <= ? AND w.blocked_status IS NULL THEN ' +
       "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = e.id AND d.status = 'pending' " +
       'AND d.next_attempt_at <= ?) ELSE 0 END AS pending_due ' +
       'FROM enabled e LEFT JOIN monitor_state m ON m.id = e.id ' +
@@ -104,12 +105,12 @@ export async function claim(
   // monitor_state webhook columns retained by earlier migrations.
   const result = await db.prepare(
     "UPDATE monitor_state SET lease_token = ?, lease_until = ? WHERE id = ? " +
-    "AND (lease_until IS NULL OR lease_until <= ?) AND (next_due_at <= ? OR (" +
+    "AND (lease_until IS NULL OR lease_until <= ?) AND (next_due_at <= ? OR (? <> 'wikipedia' AND (" +
     "EXISTS (SELECT 1 FROM deliveries d WHERE d.monitor_id = monitor_state.id " +
     "AND d.status = 'pending' AND d.next_attempt_at <= ?) " +
     "AND NOT EXISTS (SELECT 1 FROM webhook_source_state w " +
-    "WHERE w.source = ? AND (w.cooldown_until > ? OR w.blocked_status IS NOT NULL))))"
-  ).bind(token, now + LEASE_MS, id, now, now, now, source, now).run();
+    "WHERE w.source = ? AND (w.cooldown_until > ? OR w.blocked_status IS NOT NULL)))))"
+  ).bind(token, now + LEASE_MS, id, now, now, source, now, source, now).run();
   return result.meta.changes === 1;
 }
 export async function release(db: Database, id: string, token: string): Promise<void> {
@@ -208,13 +209,29 @@ export async function blockWebhook(
   ).bind(source, status, now).run();
 }
 
-export async function getPending(db: Database, id: string, now: number, limit: number): Promise<Delivery[]> {
+export async function getPending(
+  db: Database, id: string, now: number, limit: number, wikipediaCutoff?: number,
+): Promise<Delivery[]> {
+  const sample = wikipediaCutoff !== undefined;
   const rows = await db.prepare(
     "SELECT item_id, title, url, published_at, attempts FROM deliveries " +
     "WHERE monitor_id = ? AND status = 'pending' AND next_attempt_at <= ? " +
-    "ORDER BY published_at, item_id LIMIT ?"
-  ).bind(id, now, limit).all<Delivery>();
+    (sample ? 'AND published_at > ? ' : '') +
+    (sample ? 'ORDER BY published_at DESC, item_id DESC LIMIT ?' :
+      'ORDER BY published_at, item_id LIMIT ?')
+  ).bind(...(sample ? [id, now, wikipediaCutoff, limit] : [id, now, limit])).all<Delivery>();
   return rows.results;
+}
+
+// One bounded delete every successful 2h Wikipedia check (0-12 rows).
+// Old pending messages are intentionally discarded to stop backlog floods.
+export async function pruneStaleWikipediaPending(
+  db: Database, id: string, cutoff: number,
+): Promise<void> {
+  await db.prepare(
+    "DELETE FROM deliveries WHERE rowid IN (SELECT rowid FROM deliveries " +
+    "WHERE monitor_id = ? AND status = 'pending' AND published_at <= ? LIMIT 12)"
+  ).bind(id, cutoff).run();
 }
 export async function markSent(db: Database, id: string, itemId: string, now: number): Promise<void> {
   await db.prepare(
