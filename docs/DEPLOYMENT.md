@@ -1,5 +1,7 @@
 # Cloudflare staging deployment runbook
 
+**Configurable targets (2026-10-13):** Qiita searches and Zenn topic/user feeds now use lists in `config/targets.json`, just like arXiv/YouTube. All targets have distinct IDs, `enabled` flags and positive-minute intervals in `config/intervals.json`. The existing `qiita-rust`, `zenn-topic-typescript` and `arxiv-cs-ai` IDs/queries remain unchanged, protecting their existing D1 identities. A new `arxiv-cs-ds` monitor tracks `cs.DS` independently at 120 minutes. No D1 migration or new Discord Secret is needed beyond the existing arXiv secret. If the Worker lacks `DISCORD_WEBHOOK_ARXIV`, both arXiv monitors remain dormant. Do not enable broad new Qiita/Zenn topics before estimating notification volume and D1 row usage. See README configuration section for examples.
+
 **Source activation update (2026-10-13):** arXiv and Zenn are enabled in code with the existing `cs.AI` and TypeScript topic targets, respectively, but are dormant until their individual Discord Webhook Secrets are present. Wikipedia now samples at most three new page creations every 120 minutes. See the README's notification policy for details.
 
 

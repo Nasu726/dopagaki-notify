@@ -2,18 +2,36 @@ import intervals from '../config/intervals.json' with { type: 'json' };
 import targets from '../config/targets.json' with { type: 'json' };
 import type { Monitor } from './types.ts';
 import { normalizeChannelReference } from './sources/youtube.ts';
+import { zennFeedUrl } from './sources/zenn.ts';
 import { isWeeklyJstDay } from './schedule.ts';
 
 // All per-monitor intervals remain in config/intervals.json.
-// Configure arXiv category groups and any number of YouTube channels, including
-// their enabled flags, in config/targets.json; no TypeScript edits are needed.
-// The owner must intentionally select real targets before enabling them.
+// Configure any number of Qiita searches, Zenn feeds, arXiv category groups,
+// and YouTube channels (plus enabled flags) in config/targets.json.
+// Stable monitor IDs preserve their historical D1 identities on migration.
 export function arxivCategoryQuery(categories: readonly string[]): string {
   if (!categories.length || categories.length > 12 ||
       categories.some((category) => !/^[a-z][a-zA-Z0-9.-]{0,31}$/.test(category))) {
     throw new Error('Invalid arXiv categories: use e.g. cs.AI, cs.LG, math.CO');
   }
   return categories.map((category) => 'cat:' + category).join(' OR ');
+}
+
+export interface QueryTarget {
+  readonly id: string;
+  readonly query: string;
+  readonly enabled: boolean;
+}
+
+// Each configured row maps to a separate monitor ID with an independent
+// baseline, due time and outbox. Intervals live only in intervals.json.
+export function queryMonitorsFromTargets(
+  source: 'qiita' | 'zenn',
+  configured: readonly QueryTarget[],
+): readonly Omit<Monitor, 'intervalMinutes'>[] {
+  return configured.map((target) => ({
+    id: target.id, source, query: target.query.trim(), enabled: target.enabled,
+  }));
 }
 
 export interface YouTubeTarget {
@@ -34,13 +52,13 @@ export function youtubeMonitorsFromTargets(
 }
 
 const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
-  { id: 'qiita-rust', source: 'qiita', query: 'tag:Rust', enabled: true },
+  ...queryMonitorsFromTargets('qiita', targets.qiita),
   { id: 'wikipedia-ja', source: 'wikipedia', query: 'ja', enabled: true },
   ...targets.arxiv.map((target) => ({
     id: target.id, source: 'arxiv' as const,
     query: arxivCategoryQuery(target.categories), enabled: target.enabled,
   })),
-  { id: 'zenn-topic-typescript', source: 'zenn', query: 'topic:typescript', enabled: true },
+  ...queryMonitorsFromTargets('zenn', targets.zenn),
   ...youtubeMonitorsFromTargets(targets.youtube),
 ];
 
@@ -81,6 +99,10 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     }
     if (monitor.enabled && !monitor.query.trim())
       throw new Error('Enabled monitor ' + monitor.id + ' requires a configured query/target');
+    if (monitor.enabled && monitor.source === 'zenn') {
+      try { zennFeedUrl(monitor.query); }
+      catch { throw new Error('Enabled Zenn monitor ' + monitor.id + ': invalid user/topic feed query'); }
+    }
     if (monitor.enabled && monitor.source === 'youtube') {
       try { normalizeChannelReference(monitor.query); }
       catch { throw new Error('Enabled YouTube monitor ' + monitor.id + ': invalid channel reference'); }
