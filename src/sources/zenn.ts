@@ -1,5 +1,6 @@
 import type { ContentItem, Monitor } from '../types.ts';
 import { entries, fetchTextBounded, parseDate, requiredText, tagText } from './xml.ts';
+import { safeImageUrl } from '../article-thumbnail.ts';
 
 export function zennFeedUrl(query: string): URL {
   const match = /^(user|topic):([a-zA-Z0-9_-]{1,80})$/.exec(query.trim());
@@ -7,6 +8,19 @@ export function zennFeedUrl(query: string): URL {
   const path = match[1] === 'user' ? match[2] : 'topics/' + match[2];
   return new URL('https://zenn.dev/' + path + '/feed');
 }
+/** Zenn RSS supplies the article's generated OGP image in <enclosure url="...">.
+ * The enclosure MIME/type/length fields are often nonstandard. Validate
+ * only its URL, and ignore enclosure-like text in comments or CDATA.
+ */
+export function zennEnclosureImage(entry: string, articleUrl: URL): string | null {
+  const safeXml = entry.replace(/<!--[\\s\\S]*?-->|<!\\[CDATA\\[[\\s\\S]*?\\]\\]>/g, '');
+  const tag = /<enclosure\\b[^>]{0,4096}>/i.exec(safeXml)?.[0];
+  if (!tag) return null;
+  const match = /(?:\\s|^)url\\s*=\\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag);
+  const raw = match?.[1] ?? match?.[2];
+  return raw ? safeImageUrl(raw, articleUrl) : null;
+}
+
 export function parseZenn(xml: string): ContentItem[] {
   return entries(xml, 'item').map((entry) => {
     const url = new URL(requiredText(entry, 'link'));
@@ -17,6 +31,7 @@ export function parseZenn(xml: string): ContentItem[] {
       title: requiredText(entry, 'title'),
       url: url.href,
       publishedAt: parseDate(requiredText(entry, 'pubDate')),
+      ...(zennEnclosureImage(entry, url) ? { imageUrl: zennEnclosureImage(entry, url)! } : {}),
     };
   });
 }

@@ -95,6 +95,9 @@ export async function runTick(
     let fetchError: unknown;
     let fetchErrorPhase: string | null = null;
     let wikipediaFetchSucceeded = false;
+    // Images from this exact RSS poll can be used immediately without D1
+    // schema changes or a second article-page request.
+    const fetchedImages = new Map<string, string>();
     const wikipedia = runnable.source === 'wikipedia';
     const latestOnly = runnable.source === 'qiita' || runnable.source === 'zenn';
     // arXiv alone continues multi-page scans. Other feeds are snapshots.
@@ -122,6 +125,11 @@ export async function runTick(
         const sourceCursor = paginated && !verifyingHead ? state.scan_cursor : null;
         phase = 'fetch_and_parse';
         const result = await deps.fetchItems(runnable, env, sourceCursor, windowStart);
+        if (runnable.source === 'zenn') {
+          for (const article of result.items) {
+            if (article.imageUrl) fetchedImages.set(article.id, article.imageUrl);
+          }
+        }
         phase = 'stage_items';
         if (paginated && result.potentiallyTruncated) {
           console.warn('monitor ' + runnable.id + ': paginated scan hit its limit; coverage incomplete');
@@ -222,6 +230,7 @@ export async function runTick(
       try {
         await deps.send(webhook, runnable.source, {
           id: item.item_id, title: item.title, url: item.url, publishedAt: item.published_at,
+          ...(fetchedImages.has(item.item_id) ? { imageUrl: fetchedImages.get(item.item_id)! } : {}),
         });
       } catch (error) {
         if (isWebhookInvalid(error)) {

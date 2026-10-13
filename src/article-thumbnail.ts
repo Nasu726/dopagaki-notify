@@ -32,7 +32,7 @@ function decodeUrlEntities(raw: string): string {
  * nonstandard ports or control characters. Remote image bodies are never
  * fetched by the Worker.
  */
-function safeImageUrl(raw: string, articleUrl: URL): string | null {
+export function safeImageUrl(raw: string, articleUrl: URL): string | null {
   if (!raw || raw.length > 2048 || /[\x00-\x1f\x7f]/.test(raw)) return null;
   let url: URL;
   try { url = new URL(decodeUrlEntities(raw), articleUrl); }
