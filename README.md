@@ -1,48 +1,69 @@
 # dopagaki-notify
 
-**Qiita・Zenn・arXiv・OpenAlex・YouTube の新着情報と、日本語 Wikipedia のおすすめ記事を Discord に届ける、シンプルな通知システムです。**
+**好きな情報源の更新を、Discordにまとめて通知する小さなセルフホストツール。**
 
-個人利用を前提とした小さな構成です。Web UI やログイン機能、常駐サーバーはありません。監視対象を JSON で設定し、Cloudflare Workers + D1 にデプロイすれば利用できます。好きな情報源を組み合わせて、フォーク先で自由にカスタマイズすることを想定しています。
+Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。Cloudflare Workers + D1で定期実行し、ログイン・Web画面・常駐PCは不要です。監視先を自由に選べます。
 
-**[English](README.EN.md)** · [詳細な運用資料](docs/DEPLOYMENT.md) · [設計資料](PROJECT_BRIEF.md) · [開発記録](docs/ROADMAP.md)
+[English](README.EN.md) · [機能と制約](#機能と通知ルール) · [運用コマンド](#運用とトラブルシューティング) · [MIT License](LICENSE)
 
-> **対応状況:** Cloudflare Workers + D1 は実運用されている標準版です。GitHub Actions + SQLite には、明示的に有効化する [実行テンプレート](templates/github-actions/notifier.yml) を用意しています。両者で監視・通知ロジックを共有しますが、Actions 版は実環境での長期検証前であり、実行時刻や状態保存の保証は同等ではありません。
+> **現在の状態:** Cloudflare Workers + D1が主な運用環境。GitHub Actions + SQLiteは任意のテンプレートで、定期実行と状態復元の信頼性はCloudflare版と同等ではありません。YouTubeのQuizKnock **通常動画専用RSS → Discord通知は本番で確認済み**。YouTubeのサムネイルはDiscordで表示されない事象があり、[Issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64)で低優先度の調査待ちです。
 
-## できること
+## どこから始める？
 
-| 情報源 | 検出・通知内容 |
+| 目的 | 進む先 |
 | --- | --- |
-| Qiita | 検索条件に一致した最初の20件から、作成日時が新しい最大3件を候補にする |
-| Zenn | ユーザー・トピック別 RSS の新しい最大3件を候補にする |
-| arXiv | 指定カテゴリの新着論文をページ単位で取得する |
-| OpenAlex | **検索語・トピックID・著者ID**に一致する論文を監視 (直近7日間、最新25件まで) |
-| YouTube | 最新動画は公開日時が古くても未通知なら通知。通常の新着動画も通知。RSS または任意の公式 Data API に対応 |
-| 日本語 Wikipedia | 「秀逸な記事」から最大1件＋一定以上の長さのランダム記事を最大1件、おすすめする |
+| 初めてCloudflareに導入する | [1. 監視対象を決める](#1-監視対象を決める) → [2. Cloudflareで動かす](#2-cloudflareで動かす) |
+| 公開フォークでも購読先を隠したい | [非公開設定](#監視対象を非公開にする) |
+| すでに稼働中で設定だけ変える | [設定の検査](#設定の検査と通知時間帯) → [運用](#運用とトラブルシューティング) |
+| 今すぐ対象を試す・画像問題を調べる | [安全な診断コマンド](#安全な診断コマンド) |
+| Cloudflareを使いたくない | [GitHub Actions + SQLite](#3-github-actions--sqliteを使う任意) |
 
-- 記事・動画の **ID で重複通知を抑止**します。Qiita・Zenn・arXiv・Wikipedia は初回の正常取得では過去の投稿を送信しません。**YouTube だけは最新動画を公開日時にかかわらず未通知なら通知**します。既に初期化済みの監視も対象です。以降の新着動画も通知します。YouTube の送信済みIDだけは永続保存し、過去動画を何度も通知しないようにします。
-- 監視対象ごとに取得間隔を設定できます。YouTube は日本時間の曜日指定にも対応しています。**Qiita・Zenn・YouTube の通知は画像付き Embed** に対応します。
-- Discord Webhook は **情報源ごとに1つ**使用します。**既定では24時間通知**します。必要な人だけ送信可能な時間帯(JST)を設定できます。時間帯外でも監視を続け、未送信通知は D1 に保持します。
-- 通信失敗や Discord のレート制限には、D1 に保持した再試行時刻・未送信キューで対応します。5分ごとの Cron は、1回につき原則1監視対象、Discord への送信は最大3件です。
-- Qiita・Zenn は **最新を優先**して古い候補を意図的に見送ります。すべての記事を収集・保存するアーカイバーではありません。Qiita の検索結果は必ずしも新着順ではないため、最初の20件に含まれない記事は選べません。
-- OpenAlex の公開日は日付単位であり、検索結果は最新25件のみ取得します。直近7日の対象が多い検索では取りこぼす場合があります。API はキー無しでも少量利用できますが、検索APIの利用枠を確認してください。
-- YouTube の RSS は掲載件数に上限があり、配信元から消えた動画や外部 API の停止中の投稿は取りこぼす可能性があります。取得失敗後でも、次回成功時に取得できた最新動画が未通知なら通知対象です。RSS が正しい動画を返さなかった場合まで検出を保証するものではありません。
+**最短コマンド一覧** (リポジトリ直下・Node.js 22以上):
 
-### Qiita・Zenn のサムネイル画像
+| コマンド | 用途 / 副作用 |
+| --- | --- |
+| `npm install` | 開発・実行に必要なパッケージ |
+| `npm run config:check` | 公開設定とローカル環境の検証。通知・D1書込なし |
+| `npm run check` | TypeScriptの型検査と自動テスト |
+| `npm run deploy` | 事前設定チェック → **Cloudflare本番へデプロイ** |
+| `npm run smoke -- --monitor=youtube-quizknock` | 今すぐ1回取得するだけ。Discord・D1変更なし |
+| `npm run inspect:discord -- --help` | **既存**Discord通知の画像を読み取り専用で診断 |
+| `npm run dev` | ローカルWorkerを起動 |
 
-**Zenn は RSS の `enclosure` に含まれる記事画像を優先**して Discord Embed に表示します。既存の未送信キューなどで画像が手元に無い場合は Zenn のユーザーRSSを再取得し、それでも取得できない場合だけ記事HTMLの `og:image` / `twitter:image` を参照します。Qiita は引き続き記事HTMLの OGP 画像を優先しますが、**HTML の取得に失敗した場合や OGP URL が長すぎる場合には、Qiita API から取得済みの投稿者アイコンを小さなサムネイルとして表示**します。投稿者アイコンは記事固有の OGP 画像ではない点に注意してください。YouTube は引き続き動画IDからサムネイルURLを生成します。
+## 機能と通知ルール
 
-**追加設定や D1 マイグレーションは不要**です。Qiita の記事ページ取得は通知1件につき最大1回。Zenn は通常の RSS 取得直後なら追加リクエスト不要、遅延通知ではユーザーRSSと必要に応じて記事HTMLを調べます。OGP HTML取得のドメインは `qiita.com` / `zenn.dev` のみに限定し、4秒のタイムアウトと HTML先頭256 KiBの上限を設けています。ページがブロックされた場合、画像が定義されていない場合、画像URLが不正な場合は、**画像なしで記事通知を続行**します。未送信キューに保存済みの記事にも適用されます。実際の画像表示は Discord から画像URLにアクセスできることが前提です。
+| 情報源 | 監視するもの | 注意 |
+| --- | --- | --- |
+| Qiita | 検索条件に一致する記事 | API結果の先頭20件から新しい最大3件を選択 |
+| Zenn | ユーザー・トピックRSS | 新しい最大3件を選択 |
+| arXiv | 論文カテゴリ | ページ分割で追跡 |
+| OpenAlex | 検索語・トピックID・著者ID | 直近7日・最大25件のスナップショット |
+| YouTube | 指定チャンネルの動画 | 最新未通知動画は公開日が古くても通知対象 |
+| 日本語Wikipedia | 秀逸記事＋ランダム記事 | 1回最大2件の推薦 |
 
-**YouTube の常時監視テスト:** `youtube-quizknock` (`@QuizKnock`, 固定チャンネルID `UCQ_MqAw18jFTlBB-f8BP7dw`) を追加しました。**曜日制限なし・毎日60分間隔**で取得し、他の YouTube 対象と `DISCORD_WEBHOOK_YOUTUBE` を共有します。初回成功時には、その時点の最新動画1件を通知対象にします。`MONITOR_CONFIG_JSON` で非公開設定を完全上書きしている環境では、同じ監視対象を非公開 JSON 側にも追加してください。
+**重要な動作:** 投稿IDで重複送信を抑止し、未送信分と再試行時刻をD1に記録します。YouTube以外は初回取得を原則無通知で初期化。YouTubeは最新の未通知動画1件を初回から通知対象にします。Qiita/Zennは鮮度を優先するため、全件保存・完全網羅ではありません。YouTubeの送信済みIDは繰り返し通知しないよう永続保持します (それ以外の通常送信済み履歴は原則10日)。
 
-## 1. 監視対象を設定する
+**スケジュール:** Workerは5分ごとに起動し、原則1回に1監視対象を処理します。監視対象ごとに設定した間隔は「実行可能になる時刻」であり厳密な実行保証ではありません。送信は1回最大3件。通知時間帯外でも**取得とキュー保存を継続**します。
 
-通常は次の2ファイルだけを編集します。
+**画像:** Qiita/ZennはRSS画像や記事OGP (Qiitaは投稿者アイコンへのフォールバックあり) を使用します。YouTubeは動画IDからサムネイルURLを生成しますが、現時点で**Discord上の表示は未解決**です。画像が無くてもタイトルとリンクを送ります。
 
-- [`config/targets.json`](config/targets.json): Qiita の検索式、Zenn のトピック・ユーザー、arXiv のカテゴリ、OpenAlex の検索語・ID、YouTube チャンネル、各対象の `enabled`。
-- [`config/intervals.json`](config/intervals.json): 各 `id` に対応する **監視間隔(分)**。正の整数を指定します。
+## 1. 監視対象を決める
 
-例:
+まず[このリポジトリをFork](https://github.com/Nasu726/dopagaki-notify/fork)してからcloneします。
+
+```sh
+git clone https://github.com/YOUR_USERNAME/dopagaki-notify.git
+cd dopagaki-notify
+npm install
+```
+
+設定方法は**公開JSON**か**Cloudflare Secretによる非公開設定**のどちらかです。
+
+- [`config/targets.json`](config/targets.json): 監視対象と`enabled`、公開設定の`notificationWindowJst`。
+- [`config/intervals.json`](config/intervals.json): 監視`id`ごとの取得間隔 (分)。正の整数。
+- **公開フォークに個人の購読先を載せたくない場合は、次の「非公開設定」を選んでください。** 両方を混ぜるのではなく、Secretがあれば公開設定を**完全上書き**します。
+
+設定例 (抜粋。実際の`targets.json`は対象となる全カテゴリを含みます):
 
 ```json
 {
@@ -50,126 +71,86 @@
   "zenn": [{ "id": "zenn-rust", "query": "topic:rust", "enabled": true }],
   "arxiv": [{ "id": "arxiv-ds", "categories": ["cs.DS"], "enabled": true }],
   "openalex": [{ "id": "oa-graph", "query": "search:graph algorithms", "enabled": true }],
-  "youtube": [{ "id": "youtube-example", "channel": "@example", "channelId": "UC1234567890123456789012", "enabled": true, "weekdayJst": "sunday" }]
+  "youtube": [{
+    "id": "youtube-example",
+    "channel": "@example",
+    "channelId": "UC1234567890123456789012",
+    "videoType": "videos",
+    "enabled": true
+  }],
+  "notificationWindowJst": null
 }
 ```
 
-対応する `intervals.json`:
+`config/intervals.json`には上の各`id`の間隔と、Wikipediaを使う場合は`wikipedia-ja-discovery`の間隔を指定します。YouTubeで`weekdayJst`を指定する場合は間隔を60分にしてください。
 
-```json
-{
-  "qiita-go": 240,
-  "zenn-rust": 240,
-  "arxiv-ds": 120,
-  "oa-graph": 360,
-  "youtube-example": 60,
-  "wikipedia-ja-discovery": 120
-}
+**IDの互換性:** すでに稼働した監視`id`で、情報源や`query` / チャンネルを別の対象に変えないでください。D1が対象の識別情報を保持しており、意図しない履歴混在を拒否します。別の対象には新しい`id`を使います。間隔の変更は安全です。
+
+**YouTubeでShortsを除外:** `"videoType": "videos"` と固定の`channelId`を指定すると、通常動画だけの非公式`UULF` RSSを使います (Shortsとライブ配信も除外)。省略・`"all"`は従来どおりすべてのアップロードを取得します。**このフィードはYouTubeの公式保証外**で、取得に失敗してもShorts混在フィードに無断で戻しません。現在の公開設定ではQuizKnockのみ`videos`。`YOUTUBE_API_KEY`を設定していても`videos`の監視はRSSを使用します。その他は任意の[YouTube Data API v3](https://developers.google.com/youtube/v3)に対応します。
+
+**OpenAlex:** `search:graph algorithms`、`topic:T12345`、`author:A12345`に対応。APIキー`OPENALEX_API_KEY`は任意です。詳細は[運用資料](docs/DEPLOYMENT.md)。
+
+### 監視対象を非公開にする
+
+公開フォークで個人の購読先を隠したい場合、ローカルだけの無視対象ファイルを作ります。
+
+```sh
+mkdir -p .private
+node ops/export-monitor-config.mjs > .private/monitor-config.json
 ```
 
-この例は形式の説明です。YouTube の `channelId` は任意ですが、分かる場合は指定を推奨します。`UC...` 形式の固定IDを使い、HTMLの `@handle` 解決とキャッシュに依存せず正しいチャンネルを取得します。指定しない場合は `@handle` ページの所有者メタデータから自動解決し、不確実な場合は異なるチャンネルを通知するのではなくエラーにします。`config/targets.json` の `notificationWindowJst` は既定値 `null` (時間帯制限なし)です。ファイル全体を置き換える場合、不要な監視対象を削除して両ファイルの ID を一致させてください。曜日指定付き YouTube には間隔 `60` 分を指定します。Wikipedia の推薦は `src/config.ts` に定義され、通常の公開設定では有効です。
+`.private/monitor-config.json`の`targets`と`intervals`を編集し、`wikipediaEnabled`も確認してください。公開JSONを編集する必要はありません。ファイル全文をCloudflare WorkerのSecret **`MONITOR_CONFIG_JSON`** に登録します (Dashboard → Worker → Settings → Variables and Secrets)。
 
-**重要:** 過去に使用した監視 ID の検索条件や情報源を変更しないでください。D1 が ID と条件の組を記憶しているため、既存 ID の条件変更は安全のため拒否されます。別の対象に切り替えるときは新しい ID を付けてください。間隔の変更だけなら同じ ID を使えます。
+```sh
+npm run config:check -- --private-config-file=.private/monitor-config.json
+npx wrangler secret put MONITOR_CONFIG_JSON
+```
 
-### 通知時間帯 (任意・既定は24時間)
+最後のコマンドの対話入力で非公開JSONの全文を指定します。**SecretはGitHub・チャット・ログに貼らない**でください。Cloudflare Secretは一覧から元の値を読み出せません。変更前にローカルで検証してください。
 
-`config/targets.json` に `"notificationWindowJst": null` を指定すると、時刻に関係なく通知します。制限したい場合だけ `"notificationWindowJst": "09:00-20:00"` のように設定します。**開始時刻を含み、終了時刻を含みません** (例では09:00〜19:59 JST)。`"22:00-06:00"` のように日付をまたぐ指定も可能です。開始と終了が同じ時刻の場合は無効な設定としてエラーにします。時間帯外でも API の取得は継続し、通知はキューに保持されます。
+### 設定の検査と通知時間帯
 
-公開フォークで自分だけの時間帯を使う場合は、JSON を公開編集せず、次の Cloudflare Secret を設定するだけで上書きできます。
+`npm run config:check`は公開設定と、現在のローカル環境に与えた非公開設定を本番と同じパーサーで検証します。ファイルで検査する場合:
+
+```sh
+npm run config:check -- --private-config-file=.private/monitor-config.json
+npm run config:check -- --notification-window-file=.private/notification-window.txt
+```
+
+通知可能時間は日本時間の**開始含む・終了含まない**半開区間。例: `07:00-22:00`なら07:00から21:59まで送信し、それ以外は取得のみ続けます。`00:00-24:00`は**無効**です。24時間通知は`NOTIFICATION_WINDOW_JST`を未設定とし、設定JSONも`null`にしてください。
+
+Cloudflare Secretを利用する場合は次のとおりです。
 
 ```sh
 npx wrangler secret put NOTIFICATION_WINDOW_JST
 ```
 
-入力する値の例: `09:00-20:00`。未登録なら無制限です。既存の `MONITOR_CONFIG_JSON` に `"notificationWindowJst": "09:00-20:00"` を追加しても構いません。**優先順位は時間帯専用 Secret → 非公開設定 JSON → 公開 `config/targets.json`** です。時間帯だけの変更なら D1 のマイグレーションや監視 ID の変更は不要です。
+対話入力に`07:00-22:00`などを指定してください。優先順位は**`NOTIFICATION_WINDOW_JST` Secret ＞ `MONITOR_CONFIG_JSON`内の値 ＞ 公開`targets.json`**です。
 
-公開フォークに自分の興味・購読先を掲載したくない場合は、下記の **「設定を非公開にする」** を利用してください。GitHub 上の公開 JSON を編集する必要はありません。
+> **運用例:** このプロジェクトの実運用では、Cloudflare側のSecretを`07:00-22:00`に設定しています。ただし**公開リポジトリの既定値は`null` (24時間)**のままで、フォークには個人の設定は引き継がれません。
 
-### Wikipedia の User-Agent (フォーク利用者向け)
+[検証方法とよくある設定ミス](docs/CONFIG_PREFLIGHT.md)
 
-Wikipedia の API は自動アクセス元のアプリ名と、運用者へ連絡できる情報を User-Agent に含めるよう求めています。リポジトリにはアプリ名 `dopagaki-notify/0.1` と作者の連絡先が初期値として設定されていますが、**フォークして Wikipedia を有効にする場合は、運用者自身の連絡先に変更してください**。
+## 2. Cloudflareで動かす
 
-Cloudflare Workers の **Settings → Variables and Secrets** で通常の Variable `WIKIMEDIA_CONTACT_URL` を追加し、値に `https://github.com/YOUR_USERNAME/dopagaki-notify` などの公開 HTTPS URL を指定します。メールアドレス・API キーは不要です。この値から `User-Agent` と `Api-User-Agent` の両方を自動構築します。
+**準備:** Node.js 22以上、Cloudflareアカウント、DiscordのWebhook、上で決めた監視対象。Cloudflareの無料枠・料金はご自身で確認してください。
 
-既存の作者環境では未設定でも元の連絡先が使われ、動作は変わりません。GitHub Actions 版は、指定が無い場合、自分のフォークの `GITHUB_REPOSITORY` から連絡先 URL を自動設定します。
-
-### OpenAlex で論文を監視する (任意)
-
-`config/targets.json` の `openalex` に、次の監視条件を追加できます。
-
-```json
-"openalex": [
-  { "id": "oa-search", "query": "search:graph algorithms", "enabled": true },
-  { "id": "oa-topic", "query": "topic:T12345", "enabled": false },
-  { "id": "oa-author", "query": "author:A12345", "enabled": false }
-]
-```
-
-`search:` は論文の全文検索、`topic:T...` は OpenAlex トピックID、`author:A...` は著者IDを指定します。トピック・著者のIDは <https://openalex.org/> で探してください。各監視IDに対して `config/intervals.json` に間隔(例:360分)を登録し、Discord Webhook の Secret `DISCORD_WEBHOOK_OPENALEX` を設定します。
-
-**OpenAlex の API キーは任意**です。設定しなくても低頻度監視できますが、無料の API キーを取得すると利用枠が拡大します。使う場合は `OPENALEX_API_KEY` を Cloudflare Secret として登録してください (GitHub へは記載しません)。
-
-OpenAlex は公開日時が日付単位なので、初回に見つけた論文IDを「通知しない履歴」として保存します。2回目以降は、公開日が同じでも初回になかったIDなら通知できます。ただし検索結果は最新25件、公開日は直近7日以内に制限するため、完全な網羅は保証しません。既存の非公開設定 JSON は `openalex` を省略しても動きます。
-
-### YouTube Data API を使う (任意)
-
-YouTube は **何も設定しなければ従来の RSS** を使用します。RSS の 404/500 を避けたい場合、Google Cloud で YouTube Data API v3 を有効化し、API キーを発行して Cloudflare Workers の Secret `YOUTUBE_API_KEY` に登録してください。
+### 2-1. 自分のD1とWorkerを準備
 
 ```sh
-npx wrangler secret put YOUTUBE_API_KEY
-```
-
-API キーがある場合は、`channels.list` でチャンネルの「アップロード済み」プレイリストを解決し、`playlistItems.list` で最大50件の動画を取得します。両 API はそれぞれ1クォータ単位です。API モードで失敗した場合は異常をログに残し、通常の再試行処理を適用します (RSS への無言のフォールバックはしません)。2方式は同じ動画IDと送信履歴を共有するため、切り替えても通常は二重通知しません。
-
-**プライバシーと保存容量:** YouTube の送信済みIDは時間経過で削除せず永続保存します。これにより、古い最新動画の再通知を防止しますが、監視動画数に比例してD1/SQLiteに履歴が増えます。その他の情報源の送信済み履歴は従来どおり10日間です。
-
-## 2. Cloudflare Workers に導入する(対応済み)
-
-**必要なもの:** Node.js 22 以上、Cloudflare アカウント、Discord の通知先チャンネルと Webhook。Cloudflare の利用枠と料金条件は事前に確認してください。まず GitHub 上でこのリポジトリを Fork し、そのフォークを clone します。フォークせずローカルで試す場合は、元リポジトリを clone しても構いません。
-
-```sh
-git clone https://github.com/YOUR_USERNAME/dopagaki-notify.git
-cd dopagaki-notify
-npm install
-npm run check
 npx wrangler login
-```
-
-**① 自分の D1 データベースを作成**
-
-```sh
 npx wrangler d1 create dopagaki-notify
-```
-
-表示された **自分の** `database_id` を次のコマンドに渡すと、`wrangler.jsonc` に自動反映できます。
-
-```sh
 npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID
-```
-
-リポジトリ内の ID は作者の環境の値であり、フォーク先では使えません。Worker 名・D1 名を変更する場合は `wrangler.jsonc` の `name`・`database_name` も変更し、以降のコマンド中の D1 名もそれに合わせてください。バインディング名 `DB` は維持してください。
-
-**② D1 のマイグレーションを適用**
-
-```sh
 npx wrangler d1 migrations apply dopagaki-notify --remote
 ```
 
-ここでの `dopagaki-notify` は作成した D1 名です。マイグレーションは `migrations/` に同梱されています。**クラウド上の D1 には `--remote` が必要**です。
+`YOUR_D1_DATABASE_UUID`は**自分が作成した**D1のID。リポジトリの`wrangler.jsonc`にある値は元の作者環境用で、そのまま使わないでください。D1名/Worker名を変更する場合は以後のコマンドにも反映し、バインディング名`DB`は維持します。
 
-**③ Worker をデプロイ**
+### 2-2. DiscordのWebhookを登録
 
-```sh
-npm run deploy
-```
+Discordで通知先Webhookを作成し、使う情報源ごとに**Cloudflare Secret**を設定します。
 
-`wrangler.jsonc` に設定済みの Cron は、監視 `*/5 * * * *` と、送信済み履歴の整理 `10 * * * *` です。外部公開 HTTP エンドポイントはなく、アクセスしても意図的に 404 を返します。
-
-**④ Discord Webhook を Secret に設定**
-
-Discord で通知先の Webhook URL を発行し、利用する情報源に対応する Secret を登録します。
-
-| 情報源 | Cloudflare Secret 名 |
+| 情報源 | Secret |
 | --- | --- |
 | Qiita | `DISCORD_WEBHOOK_QIITA` |
 | Zenn | `DISCORD_WEBHOOK_ZENN` |
@@ -179,120 +160,96 @@ Discord で通知先の Webhook URL を発行し、利用する情報源に対�
 | Wikipedia | `DISCORD_WEBHOOK_WIKIPEDIA` |
 
 ```sh
-npx wrangler secret put DISCORD_WEBHOOK_QIITA
+npx wrangler secret put DISCORD_WEBHOOK_YOUTUBE
 ```
 
-コマンドの入力待ちで Webhook URL を貼り付けます。使用する情報源について繰り返してください。Webhook は **Git に書かない**でください。Secret のない情報源は休止状態になります。同じ情報源内の複数監視対象は1つの Webhook と送信制限を共有します。
+同じ情報源の複数監視は1つのWebhookと送信制限を共有します。Webhookが無い情報源は休止状態です。**必要なSecretを登録してから監視を始める**ようにしてください。
 
-**⑤ 動作を確認**
+Wikipediaを使うフォークでは、APIアクセス時の連絡先として`WIKIMEDIA_CONTACT_URL`をCloudflareの通常Variableに指定してください。例: 自分の公開GitHubリポジトリのURL。元作者の連絡先を使い続けないでください。
 
-初回の正常取得では YouTube 以外は無通知で基準化します。**YouTube は最も新しい動画が未通知なら、初回に限らず通知**します。YouTube 以外は新着が無ければ Discord に何も届かないのが正常です。Cloudflare の Workers Logs を見るか、次のコマンドで監視できます。
+### 2-3. デプロイ・動作確認
 
 ```sh
+npm run config:check
+npm run check
+npm run deploy
 npx wrangler tail dopagaki-notify --format pretty
+```
+
+`npm run deploy`は設定の事前検査を実行します。`npx wrangler deploy`を直接実行した場合やCloudflare Workers Buildsでは、この事前検査を通らない場合があります。CloudflareのSecret値まではGitHubのCIでは検証できません。
+
+起動設定は監視`*/5 * * * *`、履歴整理`10 * * * *`。Workerへの通常HTTPアクセスは意図的に404を返します。
+
+実際の本番D1を**読み取り専用**で確認します。
+
+```sh
 npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialized_at,last_complete_at,next_due_at FROM monitor_state ORDER BY id;"
+npx wrangler d1 execute dopagaki-notify --remote --command "SELECT monitor_id,item_id,status,sent_at FROM deliveries ORDER BY discovered_at DESC LIMIT 10;"
 ```
 
-`initialized_at` が設定されれば、少なくとも初回の取得と基準化が成功しています。新着通知が来たら、Discord と D1 の `deliveries` の両方を確認してください。Cloudflare Workers Builds と GitHub を連携すれば、`main` の変更からデプロイする運用にもできます。
+`initialized_at` / `last_complete_at`は最後の正常取得、`status=sent`はDiscord Webhookへの送信成功を示します。**画像が実際に描画された証拠にはなりません。** 投稿が無ければ通知が無いのは正常です。YouTubeのみ古い最新動画が初回に届く場合があります。
 
-## 3. 設定を非公開にする(公開フォーク向け)
+Cloudflare Workers Buildsを接続している場合は、デプロイ済みのバージョンと`main`が一致することも確認してください。
 
-**フォークを公開したまま、個人の監視対象だけを非公開にする方法**に対応しています。
+## 3. GitHub Actions + SQLiteを使う (任意)
 
-- 通常: 公開リポジトリの `config/targets.json` と `config/intervals.json` を使用します。
-- **非公開モード**: Cloudflare Secret **`MONITOR_CONFIG_JSON`** が存在すれば、その内容で **全監視設定を置き換えます**。公開 JSON の設定とは混ぜません。
-- Secret が不正なら処理をエラーにして停止します。**作者の公開設定に勝手に戻ることはありません。**
-
-ローカルで雛形を作れます。
+Cloudflareの代わりに、GitHub Actions上でSQLiteを実行するテンプレートです。状態は暗号化したArtifactsに保存します。Cronの遅延・スキップやArtifact期限による制約があるため、**主な推奨環境はCloudflare版**です。
 
 ```sh
-mkdir -p .private
-node ops/export-monitor-config.mjs > .private/monitor-config.json
-```
-
-生成された `.private/monitor-config.json` を自分の好みに書き換えてください。`.private/` は `.gitignore` に登録されています。ファイル形式は以下のとおりで、`targets` と `intervals` は公開 JSON と同じです。Wikipedia が不要なら `wikipediaEnabled: false` とし、間隔設定からも省けます。
-
-```json
-{
-  "targets": {
-    "qiita": [{ "id": "my-qiita-go", "query": "tag:Go", "enabled": true }],
-    "zenn": [],
-    "arxiv": [],
-    "openalex": [],
-    "youtube": []
-  },
-  "intervals": { "my-qiita-go": 360 },
-  "wikipediaEnabled": false,
-  "notificationWindowJst": null
-}
-```
-
-内容を確認し、**公開リポジトリへコミットする前に** Cloudflare Dashboard の **Worker → Settings → Variables and Secrets** から `MONITOR_CONFIG_JSON` を **Secret** として保存します。あるいは `npx wrangler secret put MONITOR_CONFIG_JSON` で登録できます。ファイル全文を Secret の値として入力してください。デプロイ済み Worker の Secret 更新は新しい Worker バージョンのデプロイを伴うため、適用後のログを確認してください。
-
-**公開を防ぐための注意:** `wrangler.jsonc` の D1 ID はパスワードではありませんが、作者の環境値を自分用に変更してください。Webhook URL、設定 Secret、D1 の配信履歴、公開したくないチャンネル ID や記事の内容はコミットしないでください。公開 GitHub Actions のログ、Issue、PR、公開 Discord チャンネルにも注意してください。すでにコミットした情報は、後で `.gitignore` に入れても公開履歴からは消えません。最も確実に非公開にしたい場合は **private リポジトリ**を利用してください。
-
-## 4. GitHub Actions + SQLite で利用する(テンプレート)
-
-Cloudflare を使用しない場合は、[GitHub Actions 通知テンプレート](templates/github-actions/notifier.yml) を利用できます。D1 の代わりに Node.js の SQLite を使用し、実行ごとの DB 状態を **AES-256-GCM で暗号化した Artifact** として保存します。GitHub 上に平文 DB や監視対象をコミットする必要はありません。
-
-**セットアップの流れ:**
-
-1. 公開または非公開のリポジトリにフォークし、ローカルで `npm install` を実行する。
-2. `npm run setup:actions` で `.github/workflows/notifier.yml` と Git 管理対象外の汎用サンプル `.private/monitor-config.json`、暗号化鍵 `.private/notify-state-key.txt` を生成する。
-3. 非公開の JSON を編集し、GitHub **Settings → Secrets and variables → Actions** に `MONITOR_CONFIG_JSON`、`NOTIFY_STATE_KEY` と利用する情報源の `DISCORD_WEBHOOK_*` を登録する。
-4. **Secret 登録後**に `.github/workflows/notifier.yml` をコミット・push する。
-5. GitHub の **Actions → Discord notifier (SQLite) → Run workflow** で初回の無通知基準化を行う。その後は10分ごとの定期実行に任せる。
-
-鍵はセットアップ時に自動生成されます。GitHub CLI でログインした後、以下で値を標準出力へ表示せずに登録できます。
-
-```sh
+npm run setup:actions
+npm run config:check -- --private-config-file=.private/monitor-config.json
+gh auth login
 gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
 gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-Webhook URL は別途登録してください。**鍵を失うと保存済みの状態を復元できません。** Secret・JSON・Webhook URL は Git にコミットしないでください。
+使用する`DISCORD_WEBHOOK_*`をGitHub ActionsのSecretsにも登録した後、生成された`.github/workflows/notifier.yml`だけをcommit・pushし、GitHubの**Actions → Discord notifier (SQLite) → Run workflow**で初回実行します。初回は通常の情報源を無通知で初期化します。**状態鍵は紛失・変更しないこと。**
 
-Actions は実行時刻がずれることがあり、定期実行が欠落する場合もあります。また Artifact は保持期限があり、**すべての状態が失われた場合は自動で再初期化しない**ようにしています。手動で初期化する場合に限り、`Run workflow` の `reset_state` をオンにしてください。これは過去の送信履歴と未送信キューを破棄します。
+[GitHub Actions導入・復元手順](docs/GITHUB_ACTIONS.md) · [English](docs/GITHUB_ACTIONS.EN.md)
 
-**[GitHub Actions 版の詳しい設定・復旧手順](docs/GITHUB_ACTIONS.md)**
+## 運用とトラブルシューティング
 
-## 運用・制約
-
-- **通知時間帯は既定で無制限(24時間)**です。任意設定 `notificationWindowJst` または `NOTIFICATION_WINDOW_JST` で制限できます。取得は時間帯と独立して続きます。
-- arXiv はページ追跡しますが、Qiita・Zenn は最新優先で古い記事を追いません。Wikipedia のおすすめは候補からのサンプリングです。
-- YouTube RSS は断続的に 404/500 を返す場合があります。RSS の404には最低60分の再試行間隔を設けています。
-- Discord Webhook を交換した際、以前の認証失敗で停止していれば D1 の `webhook_source_state` のブロック解除が必要です。手順は [運用資料](docs/DEPLOYMENT.md) を参照してください。
-- GitHub 上の CI 成功は、実際の通知や API の正常動作を保証しません。Workers の CPU・D1 使用量・通知内容は各自で監視してください。
-
-## 手動取得・通知テスト
-
-Cloudflare の定期実行を待たずに、指定した監視の実際の取得結果をローカルで診断できます。初期設定では **取得のみ、Discord送信なし、D1変更なし** です。
+| 症状 | 最初に確認すること |
+| --- | --- |
+| Discordに何も来ない | 対象が`enabled`か、対応`DISCORD_WEBHOOK_*`があるか、初回基準化だけか、時間帯外か |
+| 取得が進まない | Cloudflare Logs、`last_complete_at`と`next_due_at`、Secret設定の有効性 |
+| Shortsが届く | YouTube対象の`videoType`と固定`channelId`、非公開`MONITOR_CONFIG_JSON`の上書き |
+| 画像が見えない | 通知は維持し、下のDiscord画像診断で`proxy_url`/画像サイズを確認 |
+| Webhookを更新しても送れない | 情報源ごとのブロック状態を確認。[運用資料](docs/DEPLOYMENT.md)参照 |
 
 ```sh
-node --experimental-strip-types ops/manual-smoke.mjs --monitor=youtube-quizknock
+# 取得や送信はしない設定検査
+npm run config:check
+# 本番Workerの実行ログを見る
+npx wrangler tail dopagaki-notify --format pretty
+# ローカルで動作確認 (本番D1もDiscordも変更しない)
+npm run smoke -- --monitor=youtube-quizknock
 ```
 
-明示的な `--send-test --confirm-send` とローカルのWebhook環境変数がある場合に限り、`[TEST]` 表示の通知を1件送信します。本番Cloudflareでの動作保証ではありません。詳細は [手動診断の手順](docs/MANUAL_SMOKE.md) を参照してください。
+### 安全な診断コマンド
 
-## 開発・カスタマイズ
+**手動取得:** `npm run smoke -- --monitor=ID` はその場で実際の情報源を1回取得しますが、**本番Cloudflare環境ではありません**。デフォルトでDiscord送信もD1変更も行いません。明示的な`--send-test --confirm-send`を**両方指定した場合のみ**、ローカル環境のWebhookで`[TEST]`通知を1件送信します。詳しくは[手動スモークテスト](docs/MANUAL_SMOKE.md)。
+
+**Discord画像:** ローカルの非公開`DISCORD_WEBHOOK_YOUTUBE`を設定し、すでに届いたメッセージのリンクを渡します。
+
+```sh
+npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image
+```
+
+これは**既存メッセージのGETのみ**で、再送信しません。`thumbnail` / `image`、Discordの画像プロキシ、画像サイズを検査します。トークンやWebhook URLを共有しないでください。[画像診断手順](docs/DISCORD_THUMBNAIL_DIAG.md)。
+
+## 開発・設計
 
 ```sh
 npm install
+npm run config:check
 npm run check
 npm run bundle:check
 npm run dev
 ```
 
-情報源を追加する場合は `src/sources/` と `src/runner.ts` を参照してください。詳細な経緯と内部設計は [PROJECT_BRIEF.md](PROJECT_BRIEF.md)・[docs/ROADMAP.md](docs/ROADMAP.md) に残しています。質問は Issue で受け付けられますが、Webhook URL・非公開の購読先・実運用の機密ログは投稿しないでください。
+[構成・設計](PROJECT_BRIEF.md) · [開発履歴](docs/ROADMAP.md) · [詳細なCloudflare運用資料](docs/DEPLOYMENT.md)。
 
 ## ライセンス
 
-[MIT License](LICENSE) (Copyright (c) 2026 nasu)。改変・再配布・商用利用が可能です。配布時には著作権表示とライセンス本文を含めてください。
-
-### YouTube Shortsを除外する (任意)
-
-`config/targets.json` のYouTube監視に `"videoType": "videos"` を指定すると、通常動画だけを掲載する非公式の `UULF...` RSSプレイリストを監視します。**固定 `channelId` が必須**で、通常の `channel_id=UC...` ではなく `playlist_id=UULF...` にアクセスします。指定無し (または `"all"`) なら従来どおりShortsや配信を含めます。まず `youtube-quizknock` のみ有効化しています。
-
-このURL形式はYouTubeの公式仕様として保証されていないため、配信停止・仕様変更の可能性があります。エラー時にShorts混在フィードへ自動で戻すことはありません。**公式Data APIにShorts識別フラグは無い**ため、`videoType: "videos"` のモニターでは `YOUTUBE_API_KEY` 設定の有無にかかわらずRSSを使用し、他の監視では従来のAPI設定が有効です。通常動画だけでなく**ライブ配信も除外**されます。
-
-監視ID・D1の初期化状態・通知済みIDは変更しません。切り替え直後には、未通知の最新通常動画が過去の公開日時でも1件通知される場合があります。すでに送信したShortsの履歴は残ります。非公開 `MONITOR_CONFIG_JSON` で監視設定を上書きしている環境では、そのJSONの対象にも `videoType` を追加する必要があります。単体テストだけでは実際のRSS動作は保証できないため、Cloudflareでの初回取得を確認してください。
+[MIT](LICENSE) (Copyright (c) 2026 nasu)。改変・再配布・商用利用可。著作権表示とライセンス文面の保持が必要です。
