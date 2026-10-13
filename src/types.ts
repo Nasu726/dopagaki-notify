@@ -26,6 +26,8 @@ export interface Database {
 }
 export interface Env {
   DB: Database;
+  /** Optional complete private monitor configuration as a Worker Secret. */
+  MONITOR_CONFIG_JSON?: string;
   DISCORD_WEBHOOK_QIITA?: string;
   DISCORD_WEBHOOK_WIKIPEDIA?: string;
   DISCORD_WEBHOOK_ARXIV?: string;
