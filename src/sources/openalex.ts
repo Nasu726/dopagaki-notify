@@ -13,7 +13,8 @@ export function openAlexQuery(query: string): { search?: string; filter?: string
     throw new Error('Invalid OpenAlex monitoring query');
   const match = /^(search|topic|author):(.+)$/.exec(query.trim());
   if (!match) throw new Error('OpenAlex query must be search:terms, topic:T123, or author:A123');
-  const [, mode, value] = match;
+  const mode = match[1]!;
+  const value = match[2]!;
   if (mode === 'search') {
     if (!value || value.length > 160 || !value.trim())
       throw new Error('Invalid OpenAlex search query');

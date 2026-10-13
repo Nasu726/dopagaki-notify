@@ -60,7 +60,7 @@ const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
     id: target.id, source: 'arxiv' as const,
     query: arxivCategoryQuery(target.categories), enabled: target.enabled,
   })),
-  ...targets.openalex.map((target) => ({
+  ...(targets.openalex as readonly QueryTarget[]).map((target) => ({
     id: target.id, source: 'openalex' as const,
     query: target.query.trim(), enabled: target.enabled,
   })),
