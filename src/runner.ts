@@ -22,10 +22,16 @@ const MAX_NOTIFICATIONS_PER_TICK = 3;
 export const LATEST_ARTICLES_PER_POLL = 3;
 function latestArticles(items: readonly ContentItem[]): ContentItem[] {
   const seen = new Set<string>();
-  return [...items].sort((a, b) => b.publishedAt - a.publishedAt ||
-      a.id.localeCompare(b.id))
-    .filter((item) => !seen.has(item.id) && (seen.add(item.id), true))
-    .slice(0, LATEST_ARTICLES_PER_POLL);
+  const selected: ContentItem[] = [];
+  const sorted = [...items].sort((a, b) =>
+    b.publishedAt - a.publishedAt || a.id.localeCompare(b.id));
+  for (const item of sorted) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    selected.push(item);
+    if (selected.length === LATEST_ARTICLES_PER_POLL) break;
+  }
+  return selected;
 }
 const LOOKBACK_MS = 48 * 60 * 60_000;
 // Reserved scan checkpoint; never passed to a provider API.

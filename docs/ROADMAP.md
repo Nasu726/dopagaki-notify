@@ -1,6 +1,6 @@
 # Development roadmap
 
-Updated: 2026-10-13. Current stage: **expanded learning feeds and Wikipedia discovery locally CI-tested; Cloudflare deployment and real API/CPU verification outstanding**.
+Updated: 2026-10-13. Current stage: **Wikipedia discovery and basic article notifications observed in Cloudflare; bounded latest-first Qiita/Zenn policy is in CI and awaiting post-deployment verification**.
 
 ## Product scope / frozen choices
 
