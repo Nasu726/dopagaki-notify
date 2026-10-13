@@ -5,10 +5,12 @@ const NONCE_LENGTH = 12;
 const TAG_LENGTH = 16;
 
 export function parseKey(hex) {
-  if (typeof hex !== 'string' || !/^[a-fA-F0-9]{64}$/.test(hex)) {
+  // gh secret set < key.txt may preserve a trailing line break. Accept only
+  // surrounding whitespace; embedded whitespace remains invalid.
+  if (typeof hex !== 'string' || !/^[a-fA-F0-9]{64}$/.test(hex.trim())) {
     throw new Error('NOTIFY_STATE_KEY must be 64 hexadecimal characters (32 random bytes)');
   }
-  return Buffer.from(hex, 'hex');
+  return Buffer.from(hex.trim(), 'hex');
 }
 
 export function encryptState(plain, key) {

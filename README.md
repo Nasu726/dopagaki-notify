@@ -173,18 +173,19 @@ Cloudflare を使用しない場合は、[GitHub Actions 通知テンプレー�
 **セットアップの流れ:**
 
 1. 公開または非公開のリポジトリにフォークし、ローカルで `npm install` を実行する。
-2. `npm run setup:actions` で `.github/workflows/notifier.yml` と Git 管理対象外の `.private/monitor-config.json` を生成する。
+2. `npm run setup:actions` で `.github/workflows/notifier.yml` と Git 管理対象外の汎用サンプル `.private/monitor-config.json`、暗号化鍵 `.private/notify-state-key.txt` を生成する。
 3. 非公開の JSON を編集し、GitHub **Settings → Secrets and variables → Actions** に `MONITOR_CONFIG_JSON`、`NOTIFY_STATE_KEY` と利用する情報源の `DISCORD_WEBHOOK_*` を登録する。
 4. **Secret 登録後**に `.github/workflows/notifier.yml` をコミット・push する。
 5. GitHub の **Actions → Discord notifier (SQLite) → Run workflow** で初回の無通知基準化を行う。その後は10分ごとの定期実行に任せる。
 
-秘密鍵は32バイトの乱数を64桁の16進数にして生成します。例:
+鍵はセットアップ時に自動生成されます。GitHub CLI でログインした後、以下で値を標準出力へ表示せずに登録できます。
 
 ```sh
-node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
+gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
+gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-この出力を GitHub Actions Secret `NOTIFY_STATE_KEY` に保存してください。**鍵を失うと保存済みの状態を復元できません。** ただし Secret・JSON・Webhook URL は Git にコミットしないでください。GitHub CLI を使用する場合、`gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` でも設定できます。
+Webhook URL は別途登録してください。**鍵を失うと保存済みの状態を復元できません。** Secret・JSON・Webhook URL は Git にコミットしないでください。
 
 Actions は実行時刻がずれることがあり、定期実行が欠落する場合もあります。また Artifact は保持期限があり、**すべての状態が失われた場合は自動で再初期化しない**ようにしています。手動で初期化する場合に限り、`Run workflow` の `reset_state` をオンにしてください。これは過去の送信履歴と未送信キューを破棄します。
 
