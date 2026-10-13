@@ -282,10 +282,7 @@ receipts older than **ten days** (up to 480/day) (`sent_at` criterion). All pend
 survive. A fresh outbox item with an old publication date (over 10 days ago)
 is no longer eligible, preventing re-alerts after receipts are pruned.
 
-The polling Cron still runs overnight, but **Discord notifications are held
-outside 09:00 inclusive through 20:00 exclusive JST**. They are automatically
-sent starting with the next eligible 09:00 Cron. This is a send-start window,
-not a guarantee of Discord receipt before 20:00:00.
+The polling Cron runs at all hours. **The current public default has no Discord delivery window.** The operator can opt into the historical 09:00-inclusive to 20:00-exclusive JST window via the `NOTIFICATION_WINDOW_JST` Secret (`09:00-20:00`). Monitoring continues outside the configured delivery window, and queued messages are released after it reopens.
 
 The source choices are now in `config/targets.json`:
 - `arxiv[].categories`: e.g. `["cs.AI", "cs.LG"]`, producing an OR-category API query.
@@ -328,9 +325,7 @@ by up to one dispatcher interval. When an API fetch fails near midnight, an
 off-day retry is skipped until the next selected weekday. This choice favors
 the explicit day restriction over retrying every five minutes all week.
 
-Discord delivery is still restricted to **09:00–20:00 JST**. A video
-discovered during an overnight Tuesday/Sunday scan remains queued and can
-be delivered at 09:00, including on a different weekday if necessary.
+Discord delivery is unrestricted by default; the optional JST `NOTIFICATION_WINDOW_JST` Secret can defer delivery (e.g. `09:00-20:00`). A video discovered during an off-hours Tuesday/Sunday scan remains queued and can be delivered when that window opens, including on another weekday.
 Videos with updated titles/descriptions do not count as newly published
 content. The feed contains only about 15 recent videos; checking only
 one day per week may miss uploads that fall out of the feed in between.

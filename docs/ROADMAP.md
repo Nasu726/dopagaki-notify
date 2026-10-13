@@ -76,7 +76,7 @@ Updated: 2026-10-13. Current stage: **Wikipedia discovery and basic article noti
 ## New staging conditions (2026-10-12)
 
 - Wikipedia's real D1 row was observed with `initialized_at = NULL`, `last_complete_at = NULL`, and a nonzero future `next_due_at`: the initial MediaWiki fetch has **not yet completed**. Inspect the actual Worker error logs and Retry-After status before calling this source healthy; do not infer the specific root cause from that one row.
-- **JST notification window**: 09:00 inclusive, 20:00 exclusive. Source polling and outbox insertion continue overnight. Pending-only wakeups are suppressed until morning.
+- **Optional JST notification window**: disabled by default (24-hour delivery). An operator may set `09:00-20:00` (start inclusive, end exclusive); source polling and outbox insertion continue at all hours, while pending-only wakeups are suppressed outside the configured window.
 - **Retention**: separate `10 * * * *` maintenance Cron (hourly, minute 10), 20 expired `sent` receipts maximum per invocation, ten-day cutoff and partial `sent_at` index. Pending rows are never pruned automatically. This is not yet measured against Workers Free CPU limits.
 - **Editable target lists**: `config/targets.json` contains arXiv category sets and YouTube channel references (empty placeholder). Changing the query of an initialized monitor requires a new ID to preserve the fail-closed semantic history invariant.
 
@@ -103,7 +103,7 @@ Updated: 2026-10-13. Current stage: **Wikipedia discovery and basic article noti
 
 - `youtube-yurugengo`: Tuesday 00:00–23:00 hourly JST; `youtube-yurucom` and `youtube-3blue1brown-japan`: Sunday 00:00–23:00 hourly JST. All have `intervalMinutes=60`, validated `weekdayJst` target metadata and dedicated D1 monitor IDs. No requests on other weekdays, except queued Discord delivery may occur the following permitted morning.
 - Newly added off-day monitors are configured and deferred to the next selected weekday without an API fetch. First on-day scan is a silent baseline. Subsequent successes schedule the next JST hour, jumping to the next week after 23:00. Retry delays that spill into an off-day are likewise deferred. Ordinary 5-minute dispatcher Cron remains unchanged.
-- User's `更新があれば通知` means newly published videos, **not** edits to existing uploads, per the project's established publication-only contract. Notification sends continue only 09:00–20:00 JST; overnight discoveries are queued.
+- User's `更新があれば通知` means newly published videos, **not** edits to existing uploads, per the project's established publication-only contract. Notification delivery defaults to all hours; users may enable a private JST window, with out-of-window discoveries queued.
 - Actual RSS/handle resolution in Cloudflare is unverified. MediaWiki baseline remains NULL; conditionally disable it on a newly observed post-fix HTTP 403, not on NULL alone.
 
 ## Editorial policy / implementation (2026-10-13)

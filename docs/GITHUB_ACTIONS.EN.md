@@ -17,7 +17,7 @@ This opt-in template reuses the same monitoring, scheduling and Discord delivery
 6. **After secrets are in place**, commit and push `.github/workflows/notifier.yml`. The template in `templates/` is inert until copied into your workflows directory.
 7. Under **Actions → Discord notifier (SQLite)** select **Run workflow** once. This starts the initial silent baseline; old posts are not sent.
 
-The template schedules runs at UTC minutes 07, 17, 27, 37, 47 and 57 (every 10 minutes, best effort). Discord notifications still send only during **09:00–19:59 JST**.
+The template schedules runs at UTC minutes 07, 17, 27, 37, 47 and 57 (every 10 minutes, best effort). **Delivery is unrestricted by default**. Optionally set `notificationWindowJst` to `"09:00-20:00"` in `MONITOR_CONFIG_JSON`, or register `NOTIFICATION_WINDOW_JST` as an Actions Secret containing `09:00-20:00`; the dedicated Secret takes precedence. Times are JST with an exclusive end. Source polling continues outside the optional delivery window.
 
 ## How private state works
 
