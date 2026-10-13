@@ -6,7 +6,7 @@ Built for personal use and for people who want to fork and tailor a simple notif
 
 **[日本語](README.md)** · [Historical deployment notes](docs/DEPLOYMENT.md) · [Design brief (Japanese)](PROJECT_BRIEF.md) · [Development roadmap](docs/ROADMAP.md)
 
-> **Implementation status:** The Cloudflare Workers edition is implemented. The existing GitHub Actions workflow performs CI checks only; it does **not** run scheduled notifications. Porting the notification logic to Actions is possible, but requires a SQLite adapter and persistent storage. This repository does not currently include a working Actions-based notifier.
+> **Implementation status:** The Cloudflare Workers edition is implemented. The GitHub Actions version has an **opt-in notification template** with HMAC-hashed receipt persistence. Cloudflare Workers + D1 remains the full-featured durable-queue implementation.
 
 ## Features
 
@@ -162,17 +162,49 @@ After checking your local file, open **Cloudflare Dashboard → Worker → Setti
 
 **Privacy considerations:** Avoid committing webhook URLs, personal target lists, D1 delivery history, and private credentials. The checked-in D1 UUID is not a password, but replace the author's account-specific value. Personal subjects can also leak through public Actions logs, issues, pull requests, or public Discord channels. Adding a file to `.gitignore` **after** committing it does not erase existing Git history. If hiding project usage and metadata matters too, use a **private repository**.
 
-## 4. GitHub Actions as an alternative runtime (porting guide)
+## 4. GitHub Actions setup (ready-to-enable template)
 
-**The included GitHub Actions workflow is CI-only. There is no working scheduled Actions notifier in this repository today.**
+The repository includes a [GitHub Actions notifier template](templates/github-actions/notify.yml) that **actually fetches content and delivers Discord notifications**, without requiring Cloudflare. It lives outside `.github/workflows/` initially so that the original author's Cloudflare deployment is not duplicated accidentally.
 
-The core functionality in `src/runner.ts` can be reused outside Cloudflare, but GitHub-hosted runners are ephemeral. A port needs **durable SQLite storage across workflow runs**. A fresh in-memory SQLite database on every execution would lose baselines, deduplication state, and queued notifications.
+**Requirements:** GitHub account, Discord incoming webhook, Node.js 22+ for initial setup; [GitHub CLI `gh`](https://cli.github.com/) is recommended.
 
-An Actions port needs: (1) a Node SQLite implementation of the D1-shaped `Database` interface, (2) schema initialization from `migrations/`, (3) an entrypoint invoking the polling and retention tasks, (4) `schedule` and `workflow_dispatch` YAML, (5) durable storage with a safe synchronization/concurrency strategy, and (6) GitHub Actions Secrets for webhooks and private monitor settings.
+1. Fork the repository and clone your fork.
+2. Generate a local, ignored settings file with a fresh random HMAC key:
 
-GitHub Actions `schedule` supports intervals down to five minutes, but runs may be delayed or dropped; in public repositories inactive for 60 days, scheduled workflows may be automatically disabled. This is not an exact-equivalence deployment. **Do not commit a live SQLite DB to a public repository** to persist state: it includes the subscriptions and content history you are trying to keep private.
+```sh
+npm run setup:actions
+```
 
-For a ready-to-use solution, use **Cloudflare Workers + D1**. An Actions version is an achievable separate integration project, not a setup switch.
+3. Edit `.private/actions-settings.json` to set your targets, intervals and Discord webhook URLs. The example enables only one generic Qiita monitor and disables Wikipedia. Set unused target arrays to `[]`. Never commit the local file.
+4. Authenticate GitHub CLI and upload the whole file as **one GitHub Actions repository Secret**:
+
+```sh
+gh auth login
+gh secret set NOTIFY_SETTINGS_JSON < .private/actions-settings.json
+```
+
+5. Activate the workflow template:
+
+```sh
+mkdir -p .github/workflows
+cp templates/github-actions/notify.yml .github/workflows/notify.yml
+git add .github/workflows/notify.yml
+git commit -m "Enable Actions notifications"
+git push
+```
+
+6. Enable Actions in your fork and manually run **Content notifications → Run workflow** once to create a **silent baseline**. Subsequent scheduled runs detect and send new items.
+
+**Important architecture and operational differences:**
+
+- The template schedules runs at **minutes 17 and 47 of each hour (UTC)**. Individual monitor intervals are checked inside the process. Change the YAML if desired. GitHub's scheduler is **best effort**: runs may be delayed or skipped.
+- There is **no SQLite or D1 dependency**. A small ledger is saved as a GitHub Actions Artifact and restored by the next run. Artifacts of public repositories are accessible to readers, so the ledger contains only **secret-keyed HMAC-SHA-256 hashes** and timestamps, never plain monitor names, article titles, URLs, webhook values or the key.
+- A hash **cannot recover article content**. Unlike the Cloudflare version, the Actions template does not durably queue failed notifications. It re-fetches content to retry, so entries that disappear from the source feed can be lost. A crash between Discord success and Artifact upload may also cause duplicates.
+- State artifacts have **7-day retention**. If none remain, the workflow silently initializes a new baseline. Invalid artifacts or a changed HMAC key **fail closed** instead of silently resetting. Concurrency is serialized.
+- Inactive public repositories may have scheduled workflows disabled after **60 days**; re-enable them from the Actions tab.
+- If `NOTIFY_SETTINGS_JSON` is absent, the template fails rather than using the original author's published preferences.
+
+If you need durable pending retries, checkpointed scans, and D1-backed delivery state, use the **Cloudflare Workers edition**.
 
 ## Operations and limitations
 
@@ -193,4 +225,4 @@ npm run dev
 
 See `src/sources/` and `src/runner.ts` for adding integrations. The [design brief](PROJECT_BRIEF.md) and [development roadmap](docs/ROADMAP.md) preserve architecture and implementation history. Do not post webhook URLs, private subscriptions, or operational secrets in issues or PRs.
 
-> **Licensing note:** The project does not yet include an explicit `LICENSE` file. The maintainer should select a license to clarify modification and redistribution rights for others.
+**License:** [MIT License](LICENSE) (Copyright © 2026 nasu). Modification, redistribution, and commercial use are allowed.

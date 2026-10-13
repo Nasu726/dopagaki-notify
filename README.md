@@ -6,7 +6,7 @@
 
 **[English](README.EN.md)** · [詳細な運用資料](docs/DEPLOYMENT.md) · [設計資料](PROJECT_BRIEF.md) · [開発記録](docs/ROADMAP.md)
 
-> **実装状況:** Cloudflare Workers 版が本体です。GitHub Actions は現在テスト用 CI のみで、定期通知を実行するワークフローは同梱していません。SQLite などの永続化層を追加すれば移植できる構造ですが、そのまま Actions を有効にするだけでは動作しません。
+> **実装状況:** Cloudflare Workers 版が本体です。GitHub Actions にも **オプトインで有効化できる通知テンプレート**があります。Cloudflare 版が永続キューを持つ本体、Actions 版がハッシュ済み履歴による軽量構成です。
 
 ## できること
 
@@ -160,17 +160,49 @@ node ops/export-monitor-config.mjs > .private/monitor-config.json
 
 **公開を防ぐための注意:** `wrangler.jsonc` の D1 ID はパスワードではありませんが、作者の環境値を自分用に変更してください。Webhook URL、設定 Secret、D1 の配信履歴、公開したくないチャンネル ID や記事の内容はコミットしないでください。公開 GitHub Actions のログ、Issue、PR、公開 Discord チャンネルにも注意してください。すでにコミットした情報は、後で `.gitignore` に入れても公開履歴からは消えません。最も確実に非公開にしたい場合は **private リポジトリ**を利用してください。
 
-## 4. GitHub Actions で実行したい場合(移植ガイド)
+## 4. GitHub Actions 版の導入 (テンプレートあり)
 
-**現在の GitHub Actions は型検査・テスト・Wrangler のビルド確認用 CI です。定期通知の実行環境ではありません。**
+Cloudflare を使わない場合は、[GitHub Actions 用テンプレート](templates/github-actions/notify.yml)を利用できます。**実際に定期取得と Discord 通知を行う実装を同梱しています。** 自動で起動しないよう、テンプレートは最初 `.github/workflows/` の外に置いてあります。
 
-Cloudflare 以外でも、`src/runner.ts` にある監視・重複排除・通知処理を再利用できます。ただし、GitHub-hosted runner は実行ごとに環境が作り直されるため、**SQLite の状態を実行間で永続化する仕組み**が必須です。
+**必要なもの:** GitHub アカウント、Discord Webhook、Node.js 22+。初回設定には [GitHub CLI `gh`](https://cli.github.com/) を使うと簡単です。
 
-移植に必要なのは、(1) D1 用 `Database` インターフェースを Node.js の SQLite に接続するアダプタ、(2) `migrations/` による初期化、(3) 監視・履歴整理を呼び出すエントリポイント、(4) `schedule` / `workflow_dispatch` の YAML、(5) 永続的な DB 保管場所と同時実行制御、(6) GitHub Actions Secrets からの Webhook・非公開設定の読み込み、です。
+1. このリポジトリを Fork してローカルに clone します。
+2. 次のコマンドで、Git に含まれない自分専用の設定ファイルと **ランダムな HMAC 鍵**を作ります。
 
-GitHub の `schedule` は最短5分間隔ですが、実行が遅れたり省略されたりすることがあります。公開リポジトリでは活動が60日ないと定期実行が無効化される場合もあります。したがって **Cloudflare 版と同じ時間精度・耐障害性を自動的に得られるわけではありません**。公開リポジトリに SQLite DB や個人設定を書き戻す設計は避けてください。
+```sh
+npm run setup:actions
+```
 
-現段階で簡単に動かしたいなら **Cloudflare Workers + D1 を推奨**します。GitHub Actions への移植は、通知ロジックを流用できるものの、別途バックエンド実装・テストが必要です。
+3. `.private/actions-settings.json` に監視対象・間隔・Discord Webhook URL を設定します。初期状態ではサンプル Qiita 監視1件だけを有効にし、Wikipedia は無効です。不要な情報源は `targets` を空配列にできます。実際の秘密鍵と Webhook URL を GitHub にコミットしないでください。
+4. GitHub CLI でログインし、設定ファイルの全文を **ひとつの GitHub Actions Secret** に登録します。
+
+```sh
+gh auth login
+gh secret set NOTIFY_SETTINGS_JSON < .private/actions-settings.json
+```
+
+5. テンプレートを有効にしてコミットします。
+
+```sh
+mkdir -p .github/workflows
+cp templates/github-actions/notify.yml .github/workflows/notify.yml
+git add .github/workflows/notify.yml
+git commit -m "Enable Actions notifications"
+git push
+```
+
+6. GitHub の **Actions** タブで `Content notifications` を許可・有効化し、`Run workflow` を実行します。初回は無通知の基準化です。以降は定期実行され、新着があれば Discord に送信されます。
+
+**GitHub Actions 版のデータ管理と違い:**
+
+- `17,47 * * * *` (UTC) の **30分間隔**でワークフローが起動し、監視対象ごとの間隔が来たときだけ取得します。YAML を編集すれば変更できます。GitHub 側の事情で実行が遅れたり省略されたりします。
+- **SQLite や D1 は不要**です。前回の状態は GitHub Actions Artifact に保存し、次の実行で復元します。公開リポジトリの Artifact は第三者に読まれる可能性があるため、保存するのは **秘密鍵を使った HMAC-SHA-256 の識別子**と取得・通知時刻だけです。タイトル、URL、購読先、Webhook URL、HMAC 鍵は保存しません。
+- このハッシュは暗号化ではありません。**元のタイトルやURLを復元できないため、Cloudflare 版の未送信キューは再現しません。** 送信失敗分は次回の取得で再発見できれば再送します。掲載範囲から消えた場合は取りこぼします。エラー直前の送信と Artifact 保存の間で停止した場合、重複通知される可能性もあります。
+- Artifact は7日保持します。すべて期限切れになって状態が復元できなければ、新しい無通知基準化から再開します。**HMAC 鍵の変更や過去の Artifact の破損は自動復旧せずエラーにします。** 同時起動は `concurrency` で制限します。
+- public リポジトリでは60日間活動が無い場合にスケジュール実行が無効化されることがあります。止まった場合は Actions で再度有効化してください。
+- **初期設定の Secret が設定されていなければ、公開されている作者の好みで監視を開始することはありません。** 安全のため実行を失敗させます。
+
+元の Cloudflare 版のような **永続キュー・D1 による再試行・細かい復旧**を求めるなら、Cloudflare 版を利用してください。
 
 ## 運用・制約
 
@@ -191,4 +223,4 @@ npm run dev
 
 情報源を追加する場合は `src/sources/` と `src/runner.ts` を参照してください。詳細な経緯と内部設計は [PROJECT_BRIEF.md](PROJECT_BRIEF.md)・[docs/ROADMAP.md](docs/ROADMAP.md) に残しています。質問は Issue で受け付けられますが、Webhook URL・非公開の購読先・実運用の機密ログは投稿しないでください。
 
-> **ライセンスに関する注意:** 現時点では明示的な `LICENSE` ファイルがありません。公開フォーク・再配布の条件を明確にするため、メンテナがライセンスを選定する必要があります。
+**ライセンス:** [MIT License](LICENSE) (Copyright © 2026 nasu)。改変・再配布・商用利用が可能です。
