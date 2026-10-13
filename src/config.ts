@@ -41,6 +41,7 @@ export interface YouTubeTarget {
   readonly channel: string;
   readonly enabled: boolean;
   readonly weekdayJst?: string;
+  readonly channelId?: string;
 }
 
 export function youtubeMonitorsFromTargets(
@@ -50,6 +51,7 @@ export function youtubeMonitorsFromTargets(
     id: target.id, source: 'youtube' as const,
     query: target.channel.trim(), enabled: target.enabled,
     ...(target.weekdayJst !== undefined ? { weeklyJstDay: target.weekdayJst } : {}),
+    ...(target.channelId !== undefined ? { youtubeChannelId: target.channelId } : {}),
   }));
 }
 
@@ -154,7 +156,8 @@ export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[
       }
       if (source === 'youtube' && (
         typeof target.channel !== 'string' ||
-        (target.weekdayJst !== undefined && typeof target.weekdayJst !== 'string')
+        (target.weekdayJst !== undefined && typeof target.weekdayJst !== 'string') ||
+        (target.channelId !== undefined && typeof target.channelId !== 'string')
       )) {
         throw new Error('MONITOR_CONFIG_JSON YouTube targets require channel and optional weekdayJst');
       }
@@ -219,6 +222,13 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     if (monitor.enabled && monitor.source === 'zenn') {
       try { zennFeedUrl(monitor.query); }
       catch { throw new Error('Enabled Zenn monitor ' + monitor.id + ': invalid user/topic feed query'); }
+    }
+    if (monitor.youtubeChannelId !== undefined) {
+      if (monitor.source !== 'youtube' || !/^UC[A-Za-z0-9_-]{22}$/.test(monitor.youtubeChannelId))
+        throw new Error('Invalid pinned YouTube channel ID for monitor ' + monitor.id);
+      const normalized = normalizeChannelReference(monitor.query);
+      if (normalized.startsWith('UC') && normalized !== monitor.youtubeChannelId)
+        throw new Error('Pinned YouTube channel ID does not match query for monitor ' + monitor.id);
     }
     if (monitor.enabled && monitor.source === 'youtube') {
       try { normalizeChannelReference(monitor.query); }
