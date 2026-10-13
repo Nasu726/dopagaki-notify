@@ -1,0 +1,46 @@
+# Template, not an active workflow. Copy to .github/workflows/notify.yml to enable.
+# Public repositories expose workflow artifacts; this template persists HMACs
+# only. Configure NOTIFY_SETTINGS_JSON (a GitHub Actions repository Secret).
+name: Content notifications
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: dopagaki-notify
+  cancel-in-progress: false
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore prior hashed receipts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .private
+          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=dopagaki-state-v1&per_page=30" --jq '.artifacts | map(select(.expired == false)) | first | .workflow_run.id // empty')"
+          if [[ -n "$run_id" ]]; then
+            gh run download "$run_id" --name dopagaki-state-v1 --dir .private
+          fi
+      - name: Fetch and notify
+        env:
+          NOTIFY_SETTINGS_JSON: ${{ secrets.NOTIFY_SETTINGS_JSON }}
+        run: node --experimental-strip-types ops/actions-notify.mjs
+      - name: Persist HMAC-only state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dopagaki-state-v1
+          path: .private/gha-ledger.json
+          if-no-files-found: ignore
+          retention-days: 7
