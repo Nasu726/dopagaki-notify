@@ -41,8 +41,11 @@ export async function notifyDiscord(
       title: item.title.slice(0, 256),
       url: item.url,
       description: source + ' · ' + new Date(item.publishedAt).toISOString(),
+      // Compact native Discord thumbnail. The URL is generated from a
+      // validated 11-character YouTube video ID; no extra network request.
+      // Discord (not the Worker) retrieves the remote image for rendering.
       ...(youtubeId
-        ? { image: { url: 'https://i.ytimg.com/vi/' + youtubeId + '/hqdefault.jpg' } }
+        ? { thumbnail: { url: 'https://i.ytimg.com/vi/' + youtubeId + '/hqdefault.jpg' } }
         : articleImage ? { image: { url: articleImage } }
         : source === 'qiita' && item.thumbnailUrl
           ? { thumbnail: { url: item.thumbnailUrl } }
