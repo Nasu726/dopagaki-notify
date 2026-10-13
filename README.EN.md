@@ -15,10 +15,10 @@ Built for personal use and for people who want to fork and tailor a simple notif
 | Qiita | Up to 3 most recently created posts among the first 20 search results |
 | Zenn | Up to 3 newest entries in a topic or user RSS feed |
 | arXiv | Newly submitted papers in selected categories, with paginated scanning |
-| YouTube | All eligible new videos currently available in a channel's bounded Atom feed |
+| YouTube | Notify the latest available video on the first successful poll even if previously published; later notify new uploads with ID deduplication |
 | Japanese Wikipedia | Up to 1 featured article and 1 sufficiently substantial random article per recommendation poll |
 
-- Stable item IDs prevent repeated notifications. The first successful poll establishes a **silent baseline**: it does not send already published content.
+- Stable item IDs prevent repeated notifications. The first successful poll normally establishes a **silent baseline**, except for **YouTube**, which notifies the single most recently published video even on the first successful poll (useful as an initial delivery check). Later polls still send eligible new uploads.
 - Each monitor has its own polling interval. YouTube monitors may run only on a chosen day of the week in Japan Standard Time.
 - One Discord webhook **per source** (shared by monitors of that source). **Notifications are enabled around the clock by default**. An optional JST delivery window can defer messages while source polling continues.
 - The 5-minute dispatcher polls one due monitor at a time and sends up to three queued notifications per invocation. D1 tracks pending items, retries, webhook cooldowns, and deduplication state.
