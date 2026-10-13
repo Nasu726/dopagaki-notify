@@ -288,3 +288,11 @@ npm run dev
 ## ライセンス
 
 [MIT License](LICENSE) (Copyright (c) 2026 nasu)。改変・再配布・商用利用が可能です。配布時には著作権表示とライセンス本文を含めてください。
+
+### YouTube Shortsを除外する (任意)
+
+`config/targets.json` のYouTube監視に `"videoType": "videos"` を指定すると、通常動画だけを掲載する非公式の `UULF...` RSSプレイリストを監視します。**固定 `channelId` が必須**で、通常の `channel_id=UC...` ではなく `playlist_id=UULF...` にアクセスします。指定無し (または `"all"`) なら従来どおりShortsや配信を含めます。まず `youtube-quizknock` のみ有効化しています。
+
+このURL形式はYouTubeの公式仕様として保証されていないため、配信停止・仕様変更の可能性があります。エラー時にShorts混在フィードへ自動で戻すことはありません。**公式Data APIにShorts識別フラグは無い**ため、`videoType: "videos"` のモニターでは `YOUTUBE_API_KEY` 設定の有無にかかわらずRSSを使用し、他の監視では従来のAPI設定が有効です。通常動画だけでなく**ライブ配信も除外**されます。
+
+監視ID・D1の初期化状態・通知済みIDは変更しません。切り替え直後には、未通知の最新通常動画が過去の公開日時でも1件通知される場合があります。すでに送信したShortsの履歴は残ります。非公開 `MONITOR_CONFIG_JSON` で監視設定を上書きしている環境では、そのJSONの対象にも `videoType` を追加する必要があります。単体テストだけでは実際のRSS動作は保証できないため、Cloudflareでの初回取得を確認してください。

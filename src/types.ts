@@ -17,6 +17,7 @@ export interface Monitor {
   enabled: boolean;
   weeklyJstDay?: string; // optional fixed weekday for weekly YouTube polling
   youtubeChannelId?: string; // optional pinned UC... ID, preserving query/monitor identity
+  youtubeVideoType?: 'all' | 'videos'; // opt-in RSS videos-only (UULF), no Shorts/live
 }
 export interface D1Prepared {
   bind(...parameters: unknown[]): D1Prepared;
