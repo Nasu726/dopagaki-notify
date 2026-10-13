@@ -64,12 +64,62 @@ test('preflight never repeats private queries in any validation error', () => {
 });
 
 test('file-based private preflight rejects duplicate flags and empty values', () => {
-  assert.deepEqual(parsePreflightArgs([]), {help:false,configFile:null,windowFile:null});
+  assert.deepEqual(parsePreflightArgs([]), {help:false,configFile:null,windowFile:null,windowValue:null});
   assert.deepEqual(parsePreflightArgs(['--private-config-file=.private/config.json']),
-    {help:false,configFile:'.private/config.json',windowFile:null});
+    {help:false,configFile:'.private/config.json',windowFile:null,windowValue:null});
   assert.deepEqual(parsePreflightArgs(['--help']),{help:true});
+  assert.deepEqual(parsePreflightArgs(['--notification-window=08:00-20:00']),
+    {help:false,configFile:null,windowFile:null,windowValue:'08:00-20:00'});
+  assert.equal(validateRuntimeConfiguration(undefined,parsePreflightArgs([
+    '--notification-window=08:00-20:00',
+  ]).windowValue).notificationWindow,'restricted-JST');
+  assert.throws(() => validateRuntimeConfiguration(undefined, '00:00-24:00'), /Delivery window invalid/);
   for(const args of [['--bad'],['--notification-window-file='],
-    ['--private-config-file='],['--private-config-file=a','--private-config-file=b']]) {
+    ['--private-config-file='],['--private-config-file=a','--private-config-file=b'],
+    ['--notification-window='],['--notification-window=08:00-20:00','--notification-window=09:00-20:00'],
+    ['--notification-window-file=x','--notification-window=08:00-20:00']]) {
     assert.throws(()=>parsePreflightArgs(args));
   }
+});
+
+test('Worker scheduled handler classifies invalid private delivery time before D1 access', async () => {
+  const { default: worker } = await import('../src/index.ts');
+  let dbCalls = 0;
+  const env = {
+    DB: { prepare() { dbCalls++; throw new Error('D1 should not be touched'); } },
+    NOTIFICATION_WINDOW_JST: '00:00-24:00',
+  } as unknown as import('../src/types.ts').Env;
+  const logs: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
+  try {
+    await assert.rejects(() => worker.scheduled({cron:'*/5 * * * *'},env),
+      /Invalid runtime configuration/);
+  } finally { console.error = original; }
+  assert.equal(dbCalls,0);
+  assert.equal(logs.length,1,'one structured config error, not repeated nested monitor failures');
+  const entry=JSON.parse(logs[0]!);
+  assert.equal(entry.event,'runtime_config_failure');
+  assert.equal(entry.phase,'delivery_window_config');
+  assert.ok(entry.errorMessage.includes('npm run config:check'));
+  assert.ok(!JSON.stringify(entry).includes('00:00-24:00'));
+});
+
+test('Worker scheduled handler classifies malformed private monitors without exposing queries', async () => {
+  const { default: worker } = await import('../src/index.ts');
+  const secret='SECRET-SUBSCRIPTION-DO-NOT-LOG';
+  const env = {
+    DB: { prepare() { throw new Error('unexpected D1'); } },
+    MONITOR_CONFIG_JSON: JSON.stringify({targets:{youtube:[{
+      id:'private-video',channel:secret,enabled:true,
+    }]},intervals:{'private-video':60}}),
+  } as unknown as import('../src/types.ts').Env;
+  const logs:string[]=[];
+  const original=console.error;
+  console.error=(...args:unknown[])=>{logs.push(args.map(String).join(' '))};
+  try {await assert.rejects(()=>worker.scheduled({cron:'*/5 * * * *'},env),/Invalid runtime configuration/)}
+  finally {console.error=original}
+  assert.equal(logs.length,1);
+  assert.equal(JSON.parse(logs[0]!).phase,'monitor_config');
+  assert.ok(!logs[0]!.includes(secret));
 });

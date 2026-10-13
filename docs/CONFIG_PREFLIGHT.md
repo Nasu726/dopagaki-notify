@@ -8,6 +8,13 @@ Catch invalid version-controlled targets/intervals and privately supplied runtim
 npm run config:check
 ```
 
+To test the exact notification hours you **intend** to set, without storing
+them as a public variable or waiting for a scheduled Worker:
+
+```sh
+npm run config:check -- --notification-window=08:00-20:00
+```
+
 CI runs this command against **public checked-in** configuration. `npm run deploy` additionally runs it automatically before `wrangler deploy`. Running `npx wrangler deploy` directly or using Cloudflare Workers Builds without a matching preflight step does **not** guarantee this check.
 
 ## Private Cloudflare/Actions configuration
@@ -36,6 +43,19 @@ Alternatively supply `MONITOR_CONFIG_JSON` and/or `NOTIFICATION_WINDOW_JST` as l
 - Invalid values fail closed; they are never silently changed into unrestricted delivery.
 
 24時間通知する場合、`NOTIFICATION_WINDOW_JST=00:00-24:00` を設定してはいけません。Cloudflare側のこのSecretを削除し、必要なら設定JSONの `notificationWindowJst` を `null` にしてください。時刻制限する場合は `09:00-20:00` などの半開区間を指定します。
+
+## Cloudflare runtime diagnostics
+
+The Worker separately validates the runtime monitor roster and notification
+window before any D1 operation. Invalid values produce a structured
+`runtime_config_failure` event with a sanitized correction hint and a failed
+Cron outcome. This does **not** access or echo Secret values. Since a broken
+Secret persists until an operator fixes it, a scheduled error may recur on
+each Cron; the check cannot inspect Cloudflare Secrets from GitHub CI.
+
+The current production operator preference is `08:00-20:00` JST, provided as
+a private Cloudflare Secret. The repository's public default is still
+`null` (unrestricted 24-hour sending).
 
 ## Still requiring live verification
 

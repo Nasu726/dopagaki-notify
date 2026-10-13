@@ -115,6 +115,8 @@ npx wrangler secret put MONITOR_CONFIG_JSON
 ```sh
 npm run config:check -- --private-config-file=.private/monitor-config.json
 npm run config:check -- --notification-window-file=.private/notification-window.txt
+# CloudflareのSecretに設定する予定の値を直接検証
+npm run config:check -- --notification-window=08:00-20:00
 ```
 
 通知可能時間は日本時間の**開始含む・終了含まない**半開区間。例: `08:00-20:00`なら08:00から19:59まで送信し、それ以外は取得のみ続けます。`00:00-24:00`は**無効**です。24時間通知は`NOTIFICATION_WINDOW_JST`を未設定とし、設定JSONも`null`にしてください。
