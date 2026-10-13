@@ -53,3 +53,21 @@ test('official API supports raw UC channel IDs and surfaces HTTP errors for retr
     (error: unknown) => error instanceof HttpStatusError && error.source === 'YouTube Data API' && error.status === 403);
   await assert.rejects(() => fetchYouTubeDataApi(monitor, ''), /Invalid YOUTUBE_API_KEY/);
 });
+
+test('official API respects pinned UC ID instead of resolving @handle', async () => {
+  const channel = 'UCmpkIzF3xFzhPez7gXOyhVg';
+  let captured = '';
+  const testFetch: typeof fetch = async (url) => {
+    const u = new URL(String(url));
+    if (u.pathname.endsWith('/channels')) {
+      captured = u.searchParams.get('id') ?? '';
+      assert.equal(u.searchParams.has('forHandle'),false);
+      return Response.json({items:[{contentDetails:{
+        relatedPlaylists:{uploads:'UUmpkIzF3xFzhPez7gXOyhVg'},
+      }}]});
+    }
+    return Response.json({items:[]});
+  };
+  await fetchYouTubeDataApi({...monitor,query:'@yurugengo',youtubeChannelId:channel},'key',testFetch);
+  assert.equal(captured,channel);
+});
