@@ -117,7 +117,7 @@ npm run config:check -- --private-config-file=.private/monitor-config.json
 npm run config:check -- --notification-window-file=.private/notification-window.txt
 ```
 
-Time windows use **JST, start inclusive / end exclusive**. For example, `07:00-22:00` allows Discord sends from 07:00 to 21:59. The Worker still fetches and queues outside that range. `00:00-24:00` is **invalid**. For 24-hour sends, leave the `NOTIFICATION_WINDOW_JST` Secret unset and use `null` in config.
+Time windows use **JST, start inclusive / end exclusive**. For example, `08:00-20:00` allows Discord sends from 08:00 to 19:59. The Worker still fetches and queues outside that range. `00:00-24:00` is **invalid**. For 24-hour sends, leave the `NOTIFICATION_WINDOW_JST` Secret unset and use `null` in config.
 
 Set a private Cloudflare delivery window using:
 
@@ -125,9 +125,9 @@ Set a private Cloudflare delivery window using:
 npx wrangler secret put NOTIFICATION_WINDOW_JST
 ```
 
-Enter `07:00-22:00` (or your choice) into the prompt. Precedence: **dedicated Secret > window in private `MONITOR_CONFIG_JSON` > checked-in `targets.json`**.
+Enter `08:00-20:00` (or your choice) into the prompt. Precedence: **dedicated Secret > window in private `MONITOR_CONFIG_JSON` > checked-in `targets.json`**.
 
-> **Operator-specific example:** The project's current production Cloudflare Secret is `07:00-22:00`. The **checked-in default is still `null` (unrestricted, 24-hour sending)** and forks do not inherit the operator's Secret.
+> **Operator-specific example:** The project's current production Cloudflare Secret is `08:00-20:00`. The **checked-in default is still `null` (unrestricted, 24-hour sending)** and forks do not inherit the operator's Secret.
 
 [Config preflight reference](docs/CONFIG_PREFLIGHT.md).
 

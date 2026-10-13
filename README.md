@@ -117,7 +117,7 @@ npm run config:check -- --private-config-file=.private/monitor-config.json
 npm run config:check -- --notification-window-file=.private/notification-window.txt
 ```
 
-通知可能時間は日本時間の**開始含む・終了含まない**半開区間。例: `07:00-22:00`なら07:00から21:59まで送信し、それ以外は取得のみ続けます。`00:00-24:00`は**無効**です。24時間通知は`NOTIFICATION_WINDOW_JST`を未設定とし、設定JSONも`null`にしてください。
+通知可能時間は日本時間の**開始含む・終了含まない**半開区間。例: `08:00-20:00`なら08:00から19:59まで送信し、それ以外は取得のみ続けます。`00:00-24:00`は**無効**です。24時間通知は`NOTIFICATION_WINDOW_JST`を未設定とし、設定JSONも`null`にしてください。
 
 Cloudflare Secretを利用する場合は次のとおりです。
 
@@ -125,9 +125,9 @@ Cloudflare Secretを利用する場合は次のとおりです。
 npx wrangler secret put NOTIFICATION_WINDOW_JST
 ```
 
-対話入力に`07:00-22:00`などを指定してください。優先順位は**`NOTIFICATION_WINDOW_JST` Secret ＞ `MONITOR_CONFIG_JSON`内の値 ＞ 公開`targets.json`**です。
+対話入力に`08:00-20:00`などを指定してください。優先順位は**`NOTIFICATION_WINDOW_JST` Secret ＞ `MONITOR_CONFIG_JSON`内の値 ＞ 公開`targets.json`**です。
 
-> **運用例:** このプロジェクトの実運用では、Cloudflare側のSecretを`07:00-22:00`に設定しています。ただし**公開リポジトリの既定値は`null` (24時間)**のままで、フォークには個人の設定は引き継がれません。
+> **運用例:** このプロジェクトの実運用では、Cloudflare側のSecretを`08:00-20:00`に設定しています。ただし**公開リポジトリの既定値は`null` (24時間)**のままで、フォークには個人の設定は引き継がれません。
 
 [検証方法とよくある設定ミス](docs/CONFIG_PREFLIGHT.md)
 
