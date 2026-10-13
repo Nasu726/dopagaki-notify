@@ -37,6 +37,8 @@ async function main() {
   const env = {
     MONITOR_CONFIG_JSON: process.env.MONITOR_CONFIG_JSON,
     NOTIFICATION_WINDOW_JST: process.env.NOTIFICATION_WINDOW_JST || undefined,
+    WIKIMEDIA_CONTACT_URL: process.env.WIKIMEDIA_CONTACT_URL ||
+      (process.env.GITHUB_REPOSITORY ? 'https://github.com/' + process.env.GITHUB_REPOSITORY : undefined),
     DISCORD_WEBHOOK_QIITA: process.env.DISCORD_WEBHOOK_QIITA,
     DISCORD_WEBHOOK_ZENN: process.env.DISCORD_WEBHOOK_ZENN,
     DISCORD_WEBHOOK_ARXIV: process.env.DISCORD_WEBHOOK_ARXIV,

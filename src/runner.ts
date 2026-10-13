@@ -47,7 +47,8 @@ const defaults: Dependencies = {
     switch (monitor.source) {
       case 'qiita': return fetchQiita(monitor, fetch, cursor, windowStart);
       case 'wikipedia': return monitor.query.endsWith(':discover') ?
-        fetchWikipediaDiscovery(monitor, fetch) : fetchWikipedia(monitor, fetch, cursor);
+        fetchWikipediaDiscovery(monitor, fetch, env.WIKIMEDIA_CONTACT_URL) :
+        fetchWikipedia(monitor, fetch, cursor, env.WIKIMEDIA_CONTACT_URL);
       case 'arxiv': return fetchArxiv(monitor, fetch, cursor);
       case 'zenn': return fetchZenn(monitor);
       case 'youtube': return fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));

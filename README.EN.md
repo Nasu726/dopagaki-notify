@@ -73,6 +73,14 @@ Enter `09:00-20:00` (or your preferred range) into the prompt. You can also incl
 
 For public forks where your topic choices should **not be visible on GitHub**, use the private configuration described in [Section 3](#3-keep-your-interests-private-public-forks) instead of committing your target list.
 
+### Wikimedia identification (for forks)
+
+Wikimedia expects automated API clients to identify the software and provide a way to contact the **operator**. The default header identifies this application and links to the original repository. **If you fork and enable Wikipedia, set your own contact URL** rather than continuing to identify the original author as your operator.
+
+For Cloudflare Workers, create the ordinary **Variable** `WIKIMEDIA_CONTACT_URL` under **Worker → Settings → Variables and Secrets**, e.g. `https://github.com/YOUR_USERNAME/dopagaki-notify`. The app constructs the `User-Agent` and `Api-User-Agent` headers automatically. No Wikimedia API key or account registration is required.
+
+An existing original deployment continues to use the original contact by default. The GitHub Actions template derives the contact URL from the fork's `GITHUB_REPOSITORY` if no override is set.
+
 ## 2. Deploy with Cloudflare Workers (supported)
 
 **Prerequisites:** Node.js 22+, a Cloudflare account, and one or more Discord channels with incoming webhooks. Check your Cloudflare plan's current limits and charges before deployment. Fork this repository on GitHub, then clone your fork. You may instead clone the upstream repository for a local-only installation.

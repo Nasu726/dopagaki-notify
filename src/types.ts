@@ -30,6 +30,8 @@ export interface Env {
   MONITOR_CONFIG_JSON?: string;
   /** Optional private JST delivery hours, e.g. 09:00-20:00; unset = 24h. */
   NOTIFICATION_WINDOW_JST?: string;
+  /** Operator's publicly reachable HTTPS contact for Wikimedia requests. */
+  WIKIMEDIA_CONTACT_URL?: string;
   DISCORD_WEBHOOK_QIITA?: string;
   DISCORD_WEBHOOK_WIKIPEDIA?: string;
   DISCORD_WEBHOOK_ARXIV?: string;
