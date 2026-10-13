@@ -62,7 +62,7 @@ test('official API respects pinned UC ID instead of resolving @handle', async ()
     if (u.pathname.endsWith('/channels')) {
       captured = u.searchParams.get('id') ?? '';
       assert.equal(u.searchParams.has('forHandle'),false);
-      return Response.json({items:[{contentDetails:{
+      return Response.json({items:[{id:channel,contentDetails:{
         relatedPlaylists:{uploads:'UUmpkIzF3xFzhPez7gXOyhVg'},
       }}]});
     }
@@ -70,4 +70,69 @@ test('official API respects pinned UC ID instead of resolving @handle', async ()
   };
   await fetchYouTubeDataApi({...monitor,query:'@yurugengo',youtubeChannelId:channel},'key',testFetch);
   assert.equal(captured,channel);
+});
+
+
+test('official API refuses a poisoned channels.list result instead of crossing channels',async()=>{
+  const pinned={...monitor,query:'@yurugengo',youtubeChannelId:'UCmpkIzF3xFzhPez7gXOyhVg'};
+  let requests=0;
+  await assert.rejects(()=>fetchYouTubeDataApi(pinned,'key',async(input)=>{
+    requests++;
+    const url=new URL(String(input));
+    assert.ok(url.pathname.endsWith('/channels'));
+    assert.equal(url.searchParams.get('id'),pinned.youtubeChannelId);
+    return Response.json({items:[{
+      id:'UCpLu0KjNy616-E95gPx7LZg',
+      contentDetails:{relatedPlaylists:{uploads:'UUpLu0KjNy616-E95gPx7LZg'}},
+    }]});
+  }),/channel identity mismatch/);
+  assert.equal(requests,1,'do not fetch wrong owner uploads after mismatch');
+});
+
+test('official API requires an explicit valid channel owner even for @handle',async()=>{
+  for(const bogus of [undefined,'Q_MqAw18jFTlBB-f8BP7dw','UCbogus','']) {
+    await assert.rejects(()=>fetchYouTubeDataApi(monitor,'key',async()=>Response.json({
+      items:[{id:bogus,contentDetails:{relatedPlaylists:{uploads:'UU1234567890123456789012'}}}],
+    })),/channel identity mismatch/);
+  }
+});
+
+test('official API rejects contradictory playlist item owners before staging',async()=>{
+  const pinned={...monitor,query:channelId,youtubeChannelId:channelId};
+  for(const field of ['channelId','videoOwnerChannelId'] as const){
+    let calls=0;
+    await assert.rejects(()=>fetchYouTubeDataApi(pinned,'key',async(input)=>{
+      calls++;
+      const url=new URL(String(input));
+      if(url.pathname.endsWith('/channels'))return Response.json({
+        items:[{id:channelId,contentDetails:{relatedPlaylists:{uploads:'UU1234567890123456789012'}}}],
+      });
+      return Response.json({items:[{
+        status:{privacyStatus:'public'},
+        snippet:{title:'Mismatched video',[field]:'UCpLu0KjNy616-E95gPx7LZg'},
+        contentDetails:{videoId,videoPublishedAt:'2026-10-13T09:00:00Z'},
+      }]});
+    }),/playlist item channel mismatch/);
+    assert.equal(calls,2);
+  }
+});
+
+test('official API allows valid/absent playlist owner IDs, skips nonpublic items',async()=>{
+  const pinned={...monitor,query:channelId,youtubeChannelId:channelId};
+  const fetched=await fetchYouTubeDataApi(pinned,'key',async(input)=>{
+    const url=new URL(String(input));
+    if(url.pathname.endsWith('/channels'))return Response.json({
+      items:[{id:channelId,contentDetails:{relatedPlaylists:{uploads:'UU1234567890123456789012'}}}],
+    });
+    return Response.json({items:[
+      {status:{privacyStatus:'public'},
+        snippet:{title:'Public owner',channelId,videoOwnerChannelId:channelId},
+        contentDetails:{videoId,videoPublishedAt:'2026-10-13T09:00:00Z'}},
+      {status:{privacyStatus:'private'},
+        snippet:{title:'Private video',videoOwnerChannelId:'UCpLu0KjNy616-E95gPx7LZg'},
+        contentDetails:{videoId:'private1234',videoPublishedAt:'2026-10-13T09:00:00Z'}},
+    ]});
+  });
+  assert.equal(fetched.items.length,1);
+  assert.equal(fetched.items[0]?.id,'youtube:'+videoId);
 });
