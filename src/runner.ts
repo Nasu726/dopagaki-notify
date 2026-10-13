@@ -3,7 +3,7 @@ import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay }
 import { validateMonitors } from './config.ts';
 import { hasWebhookSecret, notifyDiscord, webhookFor } from './discord.ts';
 import { fetchQiita } from './sources/qiita.ts';
-import { fetchWikipedia } from './sources/wikipedia.ts';
+import { fetchWikipedia, fetchWikipediaDiscovery } from './sources/wikipedia.ts';
 import { fetchArxiv } from './sources/arxiv.ts';
 import { fetchZenn } from './sources/zenn.ts';
 import { fetchYouTube } from './sources/youtube.ts';
@@ -11,7 +11,7 @@ import { d1ChannelCache } from './sources/youtube-cache.ts';
 import {
   claim, completeFetch, deferFetchUntil, getPending, getRunnableIds,
   getState, markSent, coolDownPending, blockWebhook, postponeFetch, release, retryLater, stage, saveScanCursor, assertMonitorIdentity,
-  pruneStaleWikipediaPending,
+  pruneStaleWikipediaPending, selectWikipediaDiscovery,
 } from './state.ts';
 import type { Env, Monitor, ContentItem } from './types.ts';
 
@@ -29,7 +29,8 @@ const defaults: Dependencies = {
   fetchItems: (monitor, env, cursor, windowStart) => {
     switch (monitor.source) {
       case 'qiita': return fetchQiita(monitor, fetch, cursor, windowStart);
-      case 'wikipedia': return fetchWikipedia(monitor, fetch, cursor);
+      case 'wikipedia': return monitor.query.endsWith(':discover') ?
+        fetchWikipediaDiscovery(monitor, fetch) : fetchWikipedia(monitor, fetch, cursor);
       case 'arxiv': return fetchArxiv(monitor, fetch, cursor);
       case 'zenn': return fetchZenn(monitor);
       case 'youtube': return fetchYouTube(monitor, fetch, d1ChannelCache(env.DB));
@@ -61,6 +62,7 @@ export async function runTick(
     let fetchError: unknown;
     let wikipediaFetchSucceeded = false;
     const wikipedia = runnable.source === 'wikipedia';
+    const discovery = wikipedia && runnable.query.endsWith(':discover');
     const wikipediaCutoff = now - runnable.intervalMinutes * 60_000;
     const due = state.next_due_at <= now;
     const onSelectedDay = runnable.weeklyJstDay === undefined ||
@@ -83,10 +85,13 @@ export async function runTick(
         }
         if (wikipedia) {
           await pruneStaleWikipediaPending(env.DB, runnable.id, wikipediaCutoff);
-          const newest = result.items
-            .filter((item) => item.publishedAt > wikipediaCutoff && item.publishedAt <= now)
-            .sort((a, b) => b.publishedAt - a.publishedAt || a.id.localeCompare(b.id))
-            .slice(0, MAX_NOTIFICATIONS_PER_TICK);
+          const newest = discovery
+            ? state.initialized_at === null ? [] :
+              await selectWikipediaDiscovery(env.DB, runnable.id, result.items, now)
+            : result.items
+              .filter((item) => item.publishedAt > wikipediaCutoff && item.publishedAt <= now)
+              .sort((a, b) => b.publishedAt - a.publishedAt || a.id.localeCompare(b.id))
+              .slice(0, MAX_NOTIFICATIONS_PER_TICK);
           await stage(env.DB, runnable.id, newest, state.initialized_at, now);
         } else {
           await stage(env.DB, runnable.id, result.items, state.initialized_at, now);
@@ -131,7 +136,7 @@ export async function runTick(
     const deliveryNow = deps.clock?.() ?? now;
     const pending = !isJstNotificationTime(deliveryNow) || state.webhook_cooldown_until > now ||
       state.webhook_blocked_status !== null || (wikipedia && !wikipediaFetchSucceeded)
-      ? [] : await getPending(env.DB, runnable.id, now, MAX_NOTIFICATIONS_PER_TICK,
+      ? [] : await getPending(env.DB, runnable.id, now, discovery ? 2 : MAX_NOTIFICATIONS_PER_TICK,
         wikipedia ? wikipediaCutoff : undefined);
     for (const item of pending) {
       // A slow upstream fetch may have crossed 20:00 JST since the tick began.

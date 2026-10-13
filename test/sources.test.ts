@@ -108,7 +108,8 @@ test('all five monitors have individual minute intervals and separate webhook se
     new Set(['qiita', 'wikipedia', 'arxiv', 'zenn', 'youtube']));
   assert.ok(MONITORS.every((m) => Number.isInteger(m.intervalMinutes)));
   assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id),
-    ['qiita-rust', 'wikipedia-ja', 'arxiv-cs-ai', 'arxiv-cs-ds', 'zenn-topic-typescript',
+    ['qiita-rust', 'qiita-algorithms', 'qiita-design', 'wikipedia-ja-discovery',
+      'arxiv-cs-ai', 'arxiv-cs-ds', 'zenn-topic-typescript', 'zenn-topic-algorithm', 'zenn-topic-architecture',
       'youtube-yurugengo', 'youtube-yurucom', 'youtube-3blue1brown-japan'],
     'Qiita/Zenn/arXiv targets and selected YouTube channels are enabled');
   for (const source of ['arxiv', 'zenn', 'youtube'] as const) {

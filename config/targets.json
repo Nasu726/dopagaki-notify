@@ -4,12 +4,32 @@
       "id": "qiita-rust",
       "query": "tag:Rust",
       "enabled": true
+    },
+    {
+      "id": "qiita-algorithms",
+      "query": "tag:アルゴリズム",
+      "enabled": true
+    },
+    {
+      "id": "qiita-design",
+      "query": "tag:設計",
+      "enabled": true
     }
   ],
   "zenn": [
     {
       "id": "zenn-topic-typescript",
       "query": "topic:typescript",
+      "enabled": true
+    },
+    {
+      "id": "zenn-topic-algorithm",
+      "query": "topic:algorithm",
+      "enabled": true
+    },
+    {
+      "id": "zenn-topic-architecture",
+      "query": "topic:architecture",
       "enabled": true
     }
   ],
