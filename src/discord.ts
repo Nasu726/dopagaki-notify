@@ -43,7 +43,10 @@ export async function notifyDiscord(
       description: source + ' · ' + new Date(item.publishedAt).toISOString(),
       ...(youtubeId
         ? { image: { url: 'https://i.ytimg.com/vi/' + youtubeId + '/hqdefault.jpg' } }
-        : articleImage ? { image: { url: articleImage } } : {}),
+        : articleImage ? { image: { url: articleImage } }
+        : source === 'qiita' && item.thumbnailUrl
+          ? { thumbnail: { url: item.thumbnailUrl } }
+          : {}),
     }],
     allowed_mentions: { parse: [] },
   };

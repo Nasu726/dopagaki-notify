@@ -91,7 +91,11 @@ export async function fetchArticleThumbnail(
       redirect: 'manual',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!response.ok || !response.body) return null;
+    if (!response.ok || !response.body) {
+      if (source === 'qiita')
+        console.info('qiita article thumbnail: HTML unavailable (HTTP ' + response.status + ')');
+      return null;
+    }
     const contentType = response.headers.get('content-type');
     if (contentType && !/text\/html/i.test(contentType)) {
       await response.body.cancel();
@@ -112,12 +116,16 @@ export async function fetchArticleThumbnail(
         if (/<\/head\s*>/i.test(html)) break;
       }
       html += decoder.decode();
-      return articleOgImage(html, article);
+      const imageUrl = articleOgImage(html, article);
+      if (!imageUrl && source === 'qiita')
+        console.info('qiita article thumbnail: no Discord-compatible image in HTML metadata');
+      return imageUrl;
     } finally {
       await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
   } catch {
+    if (source === 'qiita') console.info('qiita article thumbnail: HTML request failed');
     return null;
   }
 }
