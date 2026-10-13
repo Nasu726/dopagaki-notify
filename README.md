@@ -6,7 +6,7 @@
 
 **[English](README.EN.md)** · [詳細な運用資料](docs/DEPLOYMENT.md) · [設計資料](PROJECT_BRIEF.md) · [開発記録](docs/ROADMAP.md)
 
-> **実装状況:** Cloudflare Workers 版が本体です。GitHub Actions は現在テスト用 CI のみで、定期通知を実行するワークフローは同梱していません。SQLite などの永続化層を追加すれば移植できる構造ですが、そのまま Actions を有効にするだけでは動作しません。
+> **対応状況:** Cloudflare Workers + D1 は実運用されている標準版です。GitHub Actions + SQLite には、明示的に有効化する [実行テンプレート](templates/github-actions/notifier.yml) を用意しています。両者で監視・通知ロジックを共有しますが、Actions 版は実環境での長期検証前であり、実行時刻や状態保存の保証は同等ではありません。
 
 ## できること
 
@@ -79,7 +79,13 @@ npx wrangler login
 npx wrangler d1 create dopagaki-notify
 ```
 
-表示された **自分の** `database_id` を `wrangler.jsonc` の `d1_databases[0].database_id` に設定してください。リポジトリ内の ID は作者の環境の値であり、フォーク先ではそのまま使えません。必要に応じて Worker 名・D1 名も変更します。D1 のバインディング名 `DB` は維持してください。
+表示された **自分の** `database_id` を次のコマンドに渡すと、`wrangler.jsonc` に自動反映できます。
+
+```sh
+npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID
+```
+
+リポジトリ内の ID は作者の環境の値であり、フォーク先では使えません。Worker 名・D1 名を変更する場合は `wrangler.jsonc` の `name`・`database_name` も変更し、以降のコマンド中の D1 名もそれに合わせてください。バインディング名 `DB` は維持してください。
 
 **② D1 のマイグレーションを適用**
 
@@ -160,17 +166,29 @@ node ops/export-monitor-config.mjs > .private/monitor-config.json
 
 **公開を防ぐための注意:** `wrangler.jsonc` の D1 ID はパスワードではありませんが、作者の環境値を自分用に変更してください。Webhook URL、設定 Secret、D1 の配信履歴、公開したくないチャンネル ID や記事の内容はコミットしないでください。公開 GitHub Actions のログ、Issue、PR、公開 Discord チャンネルにも注意してください。すでにコミットした情報は、後で `.gitignore` に入れても公開履歴からは消えません。最も確実に非公開にしたい場合は **private リポジトリ**を利用してください。
 
-## 4. GitHub Actions で実行したい場合(移植ガイド)
+## 4. GitHub Actions + SQLite で利用する(テンプレート)
 
-**現在の GitHub Actions は型検査・テスト・Wrangler のビルド確認用 CI です。定期通知の実行環境ではありません。**
+Cloudflare を使用しない場合は、[GitHub Actions 通知テンプレート](templates/github-actions/notifier.yml) を利用できます。D1 の代わりに Node.js の SQLite を使用し、実行ごとの DB 状態を **AES-256-GCM で暗号化した Artifact** として保存します。GitHub 上に平文 DB や監視対象をコミットする必要はありません。
 
-Cloudflare 以外でも、`src/runner.ts` にある監視・重複排除・通知処理を再利用できます。ただし、GitHub-hosted runner は実行ごとに環境が作り直されるため、**SQLite の状態を実行間で永続化する仕組み**が必須です。
+**セットアップの流れ:**
 
-移植に必要なのは、(1) D1 用 `Database` インターフェースを Node.js の SQLite に接続するアダプタ、(2) `migrations/` による初期化、(3) 監視・履歴整理を呼び出すエントリポイント、(4) `schedule` / `workflow_dispatch` の YAML、(5) 永続的な DB 保管場所と同時実行制御、(6) GitHub Actions Secrets からの Webhook・非公開設定の読み込み、です。
+1. 公開または非公開のリポジトリにフォークし、ローカルで `npm install` を実行する。
+2. `npm run setup:actions` で `.github/workflows/notifier.yml` と Git 管理対象外の `.private/monitor-config.json` を生成する。
+3. 非公開の JSON を編集し、GitHub **Settings → Secrets and variables → Actions** に `MONITOR_CONFIG_JSON`、`NOTIFY_STATE_KEY` と利用する情報源の `DISCORD_WEBHOOK_*` を登録する。
+4. **Secret 登録後**に `.github/workflows/notifier.yml` をコミット・push する。
+5. GitHub の **Actions → Discord notifier (SQLite) → Run workflow** で初回の無通知基準化を行う。その後は10分ごとの定期実行に任せる。
 
-GitHub の `schedule` は最短5分間隔ですが、実行が遅れたり省略されたりすることがあります。公開リポジトリでは活動が60日ないと定期実行が無効化される場合もあります。したがって **Cloudflare 版と同じ時間精度・耐障害性を自動的に得られるわけではありません**。公開リポジトリに SQLite DB や個人設定を書き戻す設計は避けてください。
+秘密鍵は32バイトの乱数を64桁の16進数にして生成します。例:
 
-現段階で簡単に動かしたいなら **Cloudflare Workers + D1 を推奨**します。GitHub Actions への移植は、通知ロジックを流用できるものの、別途バックエンド実装・テストが必要です。
+```sh
+node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+この出力を GitHub Actions Secret `NOTIFY_STATE_KEY` に保存してください。**鍵を失うと保存済みの状態を復元できません。** ただし Secret・JSON・Webhook URL は Git にコミットしないでください。GitHub CLI を使用する場合、`gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` でも設定できます。
+
+Actions は実行時刻がずれることがあり、定期実行が欠落する場合もあります。また Artifact は保持期限があり、**すべての状態が失われた場合は自動で再初期化しない**ようにしています。手動で初期化する場合に限り、`Run workflow` の `reset_state` をオンにしてください。これは過去の送信履歴と未送信キューを破棄します。
+
+**[GitHub Actions 版の詳しい設定・復旧手順](docs/GITHUB_ACTIONS.md)**
 
 ## 運用・制約
 
@@ -191,4 +209,6 @@ npm run dev
 
 情報源を追加する場合は `src/sources/` と `src/runner.ts` を参照してください。詳細な経緯と内部設計は [PROJECT_BRIEF.md](PROJECT_BRIEF.md)・[docs/ROADMAP.md](docs/ROADMAP.md) に残しています。質問は Issue で受け付けられますが、Webhook URL・非公開の購読先・実運用の機密ログは投稿しないでください。
 
-> **ライセンスに関する注意:** 現時点では明示的な `LICENSE` ファイルがありません。公開フォーク・再配布の条件を明確にするため、メンテナがライセンスを選定する必要があります。
+## ライセンス
+
+[MIT License](LICENSE) (Copyright (c) 2026 nasu)。改変・再配布・商用利用が可能です。配布時には著作権表示とライセンス本文を含めてください。

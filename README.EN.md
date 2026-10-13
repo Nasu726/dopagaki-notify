@@ -6,7 +6,7 @@ Built for personal use and for people who want to fork and tailor a simple notif
 
 **[日本語](README.md)** · [Historical deployment notes](docs/DEPLOYMENT.md) · [Design brief (Japanese)](PROJECT_BRIEF.md) · [Development roadmap](docs/ROADMAP.md)
 
-> **Implementation status:** The Cloudflare Workers edition is implemented. The existing GitHub Actions workflow performs CI checks only; it does **not** run scheduled notifications. Porting the notification logic to Actions is possible, but requires a SQLite adapter and persistent storage. This repository does not currently include a working Actions-based notifier.
+> **Availability:** Cloudflare Workers + D1 is the primary, deployed runtime. An **opt-in** [GitHub Actions + SQLite notification template](templates/github-actions/notifier.yml) is now included, sharing the same polling logic. The Actions template has automated integration tests but is not yet long-term production-verified; its scheduling and persistence guarantees differ from Cloudflare.
 
 ## Features
 
@@ -79,7 +79,13 @@ npx wrangler login
 npx wrangler d1 create dopagaki-notify
 ```
 
-Replace `d1_databases[0].database_id` in `wrangler.jsonc` with the UUID returned **for your account**. The checked-in UUID belongs to the original author's environment; forks cannot use it as-is. You may change the Worker or D1 name to avoid collisions, but keep the D1 binding named `DB`.
+Paste the **new UUID from your Cloudflare account** into this helper, which updates `wrangler.jsonc`:
+
+```sh
+npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID
+```
+
+The checked-in UUID belongs to the original author's environment and must not be reused. If you change the Worker/D1 name in `wrangler.jsonc`, also adjust the following commands to match. Keep the database binding named `DB`.
 
 **② Apply the bundled migrations to the remote database**
 
@@ -162,17 +168,29 @@ After checking your local file, open **Cloudflare Dashboard → Worker → Setti
 
 **Privacy considerations:** Avoid committing webhook URLs, personal target lists, D1 delivery history, and private credentials. The checked-in D1 UUID is not a password, but replace the author's account-specific value. Personal subjects can also leak through public Actions logs, issues, pull requests, or public Discord channels. Adding a file to `.gitignore` **after** committing it does not erase existing Git history. If hiding project usage and metadata matters too, use a **private repository**.
 
-## 4. GitHub Actions as an alternative runtime (porting guide)
+## 4. Run with GitHub Actions + SQLite (opt-in template)
 
-**The included GitHub Actions workflow is CI-only. There is no working scheduled Actions notifier in this repository today.**
+If you do not want to use Cloudflare, use the [GitHub Actions notifier template](templates/github-actions/notifier.yml). It uses Node.js SQLite instead of D1 and stores the database between workflow runs as an **AES-256-GCM encrypted GitHub Actions artifact**. Neither your plaintext database nor your subscriptions need to be committed.
 
-The core functionality in `src/runner.ts` can be reused outside Cloudflare, but GitHub-hosted runners are ephemeral. A port needs **durable SQLite storage across workflow runs**. A fresh in-memory SQLite database on every execution would lose baselines, deduplication state, and queued notifications.
+**Setup:**
 
-An Actions port needs: (1) a Node SQLite implementation of the D1-shaped `Database` interface, (2) schema initialization from `migrations/`, (3) an entrypoint invoking the polling and retention tasks, (4) `schedule` and `workflow_dispatch` YAML, (5) durable storage with a safe synchronization/concurrency strategy, and (6) GitHub Actions Secrets for webhooks and private monitor settings.
+1. Fork this repository (public or private), clone it and run `npm install`.
+2. Run `npm run setup:actions`. This copies the workflow into `.github/workflows/notifier.yml` and creates a gitignored `.private/monitor-config.json`.
+3. Edit the private JSON and add GitHub **Settings → Secrets and variables → Actions** Secrets: `MONITOR_CONFIG_JSON` (entire JSON), `NOTIFY_STATE_KEY` (64 hex characters), and your selected source's `DISCORD_WEBHOOK_*` URLs.
+4. **After adding Secrets**, commit and push `.github/workflows/notifier.yml`.
+5. Open **Actions → Discord notifier (SQLite) → Run workflow** for the initial silent baseline. Scheduled checks then run about every 10 minutes, subject to GitHub delays.
 
-GitHub Actions `schedule` supports intervals down to five minutes, but runs may be delayed or dropped; in public repositories inactive for 60 days, scheduled workflows may be automatically disabled. This is not an exact-equivalence deployment. **Do not commit a live SQLite DB to a public repository** to persist state: it includes the subscriptions and content history you are trying to keep private.
+Generate a random 32-byte encryption key as 64 hex characters:
 
-For a ready-to-use solution, use **Cloudflare Workers + D1**. An Actions version is an achievable separate integration project, not a setup switch.
+```sh
+node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Save the result as the **NOTIFY_STATE_KEY GitHub Secret**. Losing or rotating the key makes previous state artifacts unreadable. To upload private JSON with the GitHub CLI, use `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json`. Never commit these secrets or the database.
+
+GitHub schedules can be delayed or skipped, and artifacts expire. If the state artifact is missing, the workflow **fails closed rather than silently reinitializing**. An intentional reset requires **Run workflow → reset_state** and discards old deduplication records and pending messages. Repository activity is required to keep scheduled workflows enabled on public forks.
+
+**[Detailed GitHub Actions deployment and recovery guide](docs/GITHUB_ACTIONS.EN.md)**
 
 ## Operations and limitations
 
@@ -193,4 +211,6 @@ npm run dev
 
 See `src/sources/` and `src/runner.ts` for adding integrations. The [design brief](PROJECT_BRIEF.md) and [development roadmap](docs/ROADMAP.md) preserve architecture and implementation history. Do not post webhook URLs, private subscriptions, or operational secrets in issues or PRs.
 
-> **Licensing note:** The project does not yet include an explicit `LICENSE` file. The maintainer should select a license to clarify modification and redistribution rights for others.
+## License
+
+[MIT License](LICENSE) (Copyright (c) 2026 nasu). Modification, redistribution and commercial use are permitted provided the copyright notice and license terms are included.
