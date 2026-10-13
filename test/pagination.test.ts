@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fetchQiita, qiitaQueryWithWindow } from '../src/sources/qiita.ts';
-import { fetchWikipedia, WIKIMEDIA_USER_AGENT } from '../src/sources/wikipedia.ts';
+import { fetchWikipedia, fetchWikipediaDiscovery, WIKIMEDIA_USER_AGENT } from '../src/sources/wikipedia.ts';
 import { fetchArxiv } from '../src/sources/arxiv.ts';
 import type { Monitor } from '../src/types.ts';
 
@@ -117,4 +117,55 @@ test('Wikimedia HTTP 403 surfaces as explicit denial even with descriptive ident
     assert.ok(new Headers(init?.headers).get('User-Agent')?.includes('dopagaki-notify'));
     return new Response('blocked', { status: 403 });
   }), /MediaWiki HTTP 403/);
+});
+
+test('Wikipedia discovery requests a bounded featured pool and substantial random articles', async () => {
+  const requested: string[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    requested.push(url.searchParams.get('list') ?? '');
+    assert.equal(new Headers(init?.headers).get('User-Agent'), WIKIMEDIA_USER_AGENT);
+    assert.equal(url.hostname, 'ja.wikipedia.org');
+    assert.equal(url.searchParams.get('format'), 'json');
+    if (url.searchParams.get('list') === 'categorymembers') {
+      assert.equal(url.searchParams.get('cmtitle'), 'Category:秀逸な記事');
+      assert.equal(url.searchParams.get('cmnamespace'), '0');
+      assert.equal(url.searchParams.get('cmtype'), 'page');
+      assert.equal(url.searchParams.get('cmlimit'), '500');
+      return Response.json({ query: { categorymembers: Array.from({ length: 12 }, (_, i) => ({
+        ns: 0, pageid: i + 1, title: 'Featured ' + i,
+      })) } });
+    }
+    assert.equal(url.searchParams.get('list'), 'random');
+    assert.equal(url.searchParams.get('rnnamespace'), '0');
+    assert.equal(url.searchParams.get('rnfilterredir'), 'nonredirects');
+    assert.equal(url.searchParams.get('rnminsize'), '10000');
+    assert.equal(url.searchParams.get('rnlimit'), '8');
+    return Response.json({ query: { random: Array.from({ length: 8 }, (_, i) => ({
+      ns: 0, pageid: i + 1, title: 'Random ' + i,
+    })) } });
+  };
+  const monitor = makeMonitor('wikipedia', 'ja:discover');
+  const result = await fetchWikipediaDiscovery(monitor, fetcher);
+  assert.deepEqual(requested.sort(), ['categorymembers', 'random']);
+  assert.equal(result.items.length, 16);
+  assert.equal(result.items.filter((entry) => entry.discoveryKind === 'featured').length, 8);
+  assert.equal(result.items.filter((entry) => entry.discoveryKind === 'random').length, 8);
+  assert.equal(new Set(result.items.filter((entry) => entry.discoveryKind === 'featured').map((entry) => entry.id)).size, 8);
+  assert.equal(result.nextCursor, null);
+  assert.equal(result.potentiallyTruncated, false);
+  await assert.rejects(() => fetchWikipediaDiscovery(
+    makeMonitor('wikipedia', 'ja:../bad'), fetcher), /Invalid Wikipedia discovery query/);
+  await assert.rejects(() => fetchWikipediaDiscovery(monitor, async () =>
+    Response.json({ error: { code: 'denied' } })), /API error/);
+});
+
+test('Wikipedia discovery rejects empty and malformed curated/random results, not silently succeeding', async () => {
+  const m = makeMonitor('wikipedia', 'ja:discover');
+  await assert.rejects(() => fetchWikipediaDiscovery(m, async () =>
+    Response.json({ query: { categorymembers: [], random: [] } })), /empty/);
+  await assert.rejects(() => fetchWikipediaDiscovery(m, async (input) =>
+    Response.json(new URL(String(input)).searchParams.get('list') === 'random'
+      ? { query: { random: [{ ns: 6, pageid: 8, title: 'File' }] } }
+      : { query: { categorymembers: [{ ns: 0, pageid: 1, title: 'Featured' }] } })), /Malformed/);
 });

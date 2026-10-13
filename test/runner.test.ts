@@ -891,3 +891,66 @@ test('pending YouTube notifications can be sent next morning even outside fetch 
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='youtube:AbCdEf12345'")
     .get()?.status, 'sent');
 });
+
+test('Wikipedia discovery recommends one new featured and one random article each 2h with bounded D1', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_WIKIPEDIA = webhook;
+  const wikipedia: Monitor = {
+    id: 'wikipedia-ja-discovery', source: 'wikipedia', query: 'ja:discover',
+    enabled: true, intervalMinutes: 120,
+  };
+  const now = Date.parse('2026-10-10T00:00:00Z'); // 09:00 JST
+  const candidate = (id: number, discoveryKind: 'featured' | 'random'): ContentItem => ({
+    id: 'wikipedia:ja:' + id, title: 'Discover ' + id,
+    url: 'https://ja.wikipedia.org/?curid=' + id, publishedAt: 0, discoveryKind,
+  });
+  let items = [
+    candidate(1, 'featured'), candidate(2, 'featured'), candidate(3, 'featured'),
+    candidate(1, 'random'), candidate(4, 'random'), candidate(5, 'random'),
+  ];
+  let fetches = 0;
+  const deps = { ...s.deps, fetchItems: async () => {
+    fetches++;
+    return { items, potentiallyTruncated: false, nextCursor: null };
+  } };
+  await runTick(s.env, [wikipedia], now, deps);
+  assert.deepEqual(s.sent, [], 'silent initialization must not recommend historical articles');
+  await runTick(s.env, [wikipedia], now + 120 * 60_000, deps);
+  assert.deepEqual(s.sent, ['wikipedia:ja:1', 'wikipedia:ja:4']);
+  assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()?.n, 2);
+  assert.equal(s.raw.prepare('SELECT MIN(published_at) AS at FROM deliveries').get()?.at, now + 120 * 60_000,
+    'recommendation time must replace article creation time');
+  assert.equal(await runTick(s.env, [wikipedia], now + 125 * 60_000, deps), 'idle');
+  // Existing picks are rejected, and another random candidate must be used.
+  items = [candidate(1, 'featured'), candidate(2, 'featured'),
+    candidate(4, 'random'), candidate(5, 'random'), candidate(2, 'random')];
+  await runTick(s.env, [wikipedia], now + 240 * 60_000, deps);
+  assert.deepEqual(s.sent, ['wikipedia:ja:1', 'wikipedia:ja:4',
+    'wikipedia:ja:2', 'wikipedia:ja:5']);
+  assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()?.n, 4);
+  assert.equal(fetches, 3);
+  assert.equal(await runTick(s.env, [wikipedia], now + 245 * 60_000, deps), 'idle');
+});
+
+test('Wikipedia discovery never sends repeats or more than two items at a successful poll', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_WIKIPEDIA = webhook;
+  const m: Monitor = { id: 'wikipedia-ja-discovery', source: 'wikipedia',
+    query: 'ja:discover', enabled: true, intervalMinutes: 120 };
+  const now = Date.parse('2026-10-10T00:00:00Z');
+  const known = [
+    { id: 'wikipedia:ja:8', title: 'A', url: 'https://ja.wikipedia.org/?curid=8',
+      publishedAt: 0, discoveryKind: 'featured' as const },
+    { id: 'wikipedia:ja:8', title: 'A', url: 'https://ja.wikipedia.org/?curid=8',
+      publishedAt: 0, discoveryKind: 'random' as const },
+  ];
+  const deps = { ...s.deps, fetchItems: async () => ({
+    items: known, potentiallyTruncated: false, nextCursor: null,
+  }) };
+  await runTick(s.env, [m], now, deps);
+  await runTick(s.env, [m], now + 120 * 60_000, deps);
+  assert.deepEqual(s.sent, ['wikipedia:ja:8'], 'overlapping pools must send an article once');
+  await runTick(s.env, [m], now + 240 * 60_000, deps);
+  assert.deepEqual(s.sent, ['wikipedia:ja:8'], 'sent receipts suppress repeat recommendations');
+  assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()?.n, 1);
+});
