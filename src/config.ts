@@ -81,6 +81,84 @@ export function withIntervals(
 
 export const MONITORS: readonly Monitor[] = withIntervals(definitions, intervals);
 
+
+/**
+ * A complete runtime override for public forks that keep their chosen
+ * subjects private. The Secret uses the same target and interval shapes as
+ * the checked-in JSON files; it never merges with public monitor targets.
+ * A malformed override fails closed rather than silently activating defaults.
+ */
+function objectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[] {
+  if (json === undefined) return MONITORS;
+  if (json.length === 0 || json.length > 65_536)
+    throw new Error('MONITOR_CONFIG_JSON must contain a nonempty configuration (max 64 KiB)');
+  let raw: unknown;
+  try { raw = JSON.parse(json); }
+  catch { throw new Error('MONITOR_CONFIG_JSON contains invalid JSON'); }
+  if (!objectRecord(raw) || !objectRecord(raw.targets) || !objectRecord(raw.intervals)) {
+    throw new Error('MONITOR_CONFIG_JSON requires targets and intervals objects');
+  }
+  if (raw.wikipediaEnabled !== undefined && typeof raw.wikipediaEnabled !== 'boolean') {
+    throw new Error('MONITOR_CONFIG_JSON wikipediaEnabled must be boolean');
+  }
+  const targetConfig = raw.targets;
+  const allowed = ['qiita', 'zenn', 'arxiv', 'youtube'];
+  if (Object.keys(targetConfig).some((key) => !allowed.includes(key)))
+    throw new Error('MONITOR_CONFIG_JSON targets contains an unknown source');
+  const targetsBySource: Record<string, Record<string, unknown>[]> = {};
+  for (const source of allowed) {
+    const entries: unknown = targetConfig[source];
+    if (!Array.isArray(entries) || entries.length > 100 || !entries.every(objectRecord)) {
+      throw new Error('MONITOR_CONFIG_JSON targets.' + source + ' must be an array of objects (max 100)');
+    }
+    targetsBySource[source] = entries;
+    for (const target of entries) {
+      if (typeof target.id !== 'string' || typeof target.enabled !== 'boolean') {
+        throw new Error('MONITOR_CONFIG_JSON targets require string id and boolean enabled');
+      }
+      if ((source === 'qiita' || source === 'zenn') && typeof target.query !== 'string') {
+        throw new Error('MONITOR_CONFIG_JSON query targets require string query');
+      }
+      if (source === 'youtube' && (
+        typeof target.channel !== 'string' ||
+        (target.weekdayJst !== undefined && typeof target.weekdayJst !== 'string')
+      )) {
+        throw new Error('MONITOR_CONFIG_JSON YouTube targets require channel and optional weekdayJst');
+      }
+      if (source === 'arxiv' && (!Array.isArray(target.categories) ||
+        !target.categories.every((v: unknown) => typeof v === 'string'))) {
+        throw new Error('MONITOR_CONFIG_JSON arXiv targets require string categories array');
+      }
+    }
+  }
+  // Do not echo names/queries from a private Secret into exception logs.
+  try {
+    const definitions: Omit<Monitor, 'intervalMinutes'>[] = [
+      ...queryMonitorsFromTargets('qiita', targetsBySource.qiita as unknown as QueryTarget[]),
+      ...(raw.wikipediaEnabled === false ? [] : [{
+        id: 'wikipedia-ja-discovery', source: 'wikipedia' as const,
+        query: 'ja:discover', enabled: true,
+      }]),
+      ...(targetsBySource.arxiv ?? []).map((target) => ({
+        id: target.id as string, source: 'arxiv' as const,
+        query: arxivCategoryQuery(target.categories as string[]),
+        enabled: target.enabled as boolean,
+      })),
+      ...queryMonitorsFromTargets('zenn', targetsBySource.zenn as unknown as QueryTarget[]),
+      ...youtubeMonitorsFromTargets(targetsBySource.youtube as unknown as YouTubeTarget[]),
+    ];
+    const result = withIntervals(definitions, raw.intervals);
+    validateMonitors(result);
+    return result;
+  } catch {
+    throw new Error('MONITOR_CONFIG_JSON has invalid target values or intervals');
+  }
+}
+
 export function validateMonitors(monitors: readonly Monitor[]): void {
   const ids = new Set<string>();
   for (const monitor of monitors) {

@@ -1,5 +1,5 @@
 import { pruneSentDeliveries } from './maintenance.ts';
-import { MONITORS } from './config.ts';
+import { loadRuntimeMonitors } from './config.ts';
 import { runTick } from './runner.ts';
 import { logFailure } from './observability.ts';
 import type { Env } from './types.ts';
@@ -21,7 +21,7 @@ export default {
       }
       if (event.cron !== '*/5 * * * *') return;
       phase = 'monitor_tick';
-      const status = await runTick(env, MONITORS);
+      const status = await runTick(env, loadRuntimeMonitors(env.MONITOR_CONFIG_JSON));
       console.log('cron: ' + status);
     } catch (error) {
       // Complement monitor-specific failures with one Cron-level record.
