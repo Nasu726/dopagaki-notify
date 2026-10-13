@@ -83,10 +83,10 @@ test('pinned channel ID overrides a poisoned cached @handle mapping', async () =
   assert.equal(items.items[0]?.id,'youtube:AbCdEf12345');
   await assert.rejects(() => fetchYouTube(monitor,async ()=>
     new Response('<feed><yt:channelId>'+yurucom+'</yt:channelId></feed>')),
-    /YouTube RSS channel ID differs from requested/);
+    /YouTube RSS channel mismatch for youtube-yurugengo/);
   await assert.rejects(() => fetchYouTube(monitor,async ()=>
     new Response('<feed><entry><id>yt:video:AbCdEf12345</id></entry></feed>')),
-    /YouTube RSS has no verified channel ID/);
+    /YouTube RSS channel identity missing for youtube-yurugengo/);
 });
 
 test('channel identity mismatch reports both public channel IDs and the monitor', async () => {
