@@ -146,7 +146,8 @@ test('switch to videos-only preserves old Shorts receipt and sends normal once',
     await runTick(env,[quizknock],now+60*60_000,deps);
     assert.deepEqual(sent,['youtube:'+normalVideoId]);
     const rows=raw.prepare('SELECT item_id,status FROM deliveries WHERE monitor_id=? ORDER BY item_id').all(quizknock.id);
-    assert.deepEqual(rows,[
+    // node:sqlite returns null-prototype rows; normalize before strict comparison.
+    assert.deepEqual(rows.map(row => ({item_id:row.item_id,status:row.status})),[
       {item_id:'youtube:'+normalVideoId,status:'sent'},
       {item_id:'youtube:'+shortVideoId,status:'sent'},
     ]);
