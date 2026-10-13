@@ -147,8 +147,8 @@ test('switch to videos-only preserves old Shorts receipt and sends normal once',
     assert.deepEqual(sent,['youtube:'+normalVideoId]);
     const rows=raw.prepare('SELECT item_id,status FROM deliveries WHERE monitor_id=? ORDER BY item_id').all(quizknock.id);
     assert.deepEqual(rows,[
-      {item_id:'youtube:'+shortVideoId,status:'sent'},
       {item_id:'youtube:'+normalVideoId,status:'sent'},
+      {item_id:'youtube:'+shortVideoId,status:'sent'},
     ]);
     assert.equal(raw.prepare('SELECT config_identity FROM monitor_state WHERE id=?').get(quizknock.id)?.config_identity,JSON.stringify(['youtube','@QuizKnock']));
   } finally {raw.close();}
