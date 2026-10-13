@@ -69,7 +69,9 @@ const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
     query: target.query.trim(), enabled: target.enabled,
   })),
   ...queryMonitorsFromTargets('zenn', targets.zenn),
-  ...youtubeMonitorsFromTargets(targets.youtube),
+  // JSON imports widen string literals; validateMonitors checks the actual
+  // values at runtime (also used by config:check before deployment).
+  ...youtubeMonitorsFromTargets(targets.youtube as unknown as readonly YouTubeTarget[]),
 ];
 
 export function withIntervals(
