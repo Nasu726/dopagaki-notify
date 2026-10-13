@@ -1229,3 +1229,40 @@ test('YouTube initial notification honors optional send hours and delivers queue
   await runTick(s.env, [monitor], nextMorning, s.deps);
   assert.deepEqual(s.sent, [latest.id]);
 });
+
+test('a very old YouTube latest upload can notify an already initialized monitor once', async () => {
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  const monitor: Monitor = { id: 'youtube-oldest-latest', source: 'youtube', query: '@example',
+    intervalMinutes: 60, enabled: true };
+  const now = Date.parse('2026-10-13T02:00:00Z');
+  // An empty initial feed successfully initializes the monitor.
+  await runTick(s.env, [monitor], now, s.deps);
+  const ancient: ContentItem = { id: 'youtube:veryOld0001', title: 'Old latest',
+    url: 'https://www.youtube.com/watch?v=veryOld0001', publishedAt: now - 400 * 86400_000 };
+  s.setItems([ancient]);
+  await runTick(s.env, [monitor], now + 60 * 60_000, s.deps);
+  assert.deepEqual(s.sent, [ancient.id]);
+  await runTick(s.env, [monitor], now + 90 * 86400_000, s.deps);
+  assert.deepEqual(s.sent, [ancient.id], 'ancient newest video must never repeat');
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id=?")
+    .get(ancient.id)?.status, 'sent');
+});
+
+test('YouTube sent ID receipts outlive the ten-day cleanup while other sources are pruned', async () => {
+  const s = setup();
+  const now = Date.parse('2026-10-13T03:00:00Z');
+  s.raw.prepare(
+    "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at,sent_at) "+
+    "VALUES ('youtube-example','youtube:abc123DEF00','sent','Video','https://youtube.com/watch?v=abc123DEF00',?,?,?)"
+  ).run(now-400*86400_000, now-20*86400_000, now-20*86400_000);
+  s.raw.prepare(
+    "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at,sent_at) "+
+    "VALUES ('qiita-rust','qiita:oldreceipt','sent','Article','https://qiita.com/a',?,?,?)"
+  ).run(now-400*86400_000, now-20*86400_000, now-20*86400_000);
+  assert.equal(await pruneSentDeliveries(s.env.DB, now), 1);
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='youtube:abc123DEF00'")
+    .get()?.status, 'sent');
+  assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:oldreceipt'")
+    .get(), undefined);
+});

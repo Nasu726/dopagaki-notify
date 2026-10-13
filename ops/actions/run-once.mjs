@@ -43,6 +43,7 @@ async function main() {
     DISCORD_WEBHOOK_ZENN: process.env.DISCORD_WEBHOOK_ZENN,
     DISCORD_WEBHOOK_ARXIV: process.env.DISCORD_WEBHOOK_ARXIV,
     DISCORD_WEBHOOK_YOUTUBE: process.env.DISCORD_WEBHOOK_YOUTUBE,
+    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
     DISCORD_WEBHOOK_WIKIPEDIA: process.env.DISCORD_WEBHOOK_WIKIPEDIA,
   };
   if (!monitors.some((m) => m.enabled && (

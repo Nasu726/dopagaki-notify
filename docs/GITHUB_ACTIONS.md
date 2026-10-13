@@ -59,3 +59,8 @@ GitHub Actions Secret は定期実行で参照できます。フォーク後に�
 - [テスト](../test/actions-template.test.ts)
 
 変更の際は `npm run check` を実行してください。**Actions 版は Cloudflare 側の D1 と状態を共有しません。** 両方を並行稼働すると重複通知されるため、どちらか一方を稼働させることを推奨します。
+
+
+## 任意の YouTube Data API
+
+RSS の代わりに公式 API を使う場合は、Google Cloud で YouTube Data API v3 を有効にして API キーを作成し、GitHub Actions **Secret `YOUTUBE_API_KEY`** に設定してください。未設定なら従来どおり RSS を利用します。API モードでは `channels.list` と `playlistItems.list` を使用し、同じ動画ID・通知履歴を共有します。API の失敗は RSS に黙ってフォールバックせず再試行します。YouTube の送信済みIDは長期間経過しても重複通知しないよう、削除せず保管します。

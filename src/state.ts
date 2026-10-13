@@ -126,18 +126,16 @@ export async function stage(
   options: { allowHistoricalFirstItem?: boolean } = {},
 ): Promise<void> {
   // Usually the first observation is a silent time-based baseline.
-  // For YouTube, the caller may stage only its first (freshest) item at
-  // initialization, regardless of its age; the remaining older videos stay
-  // excluded until truly new publications appear.
+  // For YouTube, always consider the freshest item even if it predates the
+  // baseline. Older videos remain excluded unless published after baseline.
   if (baselineAt === null && !options.allowHistoricalFirstItem) return;
-  // Sent receipts expire after ten days. Historical latest items may bypass
-  // the baseline once, or during the same ten-day publication window.
-  // Beyond that window, they must never be requeued after receipt pruning.
+  // Normal non-YouTube receipts expire after ten days. YouTube sent receipts
+  // are retained permanently to ensure even an old latest video is not
+  // re-announced after a long interval or temporary feed regression.
   const retentionCutoff = now - DELIVERY_RETENTION_MS;
   const eligibleAfter = Math.max(baselineAt ?? now, retentionCutoff);
   const eligible = items.filter((item, index) =>
-    (options.allowHistoricalFirstItem && index === 0 &&
-      (baselineAt === null || item.publishedAt > retentionCutoff)) ||
+    (options.allowHistoricalFirstItem && index === 0) ||
     (baselineAt !== null && item.publishedAt > eligibleAfter));
   for (let offset = 0; offset < eligible.length; offset += OUTBOX_INSERT_BATCH) {
     const chunk = eligible.slice(offset, offset + OUTBOX_INSERT_BATCH);

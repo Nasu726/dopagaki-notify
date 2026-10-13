@@ -15,10 +15,10 @@ Built for personal use and for people who want to fork and tailor a simple notif
 | Qiita | Up to 3 most recently created posts among the first 20 search results |
 | Zenn | Up to 3 newest entries in a topic or user RSS feed |
 | arXiv | Newly submitted papers in selected categories, with paginated scanning |
-| YouTube | Notify the latest available video on the first successful poll even if previously published; later notify new uploads with ID deduplication |
+| YouTube | Always notify the latest available video if unseen, regardless of age; also notify normal new uploads. Optional YouTube Data API alternative to RSS |
 | Japanese Wikipedia | Up to 1 featured article and 1 sufficiently substantial random article per recommendation poll |
 
-- Stable item IDs prevent repeated notifications. The first successful poll normally establishes a **silent baseline**, except for **YouTube**, which notifies the single most recently published video even on the first successful poll (useful as an initial delivery check). Later polls still send eligible new uploads.
+- Stable item IDs prevent repeated notifications. The first successful poll normally establishes a **silent baseline**, except for **YouTube**, which notifies the newest video whenever it is not already acknowledged, even if it was published before the initial baseline. YouTube sent IDs are kept permanently to prevent repeated historical notifications; newer videos are still detected.
 - Each monitor has its own polling interval. YouTube monitors may run only on a chosen day of the week in Japan Standard Time.
 - One Discord webhook **per source** (shared by monitors of that source). **Notifications are enabled around the clock by default**. An optional JST delivery window can defer messages while source polling continues.
 - The 5-minute dispatcher polls one due monitor at a time and sends up to three queued notifications per invocation. D1 tracks pending items, retries, webhook cooldowns, and deduplication state.
@@ -80,6 +80,16 @@ Wikimedia expects automated API clients to identify the software and provide a w
 For Cloudflare Workers, create the ordinary **Variable** `WIKIMEDIA_CONTACT_URL` under **Worker → Settings → Variables and Secrets**, e.g. `https://github.com/YOUR_USERNAME/dopagaki-notify`. The app constructs the `User-Agent` and `Api-User-Agent` headers automatically. No Wikimedia API key or account registration is required.
 
 An existing original deployment continues to use the original contact by default. The GitHub Actions template derives the contact URL from the fork's `GITHUB_REPOSITORY` if no override is set.
+
+### Optional YouTube Data API
+
+The default uses YouTube RSS without any API key. For more reliable access, enable **YouTube Data API v3** in Google Cloud and register an optional **`YOUTUBE_API_KEY` Cloudflare Secret**:
+
+```sh
+npx wrangler secret put YOUTUBE_API_KEY
+```
+
+When set, the adapter uses `channels.list` and `playlistItems.list` (1 quota unit each) to read up to 50 uploads. API errors are logged and retried; the code does not silently fall back to RSS. Both adapters use the same video IDs and persisted sent history. Unlike other sources' ten-day sent receipts, **YouTube sent receipts are retained indefinitely** so an ancient newest upload cannot re-notify after history pruning. This uses additional D1/SQLite storage over time.
 
 ## 2. Deploy with Cloudflare Workers (supported)
 
