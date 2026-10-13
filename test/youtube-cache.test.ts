@@ -83,8 +83,47 @@ test('pinned channel ID overrides a poisoned cached @handle mapping', async () =
   assert.equal(items.items[0]?.id,'youtube:AbCdEf12345');
   await assert.rejects(() => fetchYouTube(monitor,async ()=>
     new Response('<feed><yt:channelId>'+yurucom+'</yt:channelId></feed>')),
-    /YouTube RSS channel ID differs from requested/);
+    /YouTube RSS channel mismatch for youtube-yurugengo/);
   await assert.rejects(() => fetchYouTube(monitor,async ()=>
     new Response('<feed><entry><id>yt:video:AbCdEf12345</id></entry></feed>')),
-    /YouTube RSS has no verified channel ID/);
+    /YouTube RSS channel identity missing for youtube-yurugengo/);
+});
+
+test('channel identity mismatch reports both public channel IDs and the monitor', async () => {
+  const monitor = {
+    ...MONITOR, id:'youtube-quizknock', query:'@QuizKnock',
+    youtubeChannelId:'UCQ_MqAw18jFTlBB-f8BP7dw',
+  };
+  const another = 'UCpLu0KjNy616-E95gPx7LZg';
+  await assert.rejects(
+    () => fetchYouTube(monitor, async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get('channel_id'),monitor.youtubeChannelId);
+      return new Response('<feed><yt:channelId>'+another+'</yt:channelId></feed>');
+    }),
+    /channel mismatch for youtube-quizknock: expected=UCQ_MqAw18jFTlBB-f8BP7dw, received=UCpLu0KjNy616-E95gPx7LZg/,
+  );
+});
+
+test('nested entry channel IDs cannot masquerade as the feed owner', async () => {
+  const pinned = { ...MONITOR, id:'youtube-quizknock', query:'@QuizKnock',
+    youtubeChannelId:'UCQ_MqAw18jFTlBB-f8BP7dw' };
+  await assert.rejects(() => fetchYouTube(pinned, async () => new Response(
+    '<feed><entry><yt:channelId>'+pinned.youtubeChannelId+'</yt:channelId></entry></feed>'
+  )), /channel identity missing for youtube-quizknock/);
+  const result = await fetchYouTube(pinned, async () => new Response(
+    '<feed><yt:channelId>'+pinned.youtubeChannelId+'</yt:channelId>'+
+    '<entry><id>yt:video:AbCdEf12345</id><published>2026-10-10T00:00:00Z</published>'+
+    '<title>Video</title><yt:channelId>UCpLu0KjNy616-E95gPx7LZg</yt:channelId></entry></feed>'
+  ));
+  assert.equal(result.items[0]?.id,'youtube:AbCdEf12345');
+});
+
+test('RSS header identity never derives from an entry having attributes', async () => {
+  const monitor = {...MONITOR,id:'youtube-quizknock',query:'@QuizKnock',
+    youtubeChannelId:'UCQ_MqAw18jFTlBB-f8BP7dw'};
+  await assert.rejects(() => fetchYouTube(monitor, async () => new Response(
+    '<feed><entry xmlns="http://www.w3.org/2005/Atom">'+
+    '<yt:channelId>'+monitor.youtubeChannelId+'</yt:channelId></entry></feed>'
+  )),/channel identity missing for youtube-quizknock/);
 });
