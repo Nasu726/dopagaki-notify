@@ -64,13 +64,19 @@ export async function fetchYouTube(
   const url = new URL('https://www.youtube.com/feeds/videos.xml');
   url.searchParams.set('channel_id', channelId);
   const xml = await fetchTextBounded(url, 'YouTube RSS', fetcher);
-  const feedChannelId = tagText(xml, 'yt:channelId');
+  // Only the feed-level identity is authoritative. An entry may itself
+  // contain metadata mentioning another channel; never treat that as the
+  // identity of the RSS document. Channel IDs are public, safe diagnostics.
+  const entryStart = /<entry(?:\\s|>)/i.exec(xml)?.index ?? xml.length;
+  const feedChannelId = tagText(xml.slice(0, entryStart), 'yt:channelId');
   if (feedChannelId && feedChannelId !== channelId)
-    throw new Error('YouTube RSS channel ID differs from requested channel');
+    throw new Error('YouTube RSS channel mismatch for ' + monitor.id +
+      ': expected=' + channelId + ', received=' + feedChannelId);
   // A pinned subscription must not silently accept a response without any
   // channel-identity marker. Standard YouTube RSS includes yt:channelId.
   if (monitor.youtubeChannelId && feedChannelId !== channelId)
-    throw new Error('YouTube RSS has no verified channel ID for pinned monitor');
+    throw new Error('YouTube RSS channel identity missing for ' + monitor.id +
+      ': expected=' + channelId + ', received=missing');
   const items = parseYouTube(xml);
   // A YouTube channel feed exposes only a bounded number of recent videos.
   return { items, potentiallyTruncated: items.length >= 15 };
