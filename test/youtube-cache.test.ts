@@ -111,12 +111,17 @@ test('nested entry channel IDs cannot masquerade as the feed owner', async () =>
   await assert.rejects(() => fetchYouTube(pinned, async () => new Response(
     '<feed><entry><yt:channelId>'+pinned.youtubeChannelId+'</yt:channelId></entry></feed>'
   )), /channel identity missing for youtube-quizknock/);
-  const result = await fetchYouTube(pinned, async () => new Response(
+  await assert.rejects(() => fetchYouTube(pinned, async () => new Response(
     '<feed><yt:channelId>'+pinned.youtubeChannelId+'</yt:channelId>'+
     '<entry><id>yt:video:AbCdEf12345</id><published>2026-10-10T00:00:00Z</published>'+
     '<title>Video</title><yt:channelId>UCpLu0KjNy616-E95gPx7LZg</yt:channelId></entry></feed>'
+  )), /YouTube RSS entry channel mismatch/);
+  const valid = await fetchYouTube(pinned, async () => new Response(
+    '<feed><yt:channelId>'+pinned.youtubeChannelId.slice(2)+'</yt:channelId>'+
+    '<entry><id>yt:video:AbCdEf12345</id><published>2026-10-10T00:00:00Z</published>'+
+    '<title>Video</title><yt:channelId>'+pinned.youtubeChannelId+'</yt:channelId></entry></feed>'
   ));
-  assert.equal(result.items[0]?.id,'youtube:AbCdEf12345');
+  assert.equal(valid.items[0]?.id,'youtube:AbCdEf12345');
 });
 
 test('RSS header identity never derives from an entry having attributes', async () => {
@@ -126,4 +131,51 @@ test('RSS header identity never derives from an entry having attributes', async 
     '<feed><entry xmlns="http://www.w3.org/2005/Atom">'+
     '<yt:channelId>'+monitor.youtubeChannelId+'</yt:channelId></entry></feed>'
   )),/channel identity missing for youtube-quizknock/);
+});
+
+test('QuizKnock feed-level channel ID permits exactly the omitted UC prefix', async () => {
+  const pinned = { ...MONITOR, id: 'youtube-quizknock', query: '@QuizKnock',
+    youtubeChannelId: 'UCQ_MqAw18jFTlBB-f8BP7dw' };
+  const video = '<entry><yt:videoId>AbCdEf12345</yt:videoId>' +
+    '<id>yt:video:AbCdEf12345</id><published>2026-10-10T00:00:00Z</published>' +
+    '<title>QuizKnock video</title><yt:channelId>' + pinned.youtubeChannelId + '</yt:channelId></entry>';
+  for (const header of [pinned.youtubeChannelId, pinned.youtubeChannelId.slice(2)]) {
+    const result = await fetchYouTube(pinned, async (input) => {
+      assert.equal(new URL(String(input)).searchParams.get('channel_id'), pinned.youtubeChannelId);
+      return new Response('<feed><yt:channelId>' + header + '</yt:channelId>' + video + '</feed>');
+    });
+    assert.deepEqual(result.items.map((item) => item.id), ['youtube:AbCdEf12345']);
+  }
+  for (const wrong of [
+    'UCpLu0KjNy616-E95gPx7LZg',
+    'pLu0KjNy616-E95gPx7LZg',
+    'Q_MqAw18jFTlBB-f8BP7d',
+    'X' + pinned.youtubeChannelId.slice(3),
+  ]) {
+    await assert.rejects(
+      () => fetchYouTube(pinned, async () =>
+        new Response('<feed><yt:channelId>' + wrong + '</yt:channelId>' + video + '</feed>')),
+      /YouTube RSS channel mismatch for youtube-quizknock/,
+      'unexpected accepted feed header ' + wrong,
+    );
+  }
+  await assert.rejects(
+    () => fetchYouTube(pinned, async () => new Response('<feed>' + video + '</feed>')),
+    /YouTube RSS channel identity missing for youtube-quizknock/,
+  );
+});
+
+test('an unrelated channel inside any video entry aborts the entire RSS poll', async () => {
+  const pinned = { ...MONITOR, id: 'youtube-quizknock', query: '@QuizKnock',
+    youtubeChannelId: 'UCQ_MqAw18jFTlBB-f8BP7dw' };
+  const safeEntry = '<entry><yt:videoId>AbCdEf12345</yt:videoId>' +
+    '<title>Safe</title><published>2026-10-10T00:00:00Z</published>' +
+    '<yt:channelId>' + pinned.youtubeChannelId + '</yt:channelId></entry>';
+  const wrongEntry = '<entry><yt:videoId>ZxYwVu12345</yt:videoId>' +
+    '<title>Wrong</title><published>2026-10-11T00:00:00Z</published>' +
+    '<yt:channelId>UCpLu0KjNy616-E95gPx7LZg</yt:channelId></entry>';
+  await assert.rejects(() => fetchYouTube(pinned, async () => new Response(
+    '<feed><yt:channelId>' + pinned.youtubeChannelId.slice(2) + '</yt:channelId>' +
+    safeEntry + wrongEntry + '</feed>'
+  )), /YouTube RSS entry channel mismatch/);
 });
