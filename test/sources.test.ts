@@ -4,7 +4,7 @@ import { parseArxiv, stableArxivId, fetchArxiv } from '../src/sources/arxiv.ts';
 import { parseZenn, zennFeedUrl, fetchZenn } from '../src/sources/zenn.ts';
 import { parseYouTube, normalizeChannelReference, extractChannelId, fetchYouTube } from '../src/sources/youtube.ts';
 import { entries, fetchTextBounded, tagText } from '../src/sources/xml.ts';
-import { MONITORS, arxivCategoryQuery, youtubeMonitorsFromTargets, withIntervals, validateMonitors } from '../src/config.ts';
+import { MONITORS, arxivCategoryQuery, queryMonitorsFromTargets, youtubeMonitorsFromTargets, withIntervals, validateMonitors } from '../src/config.ts';
 import { webhookFor } from '../src/discord.ts';
 import type { Env, Monitor } from '../src/types.ts';
 
@@ -108,9 +108,9 @@ test('all five monitors have individual minute intervals and separate webhook se
     new Set(['qiita', 'wikipedia', 'arxiv', 'zenn', 'youtube']));
   assert.ok(MONITORS.every((m) => Number.isInteger(m.intervalMinutes)));
   assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id),
-    ['qiita-rust', 'wikipedia-ja', 'arxiv-cs-ai', 'zenn-topic-typescript',
+    ['qiita-rust', 'wikipedia-ja', 'arxiv-cs-ai', 'arxiv-cs-ds', 'zenn-topic-typescript',
       'youtube-yurugengo', 'youtube-yurucom', 'youtube-3blue1brown-japan'],
-    'arXiv/Zenn targets and selected YouTube channels are enabled');
+    'Qiita/Zenn/arXiv targets and selected YouTube channels are enabled');
   for (const source of ['arxiv', 'zenn', 'youtube'] as const) {
     const key = 'DISCORD_WEBHOOK_' + source.toUpperCase();
     const env = { [key]: 'https://discord.com/api/webhooks/1234/token' } as Env;
@@ -183,6 +183,63 @@ test('arXiv category query config and dormant YouTube reference are explicit', (
     youtubeMonitorsFromTargets([{ id: 'weekly-mismatch', channel: '@valid', enabled: true, weekdayJst: 'sunday' }]),
     { 'weekly-mismatch': 10080 },
   )), /weeklyJstDay/);
+});
+
+
+test('Qiita and Zenn targets support independent IDs, queries, intervals and enabled flags', () => {
+  const definitions = [
+    ...queryMonitorsFromTargets('qiita', [
+      { id: 'qiita-rust', query: '  tag:Rust ', enabled: true },
+      { id: 'qiita-algorithm', query: 'tag:Algorithm', enabled: true },
+      { id: 'qiita-paused', query: 'tag:Python', enabled: false },
+    ]),
+    ...queryMonitorsFromTargets('zenn', [
+      { id: 'zenn-topic-typescript', query: 'topic:typescript', enabled: true },
+      { id: 'zenn-user', query: 'user:nasu', enabled: true },
+      { id: 'zenn-paused', query: '', enabled: false },
+    ]),
+  ];
+  const intervals = {
+    'qiita-rust': 60, 'qiita-algorithm': 180, 'qiita-paused': 1440,
+    'zenn-topic-typescript': 120, 'zenn-user': 300, 'zenn-paused': 60,
+  };
+  const monitors = withIntervals(definitions, intervals);
+  assert.doesNotThrow(() => validateMonitors(monitors));
+  assert.deepEqual(monitors.map(({ id, query, intervalMinutes, enabled }) =>
+    ({ id, query, intervalMinutes, enabled })), [
+    { id: 'qiita-rust', query: 'tag:Rust', intervalMinutes: 60, enabled: true },
+    { id: 'qiita-algorithm', query: 'tag:Algorithm', intervalMinutes: 180, enabled: true },
+    { id: 'qiita-paused', query: 'tag:Python', intervalMinutes: 1440, enabled: false },
+    { id: 'zenn-topic-typescript', query: 'topic:typescript', intervalMinutes: 120, enabled: true },
+    { id: 'zenn-user', query: 'user:nasu', intervalMinutes: 300, enabled: true },
+    { id: 'zenn-paused', query: '', intervalMinutes: 60, enabled: false },
+  ]);
+  assert.throws(() => withIntervals(definitions,
+    { ...intervals, 'qiita-extra': 30 }), /Unknown interval setting/);
+  const { 'qiita-algorithm': _omitted, ...incomplete } = intervals;
+  assert.throws(() => withIntervals(definitions, incomplete), /interval must be a positive integer/);
+  assert.throws(() => validateMonitors(withIntervals([
+    ...definitions, { ...definitions[0]! },
+  ], intervals)), /Duplicate monitor id/);
+  assert.throws(() => validateMonitors(withIntervals(queryMonitorsFromTargets('zenn', [
+    { id: 'zenn-invalid', query: 'topic:../bad', enabled: true },
+  ]), { 'zenn-invalid': 60 })), /invalid user\/topic feed/);
+  assert.throws(() => validateMonitors(withIntervals(queryMonitorsFromTargets('qiita', [
+    { id: 'qiita-empty', query: '  ', enabled: true },
+  ]), { 'qiita-empty': 60 })), /requires a configured query/);
+});
+
+test('arXiv keeps the original cs.AI monitor ID and adds independently tracked cs.DS', () => {
+  const ai = MONITORS.find((monitor) => monitor.id === 'arxiv-cs-ai');
+  const ds = MONITORS.find((monitor) => monitor.id === 'arxiv-cs-ds');
+  assert.deepEqual(
+    [ai && { source: ai.source, query: ai.query, interval: ai.intervalMinutes, enabled: ai.enabled },
+     ds && { source: ds.source, query: ds.query, interval: ds.intervalMinutes, enabled: ds.enabled }],
+    [{ source: 'arxiv', query: 'cat:cs.AI', interval: 120, enabled: true },
+     { source: 'arxiv', query: 'cat:cs.DS', interval: 120, enabled: true }],
+  );
+  assert.equal(MONITORS.find((m) => m.id === 'qiita-rust')?.query, 'tag:Rust');
+  assert.equal(MONITORS.find((m) => m.id === 'zenn-topic-typescript')?.query, 'topic:typescript');
 });
 
 test('multiple YouTube channels have independently configured intervals and flags', () => {

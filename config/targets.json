@@ -1,9 +1,30 @@
 {
+  "qiita": [
+    {
+      "id": "qiita-rust",
+      "query": "tag:Rust",
+      "enabled": true
+    }
+  ],
+  "zenn": [
+    {
+      "id": "zenn-topic-typescript",
+      "query": "topic:typescript",
+      "enabled": true
+    }
+  ],
   "arxiv": [
     {
       "id": "arxiv-cs-ai",
       "categories": [
         "cs.AI"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "arxiv-cs-ds",
+      "categories": [
+        "cs.DS"
       ],
       "enabled": true
     }

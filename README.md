@@ -16,6 +16,17 @@ For the owner-assisted Cloudflare setup, see **[docs/DEPLOYMENT.md](docs/DEPLOYM
 
 D1 Free optimization: Wikipedia causes approximately **12 source scans/day**, with **at most 36 new items staged per day**, plus one bounded stale-pending cleanup per successful scan. No new D1 schema or migration is required. These figures do **not** bound total D1 usage by the other sources, hourly retention, or any other Worker. Inspect Cloudflare D1 row-read/row-write metrics and build logs after deploy.
 
+## Add or change monitors without editing TypeScript
+
+Edit **both** [`config/targets.json`](config/targets.json) and [`config/intervals.json`](config/intervals.json). Monitor IDs are unique globally; intervals are positive integer minutes.
+
+- `qiita`: `{ "id": "qiita-python", "query": "tag:Python", "enabled": false }` — accepts Qiita search expressions, including tag filters. Disabled examples do not poll. Existing `qiita-rust` stays enabled.
+- `zenn`: `{ "id": "zenn-topic-rust", "query": "topic:rust", "enabled": false }` — use `topic:<slug>` or `user:<slug>`; trend feeds are unsupported because they lack chronological semantics. Existing `zenn-topic-typescript` stays enabled.
+- `arxiv`: one monitor per category group. `arxiv-cs-ai` keeps `cs.AI` and **`arxiv-cs-ds` now independently monitors `cs.DS`**, each every 120 minutes. Papers cross-listed in both categories can be notified twice because outboxes are per monitor.
+- `youtube`: independent ID, `channel`, `enabled`, optional `weekdayJst`; existing selected weekdays remain unchanged.
+
+To add a new target, insert its object in `targets.json` and matching `"id": minutes` in `intervals.json`. Changing `intervals.json` alone preserves the monitor's D1 baseline and identity. **Do not reuse an initialized ID for a different query, platform, or category group**: that fails closed; use a new ID, which begins with a silent first fetch. Remove or disable the old ID deliberately (old pending items are not delivered while disabled). Different targets retain independent due timestamps, scan cursors, and notification records but share the platform's Discord Webhook and source-wide cooldown. Notification sending remains 09:00–19:59 JST. Adding many targets increases D1 rows scanned on each 5-minute dispatcher and can cause delays (only one monitor is processed per tick); avoid enabling many high-volume searches at once. Both arXiv sources require the already defined `DISCORD_WEBHOOK_ARXIV` secret. No D1 migration is needed.
+
 ## Quick setup
 
 Requires Node.js 22+; the project is written in TypeScript.
@@ -33,6 +44,7 @@ npm run bundle:check # Wrangler compiles without deploying
   "qiita-rust": 60,
   "wikipedia-ja": 120,
   "arxiv-cs-ai": 120,
+  "arxiv-cs-ds": 120,
   "zenn-topic-typescript": 60,
   "youtube-yurugengo": 60,
   "youtube-yurucom": 60,
@@ -40,7 +52,7 @@ npm run bundle:check # Wrangler compiles without deploying
 }
 ```
 
-The file intentionally holds **interval values only**. arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; the fixed Qiita/Wikipedia/Zenn enabled flags remain in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` is enabled at **60 minutes** and `wikipedia-ja` samples at **120 minutes**; the three explicitly selected YouTube channels are also enabled for hourly checks on their selected JST weekdays; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv and Zenn are enabled in configuration and become active after their Discord Webhook Secrets are configured. All YouTube checks and real deliveries are **unverified** in Cloudflare until their first live baselines succeed.
+The file intentionally holds **interval values only**. Qiita searches, Zenn feeds, arXiv category groups and YouTube channels **and their enabled flags** are editable in **[config/targets.json](config/targets.json)**; Wikipedia remains fixed in [src/config.ts](src/config.ts). **Staging:** Qiita's synthetic one-off D1 → Discord → D1 test notification was delivered and acknowledged (`status=sent`, `attempts=0`). `qiita-rust` is enabled at **60 minutes** and `wikipedia-ja` samples at **120 minutes**; the three explicitly selected YouTube channels are also enabled for hourly checks on their selected JST weekdays; the monitoring Cron runs every five minutes and processes one monitor at a time. The Wikipedia first observation establishes a **silent baseline**. arXiv and Zenn are enabled in configuration and become active after their Discord Webhook Secrets are configured. All YouTube checks and real deliveries are **unverified** in Cloudflare until their first live baselines succeed.
 
 The monitoring Cron Trigger in `wrangler.jsonc` runs every **five minutes** (`*/5 * * * *`), irrespective of these settings. It checks D1 deadlines; it does **not** fetch every API every five minutes. A **second independent Cron** (`10 * * * *`, every hour at minute 10 UTC/JST) deletes at most 20 acknowledged messages per invocation (24 invocations/day; up to 480 sent receipts/day). The previous five-minute cadence was unnecessary overhead. Each successful check schedules the next due time in D1 at *completion/check time + interval minutes*. Missed/delayed Cron runs may cause monitoring to run late. **The current starter handles only one due monitor per tick**; several short-interval monitors can also cause delays. It does **not** guarantee an exact per-monitor execution time. Editing the interval does not immediately rewrite existing D1 due timestamps: the new interval applies following that monitor's next successful check.
 
