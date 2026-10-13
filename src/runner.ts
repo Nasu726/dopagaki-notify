@@ -131,12 +131,16 @@ export async function runTick(
             console.log('monitor ' + runnable.id + ': silent baseline initialized');
         }
       } catch (error) {
-        // A MediaWiki 403 may indicate upstream bot-policy rejection. Avoid
-        // retrying a denied client every five minutes while the operator
-        // investigates; a source outage must still preserve queued deliveries.
+        // MediaWiki 403 and YouTube RSS 404 can persist for hours upstream.
+        // Retrying every five minutes creates noise without improving coverage:
+        // these monitors retain their queue and retry after at least one hour.
+        // Other HTTP 404s (e.g. channel page or Discord) are not reclassified.
         const serverDelay = suggestedRetryDelay(error);
-        const delay = error instanceof HttpStatusError && error.source === 'MediaWiki' &&
-          error.status === 403 ? Math.max(60 * 60_000, serverDelay ?? 0) : serverDelay;
+        const hourlyUpstreamBackoff = error instanceof HttpStatusError && (
+          (error.source === 'MediaWiki' && error.status === 403) ||
+          (error.source === 'YouTube RSS' && error.status === 404)
+        );
+        const delay = hourlyUpstreamBackoff ? Math.max(60 * 60_000, serverDelay ?? 0) : serverDelay;
         fetchErrorPhase = phase;
         phase = 'schedule_fetch_retry';
         retryAt = await postponeFetch(env.DB, runnable.id, token, now, delay);

@@ -980,7 +980,41 @@ test('failed YouTube RSS logs the monitor ID, source, fetch phase, HTTP status a
   assert.equal(row.phase, 'fetch_and_parse');
   assert.equal(row.httpStatus, 404);
   assert.equal(row.upstream, 'YouTube RSS');
-  assert.equal(row.retryAt, new Date(now + 5 * 60_000).toISOString());
+  assert.equal(row.retryAt, new Date(now + 60 * 60_000).toISOString());
   assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
-    .get(m.id)?.next_due_at, now + 5 * 60_000);
+    .get(m.id)?.next_due_at, now + 60 * 60_000);
+  // The five-minute dispatcher must not refetch the same failing YouTube RSS.
+  assert.equal(await runTick(s.env, [m], now + 5 * 60_000, {
+    ...s.deps,
+    fetchItems: async () => { throw new Error('Unexpected early retry'); },
+  }), 'idle');
+});
+
+test('YouTube RSS 404 respects Retry-After longer than one hour; other 404s are unchanged', async () => {
+  const now = Date.parse('2026-10-13T00:00:00Z');
+  for (const scenario of [
+    { source: 'YouTube RSS', status: 404, hint: 2 * 60 * 60_000, expected: 2 * 60 * 60_000 },
+    { source: 'YouTube channel', status: 404, hint: null, expected: 5 * 60_000 },
+    { source: 'YouTube RSS', status: 500, hint: null, expected: 5 * 60_000 },
+  ]) {
+    const s = setup();
+    s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+    const m: Monitor = { id: 'youtube-retry-' + scenario.status + '-' +
+      (scenario.source === 'YouTube RSS' ? 'rss' : 'channel'),
+      source: 'youtube', query: '@example', enabled: true, intervalMinutes: 60 };
+    const original = console.error;
+    console.error = () => {};
+    try {
+      await assert.rejects(() => runTick(s.env, [m], now, {
+        ...s.deps,
+        fetchItems: async () => {
+          throw new HttpStatusError(scenario.source, scenario.status, scenario.hint);
+        },
+      }));
+    } finally {
+      console.error = original;
+    }
+    assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
+      .get(m.id)?.next_due_at, now + scenario.expected);
+  }
 });
