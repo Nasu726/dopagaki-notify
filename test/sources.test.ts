@@ -104,16 +104,15 @@ test('XML reader decodes numeric entities, bounds response sizes and refuses bad
     async () => new Response('x'.repeat(1200)), 1000), /too large/);
 });
 
-test('all five monitors have individual minute intervals and separate webhook secret keys', () => {
+test('public template includes all six sources but enables nothing until the fork owner opts in', () => {
   assert.deepEqual(new Set(MONITORS.map((m) => m.source)),
-    new Set(['qiita', 'wikipedia', 'arxiv', 'zenn', 'youtube']));
+    new Set(['qiita', 'wikipedia', 'arxiv', 'zenn', 'youtube', 'openalex']));
   assert.ok(MONITORS.every((m) => Number.isInteger(m.intervalMinutes)));
-  assert.deepEqual(MONITORS.filter((m) => m.enabled).map((m) => m.id),
-    ['qiita-rust', 'qiita-algorithms', 'qiita-design', 'wikipedia-ja-discovery',
-      'arxiv-cs-ai', 'arxiv-cs-ds', 'zenn-topic-typescript', 'zenn-topic-algorithm', 'zenn-topic-architecture',
-      'youtube-yurugengo', 'youtube-yurucom', 'youtube-3blue1brown-japan',
-      'youtube-quizknock'],
-    'Qiita/Zenn/arXiv targets and selected YouTube channels are enabled');
+  assert.ok(MONITORS.every((m) => !m.enabled), 'fresh public forks must not poll any subscriptions');
+  assert.deepEqual(MONITORS.map(m => m.id),[
+    'qiita-example','wikipedia-ja-discovery','arxiv-example',
+    'openalex-example','zenn-example','youtube-example',
+  ]);
   for (const source of ['arxiv', 'zenn', 'youtube'] as const) {
     const key = 'DISCORD_WEBHOOK_' + source.toUpperCase();
     const env = { [key]: 'https://discord.com/api/webhooks/1234/token' } as Env;
@@ -159,27 +158,22 @@ test('mixed XML entities and CDATA are decoded only outside CDATA', () => {
   assert.equal(entries('<feed><!-- <entry><id>fake</id></entry> --></feed>', 'entry').length, 0);
 });
 
-test('arXiv category query config and dormant YouTube reference are explicit', () => {
+test('arXiv category validation and weekday YouTube scheduling do not rely on public subscriptions', () => {
   assert.equal(arxivCategoryQuery(['cs.AI']), 'cat:cs.AI');
   assert.equal(arxivCategoryQuery(['cs.AI', 'math.CO']), 'cat:cs.AI OR cat:math.CO');
   for (const invalid of [[], ['cat:cs.AI'], ['cs.AI OR cat:evil'], ['../oops']]) {
     assert.throws(() => arxivCategoryQuery(invalid));
   }
-  const expected = [
-    { id: 'youtube-yurugengo', query: '@yurugengo', weekday: 'tuesday' },
-    { id: 'youtube-yurucom', query: '@yurucom', weekday: 'sunday' },
-    { id: 'youtube-3blue1brown-japan', query: '@3Blue1BrownJapan', weekday: 'sunday' },
-  ];
-  assert.equal(MONITORS.find((m) => m.id === 'youtube-3blue1brown-japan')?.youtubeChannelId,
-    'UCBevyiJ2ierZY-0yZhfLrmQ', '3Blue1BrownJapan must bypass mutable handle cache');
-  for (const target of expected) {
-    const monitor = MONITORS.find((m) => m.id === target.id);
-    assert.equal(monitor?.query, target.query);
-    assert.equal(monitor?.weeklyJstDay, target.weekday);
-    assert.equal(monitor?.intervalMinutes, 60);
-    assert.equal(monitor?.enabled, true);
-  }
-  assert.ok(!MONITORS.some((m) => m.id === 'youtube-example'));
+  const example=MONITORS.find(m=>m.id==='youtube-example');
+  assert.equal(example?.enabled,false);
+  assert.equal(example?.query,'@example');
+  const independent=withIntervals(youtubeMonitorsFromTargets([
+    {id:'weekday-one',channel:'@sampleone',enabled:true,weekdayJst:'tuesday'},
+    {id:'weekday-two',channel:'@sampletwo',enabled:true,weekdayJst:'sunday'},
+  ]),{'weekday-one':60,'weekday-two':180});
+  assert.doesNotThrow(()=>validateMonitors(independent));
+  assert.equal(independent[0]?.weeklyJstDay,'tuesday');
+  assert.equal(independent[1]?.intervalMinutes,180);
   assert.throws(() => validateMonitors(withIntervals(
     youtubeMonitorsFromTargets([{ id: 'weekly-invalid', channel: '@valid', enabled: true, weekdayJst: 'not-a-day' }]),
     { 'weekly-invalid': 60 },
@@ -189,7 +183,6 @@ test('arXiv category query config and dormant YouTube reference are explicit', (
     { 'weekly-any-interval': 10080 },
   )));
 });
-
 
 test('Qiita and Zenn targets support independent IDs, queries, intervals and enabled flags', () => {
   const definitions = [
@@ -234,17 +227,18 @@ test('Qiita and Zenn targets support independent IDs, queries, intervals and ena
   ]), { 'qiita-empty': 60 })), /requires a configured query/);
 });
 
-test('arXiv keeps the original cs.AI monitor ID and adds independently tracked cs.DS', () => {
-  const ai = MONITORS.find((monitor) => monitor.id === 'arxiv-cs-ai');
-  const ds = MONITORS.find((monitor) => monitor.id === 'arxiv-cs-ds');
-  assert.deepEqual(
-    [ai && { source: ai.source, query: ai.query, interval: ai.intervalMinutes, enabled: ai.enabled },
-     ds && { source: ds.source, query: ds.query, interval: ds.intervalMinutes, enabled: ds.enabled }],
-    [{ source: 'arxiv', query: 'cat:cs.AI', interval: 120, enabled: true },
-     { source: 'arxiv', query: 'cat:cs.DS', interval: 120, enabled: true }],
-  );
-  assert.equal(MONITORS.find((m) => m.id === 'qiita-rust')?.query, 'tag:Rust');
-  assert.equal(MONITORS.find((m) => m.id === 'zenn-topic-typescript')?.query, 'topic:typescript');
+test('arXiv public example is dormant and categories can form independent monitors', () => {
+  const example=MONITORS.find(m=>m.id==='arxiv-example');
+  assert.equal(example?.source,'arxiv');
+  assert.equal(example?.query,'cat:cs.DS');
+  assert.equal(example?.intervalMinutes,120);
+  assert.equal(example?.enabled,false);
+  const independent=withIntervals([
+    {id:'arxiv-ai-test',source:'arxiv',query:arxivCategoryQuery(['cs.AI']),enabled:true},
+    {id:'arxiv-ds-test',source:'arxiv',query:arxivCategoryQuery(['cs.DS']),enabled:true},
+  ],{'arxiv-ai-test':120,'arxiv-ds-test':180});
+  assert.doesNotThrow(()=>validateMonitors(independent));
+  assert.equal(independent[1]?.intervalMinutes,180);
 });
 
 test('multiple YouTube channels have independently configured intervals and flags', () => {
@@ -323,16 +317,15 @@ test('Discord YouTube embeds include a video thumbnail while other sources remai
   assert.equal(qiita.embeds[0]?.thumbnail,undefined);
 });
 
-test('QuizKnock runs every day hourly with a pinned immutable channel ID', () => {
-  const monitor=MONITORS.find((m)=>m.id==='youtube-quizknock');
+test('public YouTube example is unconfigured for any actual pinned channel', () => {
+  const monitor=MONITORS.find(m=>m.id==='youtube-example');
   assert.ok(monitor);
   assert.equal(monitor.source,'youtube');
-  assert.equal(monitor.query,'@QuizKnock');
-  assert.equal(monitor.youtubeChannelId,'UCQ_MqAw18jFTlBB-f8BP7dw');
+  assert.equal(monitor.query,'@example');
+  assert.equal(monitor.youtubeChannelId,undefined);
   assert.equal(monitor.intervalMinutes,60);
-  assert.equal(monitor.enabled,true);
-  assert.equal(monitor.weeklyJstDay,undefined,
-    'QuizKnock must not be restricted to a particular weekday');
+  assert.equal(monitor.enabled,false);
+  assert.equal(monitor.weeklyJstDay,undefined);
 });
 
 test('Zenn RSS enclosure URL is used as a validated article thumbnail', () => {

@@ -768,8 +768,8 @@ test('five-minute global tick is independent of per-monitor hourly source interv
   const minute = 60_000;
   const now = Date.now();
   for (const monitor of MONITORS.filter((m) => m.source === 'youtube')) {
-    assert.equal(monitor.intervalMinutes, 60);
-    assert.equal(monitor.enabled, true);
+    assert.ok(monitor.intervalMinutes > 0);
+    assert.equal(monitor.enabled, false, 'public template never polls by default');
   }
   // Prepare every enabled monitor as already initialized and next due in an hour.
   for (const monitor of MONITORS.filter((m) => m.enabled)) {
@@ -809,7 +809,8 @@ test('selected JST weekday is checked hourly across midnight and year boundaries
 test('off-day YouTube initialization is deferred until specified day, with no upstream fetch', async () => {
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
-  const monitor = MONITORS.find((m) => m.id === 'youtube-yurucom')!;
+  const monitor: Monitor = {id:'weekday-sunday-example',source:'youtube',
+    query:'@sample',weeklyJstDay:'sunday',intervalMinutes:60,enabled:true};
   const tuesday = Date.parse('2026-10-13T03:00:00Z'); // Tue 12:00 JST, not Sunday's slot
   let fetches = 0;
   const deps = {
@@ -833,10 +834,15 @@ test('off-day YouTube initialization is deferred until specified day, with no up
   assert.equal(state?.next_due_at, sunday + 60 * 60_000);
 });
 
-test('all three YouTube monitors use independent Tuesday/Sunday hourly schedules', async () => {
+test('independent weekly YouTube monitors retain Tuesday/Sunday hourly schedules', async () => {
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
-  const monitors = MONITORS.filter((m) => m.source === 'youtube' && m.weeklyJstDay !== undefined);
+  const monitors: Monitor[]=[
+    {id:'weekday-tuesday',source:'youtube',query:'@sampletuesday',enabled:true,
+      intervalMinutes:60,weeklyJstDay:'tuesday'},
+    {id:'weekday-sunday',source:'youtube',query:'@samplesunday',enabled:true,
+      intervalMinutes:60,weeklyJstDay:'sunday'},
+  ];
   for (const monitor of monitors) {
     const base = monitor.weeklyJstDay === 'tuesday'
       ? Date.parse('2026-10-13T03:00:00Z')
@@ -864,7 +870,8 @@ test('all three YouTube monitors use independent Tuesday/Sunday hourly schedules
 test('Sunday YouTube API failure retries on Sunday then resumes hourly; off-day retries defer', async () => {
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
-  const monitor = MONITORS.find((m) => m.id === 'youtube-yurucom')!;
+  const monitor: Monitor = {id:'weekday-sunday-example',source:'youtube',
+    query:'@sample',weeklyJstDay:'sunday',intervalMinutes:60,enabled:true};
   const sunday = Date.parse('2026-10-17T15:00:00Z'); // Sun 00:00 JST
   let denied = true;
   const deps = {
@@ -891,7 +898,8 @@ test('pending YouTube notifications can be sent next morning even outside fetch 
   const s = setup();
   s.env.NOTIFICATION_WINDOW_JST = '09:00-20:00';
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
-  const monitor = MONITORS.find((m) => m.id === 'youtube-yurugengo')!;
+  const monitor: Monitor = {id:'weekday-tuesday-example',source:'youtube',
+    query:'@sample',weeklyJstDay:'tuesday',intervalMinutes:60,enabled:true};
   const tuesday = Date.parse('2026-10-13T10:00:00Z'); // Tue 19:00 JST
   await runTick(s.env, [monitor], tuesday, s.deps); // silent baseline
   s.setItems([{ id: 'youtube:AbCdEf12345', title: 'New upload',
