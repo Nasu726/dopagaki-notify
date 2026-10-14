@@ -183,13 +183,13 @@ Use your own D1 UUID. The committed [`wrangler.example.jsonc`](wrangler.example.
 
 ### Cloudflare Workers Builds (Git-based deployments)
 
-The production `wrangler.jsonc` is **gitignored** so every account supplies its own D1 binding. Before merging a change that removes the previously tracked Wrangler config, configure your Worker's **Settings → Builds** in the Cloudflare dashboard:
+The production `wrangler.jsonc` is **gitignored** so every account supplies its own D1 binding. For automatic deployment from a fork's `main`, configure your Worker's **Settings → Builds** before the first deployment:
 
 - **Build environment variable:** `D1_DATABASE_ID` = your own D1 UUID
 - **Build command:** `npm run setup:cloudflare -- "$D1_DATABASE_ID"`
 - **Deploy command:** `npx wrangler deploy` (default)
 
-The Build command works with **both the old and new** setup scripts, so you can configure and test Workers Builds *before merging*. The Build environment variable is distinct from deployed Worker runtime Secrets. A D1 UUID is a resource ID, not an API credential.
+The Build command works with both the older tracked-config setup and the new generated-config setup; existing deployments can test it before switching. The Build environment variable is distinct from deployed Worker runtime Secrets. A D1 UUID is a resource ID, not an API credential.
 
 **Existing clones:** Back up the previously tracked `wrangler.jsonc` *before pulling this migration*. Git may remove that file. After updating, regenerate a gitignored local copy using `npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID` and restore any custom Worker name, D1 name or flags. Prior Git history still contains the previously committed UUID; changing a nonsecret D1 UUID does not by itself warrant rebuilding the database.
 
@@ -238,7 +238,7 @@ npx wrangler d1 execute dopagaki-notify --remote --command "SELECT monitor_id,it
 
 `initialized_at` / `last_complete_at` track completed upstream scans. A `sent` receipt means Discord accepted the webhook, **not** that it displayed remote images. No new content generally means no Discord message. YouTube may send its latest unseen upload on its first poll if it is within the configured retention horizon.
 
-If Workers Builds is enabled, verify the deployed commit matches **your configured production branch**. In this upstream repository, `main` is the public template and `production` is the maintainer's deployment branch. Editing `main` alone does not deploy that production Worker. Branches in a public repository are public, including `production`.
+If Workers Builds is enabled, verify the deployed commit matches the branch you chose (**normally `main`**). A fork may deploy directly from `main` without creating a separate production branch. Separate branches are optional, not a prerequisite.
 
 ## 3. GitHub Actions + SQLite (optional)
 

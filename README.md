@@ -183,13 +183,13 @@ npx wrangler d1 migrations apply dopagaki-notify --remote
 
 ### Cloudflare Workers Buildsで自動デプロイする場合
 
-公開リポジトリに実D1 UUIDをコミットしないため、`wrangler.jsonc` はGitの管理対象外です。CloudflareのGit連携による自動デプロイを利用する場合は、**マージ前に**CloudflareダッシュボードのWorker → **Settings → Builds** で次を設定してください。
+公開リポジトリに実D1 UUIDをコミットしないため、`wrangler.jsonc` はGitの管理対象外です。CloudflareのGit連携による自動デプロイを利用する場合は、最初のデプロイ前にCloudflareダッシュボードのWorker → **Settings → Builds** で次を設定してください。フォークでは`main`をそのままデプロイ対象にできます。
 
 - **Build環境変数** `D1_DATABASE_ID` : 自分のCloudflare D1 UUID
 - **Build command** : `npm run setup:cloudflare -- "$D1_DATABASE_ID"`
 - **Deploy command** : `npx wrangler deploy` (通常の既定値)
 
-このBuild commandは**旧版のセットアップスクリプトでも機能する**ため、先にCloudflare側へ設定・試験してからリポジトリ側を切り替えられます。`D1_DATABASE_ID` はWorkerのランタイムSecretとは別のBuild環境変数です。UUID自体はアクセス用資格情報ではありません。
+既存の旧設定から移行する場合も、このBuild commandは**旧版のセットアップスクリプトと互換**なので、設定・試験してから切り替えられます。`D1_DATABASE_ID` はWorkerのランタイムSecretとは別のBuild環境変数です。UUID自体はアクセス用資格情報ではありません。
 
 **既存のcloneを更新する場合:** 以前Gitで追跡していた `wrangler.jsonc` が削除されるので、更新前にローカルの設定を安全な場所へバックアップしてください。`git pull`後に `npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID` を再実行し、カスタマイズ箇所も必要に応じて戻します。Gitの過去コミットからUUIDが消えるわけではありませんが、通常はUUIDのためにD1を再作成する必要はありません。
 
@@ -238,7 +238,7 @@ npx wrangler d1 execute dopagaki-notify --remote --command "SELECT monitor_id,it
 
 `initialized_at` / `last_complete_at`は最後の正常取得、`status=sent`はDiscord Webhookへの送信成功を示します。**画像が実際に描画された証拠にはなりません。** 投稿が無ければ通知が無いのは正常です。YouTubeの初回通知は保持期間内の最新動画が対象です (既定10日、個別設定可)。
 
-Cloudflare Workers Buildsを接続している場合は、**設定した本番ブランチ**とデプロイ済みコミットが一致することを確認してください。このリポジトリでは`main`が公開テンプレート、`production`が作者の本番ブランチです。**`main`への変更だけでは本番Workerは更新されません。**フォーク利用者は自身のデプロイ対象ブランチを設定してください。公開リポジトリ上のブランチはどちらも公開されます。
+Cloudflare Workers Buildsを接続している場合は、**デプロイ対象ブランチ(通常は`main`)の最新コミット**とデプロイ済みコミットが一致することを確認してください。フォークしたリポジトリは、そのまま`main`を本番デプロイに使えます。必要な場合だけ別ブランチへ切り替えてください。
 
 ## 3. GitHub Actions + SQLiteを使う (任意)
 
