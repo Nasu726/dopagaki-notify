@@ -56,8 +56,7 @@ The final login opens Cloudflare OAuth in the browser.
 npx wrangler d1 create dopagaki-notify
 ```
 
-Copy the returned D1 `database_id` into the existing `DB` binding in
-`wrangler.jsonc`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`.
+Run `npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID` to generate a **gitignored** `wrangler.jsonc` from `wrangler.example.jsonc`. The public example deliberately contains only an all-zero dummy UUID. For connected Workers Builds, set build environment variable `D1_DATABASE_ID` and Build command `npm run setup:cloudflare -- "$D1_DATABASE_ID"` before migrating from the old tracked config. See `docs/CLOUDFLARE_BINDING.md`.
 Do not add a second database binding for the same database. This ID is not a
 credential; the Cloudflare account login controls access.
 

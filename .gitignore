@@ -7,3 +7,6 @@ node_modules/
 *.log
 .DS_Store
 .private/
+
+# Generated, account-specific Cloudflare Worker D1 binding
+/wrangler.jsonc

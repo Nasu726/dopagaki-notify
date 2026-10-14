@@ -176,7 +176,21 @@ npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID
 npx wrangler d1 migrations apply dopagaki-notify --remote
 ```
 
-Use the **new UUID from your own account**, not the original developer's database ID in `wrangler.jsonc`. Change the Worker/D1 name in subsequent commands if you rename them, but keep the D1 binding named `DB`.
+Use your own D1 UUID. The committed [`wrangler.example.jsonc`](wrangler.example.jsonc) contains **only a dummy UUID**. `setup:cloudflare` generates a **gitignored, account-local `wrangler.jsonc`**. Keep `DB` as the binding name, and update local database/Worker names consistently if you customize them.
+
+### Cloudflare Workers Builds (Git-based deployments)
+
+The production `wrangler.jsonc` is **gitignored** so every account supplies its own D1 binding. Before merging a change that removes the previously tracked Wrangler config, configure your Worker's **Settings → Builds** in the Cloudflare dashboard:
+
+- **Build environment variable:** `D1_DATABASE_ID` = your own D1 UUID
+- **Build command:** `npm run setup:cloudflare -- "$D1_DATABASE_ID"`
+- **Deploy command:** `npx wrangler deploy` (default)
+
+The Build command works with **both the old and new** setup scripts, so you can configure and test Workers Builds *before merging*. The Build environment variable is distinct from deployed Worker runtime Secrets. A D1 UUID is a resource ID, not an API credential.
+
+**Existing clones:** Back up the previously tracked `wrangler.jsonc` *before pulling this migration*. Git may remove that file. After updating, regenerate a gitignored local copy using `npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID` and restore any custom Worker name, D1 name or flags. Prior Git history still contains the previously committed UUID; changing a nonsecret D1 UUID does not by itself warrant rebuilding the database.
+
+[Full migration instructions](docs/CLOUDFLARE_BINDING.md)
 
 ### 2.2 Configure Discord Secrets
 
