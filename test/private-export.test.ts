@@ -12,6 +12,8 @@ test('private export is a valid complete override, hoisting top-level controls',
   assert.equal(parsed.targets.notificationWindowJst,undefined);
   assert.deepEqual(parsed.retentionDays,{});
   assert.equal(parsed.notificationWindowJst,null);
+  assert.equal(parsed.wikipediaEnabled,false);
+  assert.equal(parsed.targets.wikipediaEnabled,undefined);
   const loaded=loadRuntimeMonitors(content);
   assert.ok(loaded.length>0);
 });

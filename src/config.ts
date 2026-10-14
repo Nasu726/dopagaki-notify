@@ -59,7 +59,8 @@ export function youtubeMonitorsFromTargets(
 
 const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
   ...queryMonitorsFromTargets('qiita', targets.qiita),
-  { id: 'wikipedia-ja-discovery', source: 'wikipedia', query: 'ja:discover', enabled: true },
+  { id: 'wikipedia-ja-discovery', source: 'wikipedia', query: 'ja:discover',
+    enabled: targets.wikipediaEnabled !== false },
   ...targets.arxiv.map((target) => ({
     id: target.id, source: 'arxiv' as const,
     query: arxivCategoryQuery(target.categories), enabled: target.enabled,

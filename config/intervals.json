@@ -1,15 +1,8 @@
 {
-  "qiita-rust": 360,
-  "arxiv-cs-ai": 120,
-  "zenn-topic-typescript": 360,
-  "youtube-yurugengo": 60,
-  "youtube-yurucom": 60,
-  "youtube-3blue1brown-japan": 60,
-  "arxiv-cs-ds": 120,
-  "wikipedia-ja-discovery": 120,
-  "qiita-algorithms": 240,
-  "qiita-design": 360,
-  "zenn-topic-algorithm": 240,
-  "zenn-topic-architecture": 360,
-  "youtube-quizknock": 60
+  "qiita-example": 60,
+  "zenn-example": 60,
+  "arxiv-example": 120,
+  "youtube-example": 60,
+  "openalex-example": 120,
+  "wikipedia-ja-discovery": 120
 }

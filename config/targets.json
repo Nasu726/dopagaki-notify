@@ -1,85 +1,42 @@
 {
   "qiita": [
     {
-      "id": "qiita-rust",
-      "query": "tag:Rust",
-      "enabled": true
-    },
-    {
-      "id": "qiita-algorithms",
-      "query": "tag:アルゴリズム",
-      "enabled": true
-    },
-    {
-      "id": "qiita-design",
-      "query": "tag:設計",
-      "enabled": true
+      "id": "qiita-example",
+      "query": "tag:Go",
+      "enabled": false
     }
   ],
   "zenn": [
     {
-      "id": "zenn-topic-typescript",
-      "query": "topic:typescript",
-      "enabled": true
-    },
-    {
-      "id": "zenn-topic-algorithm",
-      "query": "topic:algorithm",
-      "enabled": true
-    },
-    {
-      "id": "zenn-topic-architecture",
-      "query": "topic:architecture",
-      "enabled": true
+      "id": "zenn-example",
+      "query": "topic:javascript",
+      "enabled": false
     }
   ],
   "arxiv": [
     {
-      "id": "arxiv-cs-ai",
-      "categories": [
-        "cs.AI"
-      ],
-      "enabled": true
-    },
-    {
-      "id": "arxiv-cs-ds",
+      "id": "arxiv-example",
       "categories": [
         "cs.DS"
       ],
-      "enabled": true
+      "enabled": false
     }
   ],
   "youtube": [
     {
-      "id": "youtube-yurugengo",
-      "channel": "@yurugengo",
-      "enabled": true,
-      "weekdayJst": "tuesday",
-      "channelId": "UCmpkIzF3xFzhPez7gXOyhVg"
-    },
-    {
-      "id": "youtube-yurucom",
-      "channel": "@yurucom",
-      "enabled": true,
-      "weekdayJst": "sunday",
-      "channelId": "UCpLu0KjNy616-E95gPx7LZg"
-    },
-    {
-      "id": "youtube-3blue1brown-japan",
-      "channel": "@3Blue1BrownJapan",
-      "enabled": true,
-      "weekdayJst": "sunday",
-      "channelId": "UCBevyiJ2ierZY-0yZhfLrmQ"
-    },
-    {
-      "id": "youtube-quizknock",
-      "channel": "@QuizKnock",
-      "channelId": "UCQ_MqAw18jFTlBB-f8BP7dw",
-      "videoType": "videos",
-      "enabled": true
+      "id": "youtube-example",
+      "channel": "@example",
+      "enabled": false
     }
   ],
+  "openalex": [
+    {
+      "id": "openalex-example",
+      "query": "search:graph algorithms",
+      "enabled": false
+    }
+  ],
+  "wikipediaEnabled": false,
   "notificationWindowJst": null,
-  "openalex": [],
   "retentionDays": {}
 }
