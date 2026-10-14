@@ -82,7 +82,7 @@ Sample target fragment (a complete `targets.json` must include all source catego
 }
 ```
 
-Provide intervals for the IDs above and for `wikipedia-ja-discovery` if using the standard Wikipedia monitor. Weekday-restricted YouTube monitors (`weekdayJst`) require an interval of 60 minutes.
+Provide intervals for the IDs above and for `wikipedia-ja-discovery` if using the standard Wikipedia monitor. `weekdayJst` restricts which JST weekdays permit fetching; set any positive integer polling interval in minutes, independently.
 
 **Monitor identity:** Do not reuse an existing `id` for a different provider/query/channel. D1 pins it to its original source/query identity to protect historical receipts. For a changed subject, create a new `id`. Changing intervals is safe.
 

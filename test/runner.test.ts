@@ -881,7 +881,7 @@ test('Sunday YouTube API failure retries on Sunday then resumes hourly; off-day 
   const retry = sunday + 5 * 60_000;
   assert.equal(await runTick(s.env, [monitor], retry, deps), 'processed');
   due = s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?').get(monitor.id)?.next_due_at;
-  assert.equal(due, sunday + 60 * 60_000);
+  assert.equal(due, retry + 60 * 60_000, 'successful retry starts the configured interval from actual fetch');
   assert.equal(await runTick(s.env, [monitor], Date.parse('2026-10-18T15:00:00Z'), deps), 'processed');
   assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?').get(monitor.id)?.next_due_at,
     Date.parse('2026-10-24T15:00:00Z')); // next Sunday 00:00 JST
@@ -1345,4 +1345,28 @@ test('Qiita API author icon is forwarded to Discord in the same polling tick', a
   assert.equal(notified[0]?.thumbnailUrl,'https://image.example.org/qiita-user.png');
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE monitor_id=?")
     .get(monitor.id)?.status,'sent');
+});
+
+
+test('weekday-constrained YouTube accepts independent positive-minute intervals', async()=>{
+  const { nextAllowedJstWeekdayDue } = await import('../src/schedule.ts');
+  const now=Date.parse('2026-10-13T03:00:00Z'); // Tue 12:00 JST
+  const monitor:Monitor={id:'youtube-custom-weekly',source:'youtube',query:'@example',
+    enabled:true,intervalMinutes:135,weeklyJstDay:'tuesday'};
+  assert.doesNotThrow(()=>validateMonitors([monitor]));
+  assert.equal(nextAllowedJstWeekdayDue(now,'tuesday',135),now+135*60_000);
+  assert.equal(nextAllowedJstWeekdayDue(now,'tuesday',10080),now+10080*60_000);
+  assert.equal(nextAllowedJstWeekdayDue(Date.parse('2026-10-13T13:00:00Z'),'tuesday',180),
+    Date.parse('2026-10-19T15:00:00Z'),'interval crossing midnight moves to next selected weekday');
+  assert.equal(nextAllowedJstWeekdayDue(Date.parse('2026-10-14T03:00:00Z'),'tuesday',0),
+    Date.parse('2026-10-19T15:00:00Z'));
+  assert.throws(()=>nextAllowedJstWeekdayDue(now,'tuesday',-2));
+  const s=setup();s.env.DISCORD_WEBHOOK_YOUTUBE=webhook;
+  assert.equal(await runTick(s.env,[monitor],now,s.deps),'processed');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
+    .get(monitor.id)?.next_due_at,now+135*60_000);
+  assert.equal(await runTick(s.env,[monitor],now+120*60_000,s.deps),'idle');
+  assert.equal(await runTick(s.env,[monitor],now+135*60_000,s.deps),'processed');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
+    .get(monitor.id)?.next_due_at,now+270*60_000);
 });

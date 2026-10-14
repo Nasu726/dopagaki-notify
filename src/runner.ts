@@ -1,4 +1,4 @@
-import { isJstNotificationTime, isJstWeekday, nextHourlyJstWeekdayDue } from './schedule.ts';
+import { isJstNotificationTime, isJstWeekday, nextAllowedJstWeekdayDue } from './schedule.ts';
 import { HttpStatusError, isRateLimited, isWebhookInvalid, suggestedRetryDelay } from './http.ts';
 import { validateMonitors, resolveNotificationWindowJst } from './config.ts';
 import { logFailure } from './observability.ts';
@@ -115,7 +115,7 @@ export async function runTick(
       // must not fetch outside its specified JST weekday.
       phase = 'defer_weekday_fetch';
       await deferFetchUntil(env.DB, runnable.id, token,
-        nextHourlyJstWeekdayDue(now, runnable.weeklyJstDay));
+        nextAllowedJstWeekdayDue(now, runnable.weeklyJstDay, 0));
     }
     if (due && onSelectedDay) {
       webhookFor(runnable, env);
@@ -191,7 +191,7 @@ export async function runTick(
             state.scan_started_at ?? now, VERIFY_HEAD_CURSOR);
         } else {
           const nextDueAt = runnable.weeklyJstDay === undefined ? undefined :
-            nextHourlyJstWeekdayDue(now, runnable.weeklyJstDay);
+            nextAllowedJstWeekdayDue(now, runnable.weeklyJstDay, runnable.intervalMinutes);
           await completeFetch(env.DB, runnable.id, token, now, runnable.intervalMinutes,
             paginated ? state.scan_started_at ?? now : now,
             paginated ? !result.potentiallyTruncated : true, nextDueAt);

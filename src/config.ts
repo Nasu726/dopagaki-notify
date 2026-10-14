@@ -211,10 +211,9 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     if (typeof monitor.enabled !== 'boolean')
       throw new Error('Monitor ' + monitor.id + ': enabled must be a boolean');
     if (monitor.weeklyJstDay !== undefined &&
-        (monitor.source !== 'youtube' || monitor.intervalMinutes !== 60 ||
-         !isWeeklyJstDay(monitor.weeklyJstDay))) {
+        (monitor.source !== 'youtube' || !isWeeklyJstDay(monitor.weeklyJstDay))) {
       throw new Error('Monitor ' + monitor.id +
-        ': weeklyJstDay requires a YouTube monitor with interval 60 and a valid weekday');
+        ': weeklyJstDay requires a YouTube monitor and a valid weekday');
     }
     if (monitor.enabled && !monitor.query.trim())
       throw new Error('Enabled monitor ' + monitor.id + ' requires a configured query/target');

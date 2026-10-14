@@ -70,3 +70,22 @@ export function nextHourlyJstWeekdayDue(now: number, weekday: string): number {
     local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + skip, 0,
   ) - JST_OFFSET_MS;
 }
+
+/** Earliest permitted JST weekday at or after now + minimum interval.
+ * A queued late Cron starts its next interval from actual execution, not
+ * from a fixed hourly slot; if the interval crosses the weekday boundary,
+ * defer until that weekday next recurs. No restriction to 60-minute polling.
+ */
+export function nextAllowedJstWeekdayDue(now: number, weekday: string, intervalMinutes: number): number {
+  const weekdayIndex = WEEKDAYS.findIndex(day => day === weekday);
+  if (weekdayIndex < 0 || !Number.isFinite(now) ||
+      !Number.isSafeInteger(intervalMinutes) || intervalMinutes < 0)
+    throw new Error('Invalid weekly JST schedule or interval');
+  const candidate = now + intervalMinutes * 60_000;
+  if (!Number.isFinite(candidate)) throw new Error('Invalid weekly scheduling horizon');
+  const local = new Date(candidate + JST_OFFSET_MS);
+  const offsetDays = (weekdayIndex - local.getUTCDay() + 7) % 7;
+  if (offsetDays === 0) return candidate;
+  return Date.UTC(local.getUTCFullYear(), local.getUTCMonth(),
+    local.getUTCDate() + offsetDays, 0) - JST_OFFSET_MS;
+}
