@@ -184,10 +184,10 @@ test('arXiv category query config and dormant YouTube reference are explicit', (
     youtubeMonitorsFromTargets([{ id: 'weekly-invalid', channel: '@valid', enabled: true, weekdayJst: 'not-a-day' }]),
     { 'weekly-invalid': 60 },
   )), /weeklyJstDay/);
-  assert.throws(() => validateMonitors(withIntervals(
-    youtubeMonitorsFromTargets([{ id: 'weekly-mismatch', channel: '@valid', enabled: true, weekdayJst: 'sunday' }]),
-    { 'weekly-mismatch': 10080 },
-  )), /weeklyJstDay/);
+  assert.doesNotThrow(() => validateMonitors(withIntervals(
+    youtubeMonitorsFromTargets([{ id: 'weekly-any-interval', channel: '@valid', enabled: true, weekdayJst: 'sunday' }]),
+    { 'weekly-any-interval': 10080 },
+  )));
 });
 
 
