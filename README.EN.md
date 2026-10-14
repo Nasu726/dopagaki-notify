@@ -57,7 +57,7 @@ cd dopagaki-notify
 npm install
 ```
 
-Choose **checked-in public JSON** or a **private Cloudflare Secret**:
+Choose **checked-in public JSON** or a **private runtime Secret**. Both Cloudflare and GitHub Actions support the same target configuration; Actions defaults to private mode for safety:
 
 - [`config/targets.json`](config/targets.json): Sources, targets, `enabled` flags, and the public `notificationWindowJst`.
 - [`config/intervals.json`](config/intervals.json): Positive integer intervals **in minutes**, keyed by monitor `id`.
@@ -223,17 +223,18 @@ If Workers Builds is enabled, verify the live deployment is actually the intende
 
 ## 3. GitHub Actions + SQLite (optional)
 
-The alternative [GitHub Actions template](templates/github-actions/notifier.yml) runs on GitHub-hosted runners with SQLite state stored in **encrypted Actions Artifacts**. Scheduled workflows can be delayed/skipped and state artifacts can expire; Cloudflare is the primary recommendation.
+[GitHub Actions](templates/github-actions/notifier.yml) is a **fully selectable alternative runtime** with the same sources, private subscriptions, weekday/windows, retention, optional API keys and webhook handling. SQLite state is stored as **encrypted Actions Artifacts**. Scheduled jobs can be delayed/skipped and Artifacts expire, so uptime/recovery guarantees differ from Cloudflare. **Select one runtime; running both against separate states causes duplicate notifications.**
 
 ```sh
-npm run setup:actions
+# Private mode (default): keep subscriptions in Actions Secrets
+npm run setup:actions -- --config-mode=private
 npm run config:check -- --private-config-file=.private/monitor-config.json
 gh auth login
 gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
 gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-Add the required `DISCORD_WEBHOOK_*` GitHub Actions Secrets. Then commit/push **only** the generated `.github/workflows/notifier.yml` and select **Actions → Discord notifier (SQLite) → Run workflow** to establish the initial state. Do **not** lose or rotate your state encryption key without a planned reset.
+Set the Actions repository Variable `MONITOR_CONFIG_MODE=private` (default). To use checked-in public targets instead, run `npm run setup:actions -- --config-mode=public`, set `gh variable set MONITOR_CONFIG_MODE --body public`, and remove the conflicting `MONITOR_CONFIG_JSON` Secret. Add the required `DISCORD_WEBHOOK_*` GitHub Actions Secrets. Then commit/push **only** the generated `.github/workflows/notifier.yml` and select **Actions → Discord notifier (SQLite) → Run workflow** to establish the initial state. Do **not** lose or rotate your state encryption key without a planned reset.
 
 [GitHub Actions guide (English)](docs/GITHUB_ACTIONS.EN.md) · [日本語](docs/GITHUB_ACTIONS.md).
 

@@ -16,7 +16,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。Cloudf
 | 公開フォークでも購読先を隠したい | [非公開設定](#監視対象を非公開にする) |
 | すでに稼働中で設定だけ変える | [設定の検査](#設定の検査と通知時間帯) → [運用](#運用とトラブルシューティング) |
 | 今すぐ対象を試す・画像問題を調べる | [安全な診断コマンド](#安全な診断コマンド) |
-| Cloudflareを使いたくない | [GitHub Actions + SQLite](#3-github-actions--sqliteを使う任意) |
+| GitHubで実行し、監視対象もSecretで非公開にする | [GitHub Actions + SQLite](#3-github-actions--sqliteを使う-任意) |
 
 **最短コマンド一覧** (リポジトリ直下・Node.js 22以上):
 
@@ -57,7 +57,7 @@ cd dopagaki-notify
 npm install
 ```
 
-設定方法は**公開JSON**か**Cloudflare Secretによる非公開設定**のどちらかです。
+監視設定は**公開JSON**か**Secretによる非公開設定**のどちらかです。Cloudflare Worker・GitHub Actionsともに両方選べます (Actionsは非公開が安全な既定値)。
 
 - [`config/targets.json`](config/targets.json): 監視対象と`enabled`、公開設定の`notificationWindowJst`。
 - [`config/intervals.json`](config/intervals.json): 監視`id`ごとの取得間隔 (分)。正の整数。
@@ -223,17 +223,18 @@ Cloudflare Workers Buildsを接続している場合は、デプロイ済みの�
 
 ## 3. GitHub Actions + SQLiteを使う (任意)
 
-Cloudflareの代わりに、GitHub Actions上でSQLiteを実行するテンプレートです。状態は暗号化したArtifactsに保存します。Cronの遅延・スキップやArtifact期限による制約があるため、**主な推奨環境はCloudflare版**です。
+GitHub Actions上でSQLiteを実行する、Cloudflareと並ぶ**選択可能な実行方式**です。対応する情報源・曜日/時間帯指定・保存期間・Webhook・任意APIキーは共通です。状態は暗号化Artifactsで保存します。ただしActionsのCronは遅延・スキップがあり、Artifactには保存期限があるため、稼働の保証はCloudflare版と同じではありません。**CloudflareとActionsを同時起動すると通知が重複するので片方だけを選んでください。**
 
 ```sh
-npm run setup:actions
+# 非公開モード (既定): Secretに購読先を登録
+npm run setup:actions -- --config-mode=private
 npm run config:check -- --private-config-file=.private/monitor-config.json
 gh auth login
 gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
 gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-使用する`DISCORD_WEBHOOK_*`をGitHub ActionsのSecretsにも登録した後、生成された`.github/workflows/notifier.yml`だけをcommit・pushし、GitHubの**Actions → Discord notifier (SQLite) → Run workflow**で初回実行します。初回は通常の情報源を無通知で初期化します。**状態鍵は紛失・変更しないこと。**
+GitHub Actionsの**Variables**に`MONITOR_CONFIG_MODE=private`(既定)を設定します。公開JSONを使う場合は代わりに`npm run setup:actions -- --config-mode=public`と`gh variable set MONITOR_CONFIG_MODE --body public`を使用し、`MONITOR_CONFIG_JSON` Secretは削除してください。使う情報源の`DISCORD_WEBHOOK_*`をGitHub ActionsのSecretsに登録した後、生成された`.github/workflows/notifier.yml`だけをcommit・pushし、GitHubの**Actions → Discord notifier (SQLite) → Run workflow**で初回実行します。初回は通常の情報源を無通知で初期化します。**状態鍵は紛失・変更しないこと。**
 
 [GitHub Actions導入・復元手順](docs/GITHUB_ACTIONS.md) · [English](docs/GITHUB_ACTIONS.EN.md)
 

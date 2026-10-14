@@ -4,6 +4,19 @@
 
 現行の Cloudflare Workers 版と同じ `src/index.ts`・`src/runner.ts`・情報源アダプタを利用します。違いは DB への接続とジョブの起動方法です。Actions 版は自動テスト済みのオプションテンプレートであり、実運用での継続稼働は未検証です。
 
+## 実行方式と設定公開範囲を選ぶ
+
+このシステムは**Cloudflare Workers + D1**または**GitHub Actions + SQLite**のいずれかを選んで実行できます。両方式ともRSS/API連携、通知時間帯、YouTube曜日指定、監視対象ごとの`retentionDays`と非公開設定を共有します。ActionsにはCronの遅延・Artifact期限の制約があります。**両方式を同時に有効化すると別々のDBから通知され重複します。**
+
+Actionsでの監視設定も明示的に選択します:
+
+| 設定方式 | リポジトリVariable `MONITOR_CONFIG_MODE` | 監視設定 | 公開範囲 |
+| --- | --- | --- | --- |
+| **private (既定)** | `private`または未設定 | Actions Secret `MONITOR_CONFIG_JSON` | 購読先は非公開 |
+| **public** | `public` | Git管理下の`config/targets.json` / `config/intervals.json` | 購読先がGitHub上に公開 |
+
+**既定はprivateで、Secretが無ければ安全にエラー停止します。** publicモードに変更する際は既存の`MONITOR_CONFIG_JSON` Secretを削除します。混在を防ぐため、両方を残した設定は拒否します。切替時には過去の監視IDと検索条件を維持してください。公開後にPrivateに戻しても過去のGit履歴は消えません。
+
 ## 最初の設定
 
 1. GitHub でリポジトリをフォークして clone し、Node.js 22 以上を用意。
@@ -73,3 +86,23 @@ RSS の代わりに公式 API を使う場合は、Google Cloud で YouTube Data
 ## OpenAlex 対応
 
 `.private/monitor-config.json` の `targets.openalex` に `{"id":"oa-graph","query":"search:graph algorithms","enabled":true}` を追加し、`intervals` にその ID に対応する監視間隔(分)を設定します。GitHub Actions **Secret `DISCORD_WEBHOOK_OPENALEX`** は必要です。**`OPENALEX_API_KEY` は任意の Secret** で、未設定なら API のキーなし利用枠を使用します。初回の検索結果は無通知で記録し、以降に見つかった新しいIDを通知します。対象は過去7日・最大25件です。
+
+公開方式を選ぶ場合:
+
+```sh
+npm run setup:actions -- --config-mode=public
+# config/targets.json と config/intervals.json を編集してから
+npm run config:check
+gh variable set MONITOR_CONFIG_MODE --body public
+```
+
+private方式を選ぶ場合:
+
+```sh
+npm run setup:actions -- --config-mode=private
+npm run config:check -- --private-config-file=.private/monitor-config.json
+gh variable set MONITOR_CONFIG_MODE --body private
+gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
+```
+
+どちらでも`NOTIFY_STATE_KEY`と使用情報源のWebhook Secretが必要です。セットアップは既存のワークフローファイルを上書きしないため、以前にコピーした`.github/workflows/notifier.yml`を使用中ならテンプレートの`MONITOR_CONFIG_MODE`環境変数を反映してください。
