@@ -32,13 +32,13 @@ npm run bundle:check
 
 Changing from a tracked production `wrangler.jsonc` to an ignored local file can **break automatic deployments unless you first configure the Build step**.
 
-**Before merging the migration PR**: In the Cloudflare Dashboard, for the connected Worker, open **Settings → Builds** and set:
+**Before switching an existing production branch to the gitignored template layout**: In the Cloudflare Dashboard, for the connected Worker, open **Settings → Builds** and set:
 
 - Build environment variable `D1_DATABASE_ID` = your own Cloudflare D1 UUID.
 - Build command: `npm run setup:cloudflare -- "$D1_DATABASE_ID"`.
 - Deploy command: `npx wrangler deploy` (default).
 
-This works with both the old and new versions of `ops/setup-cloudflare.mjs`. Validate a build while the old tracked config is still present. Once the PR is merged, Workers Builds runs the setup step in the ephemeral Build workspace and produces the correct local config before Wrangler deploys.
+This works with both the old and new versions of `ops/setup-cloudflare.mjs`. Validate a build while the old tracked config is still present. Once the deployment branch uses the gitignored-template layout, Workers Builds runs the setup step in the ephemeral Build workspace and produces the correct local config before Wrangler deploys. The upstream `main` already uses this layout; its separate `production` branch may still use a tracked Wrangler file.
 
 This Build environment variable is **different** from the runtime Worker Secrets registered via `wrangler secret put`. Build commands should not echo the variable's value.
 
@@ -50,7 +50,7 @@ The previous D1 identifier remains readable in **old public Git commits**, even 
 
 ### What this does not do
 
-This PR neither operates Cloudflare nor changes/erases the existing D1 instance. Existing deployed Workers keep running with their already deployed bindings until the next deployment. Forks using GitHub Actions + SQLite do not need any Cloudflare D1 setup.
+Changing the Git configuration does not operate Cloudflare or change/erase the existing D1 instance. Existing deployed Workers keep running with their already deployed bindings until the next deployment. Forks using GitHub Actions + SQLite do not need any Cloudflare D1 setup.
 
 ## 日本語要約
 

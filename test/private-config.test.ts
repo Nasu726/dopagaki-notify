@@ -28,7 +28,7 @@ const privateTargets = {
 
 test('no private override preserves shipped monitors and identities', () => {
   assert.equal(loadRuntimeMonitors(undefined), MONITORS);
-  assert.ok(MONITORS.some((m) => m.id === 'qiita-rust'));
+  assert.ok(MONITORS.some((m) => m.id === 'qiita-example'));
 });
 
 test('private configuration completely replaces public preferences', () => {
@@ -37,7 +37,7 @@ test('private configuration completely replaces public preferences', () => {
   assert.deepEqual(monitors.map((m) => m.id), [
     'qiita-private-interest', 'arxiv-sample', 'zenn-example', 'youtube-sample',
   ]);
-  assert.ok(!monitors.some((m) => m.id === 'qiita-rust' || m.id.startsWith('wikipedia-')));
+  assert.ok(!monitors.some((m) => m.id === 'qiita-example' || m.id.startsWith('wikipedia-')));
   assert.deepEqual(monitors.find((m) => m.id === 'youtube-sample'), {
     id: 'youtube-sample', source: 'youtube', query: '@example',
     enabled: true, intervalMinutes: 60, weeklyJstDay: 'sunday',

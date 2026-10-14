@@ -7,10 +7,10 @@ import { runTick } from '../src/runner.ts';
 import { openDatabase, applyMigrations } from '../ops/actions/sqlite.mjs';
 import type { Monitor, Env, ContentItem } from '../src/types.ts';
 
-const channelId = 'UCQ_MqAw18jFTlBB-f8BP7dw';
+const channelId = 'UC1234567890123456789012';
 const playlistId = 'UULF' + channelId.slice(2);
-const quizknock: Monitor = {
-  id: 'youtube-quizknock', source: 'youtube', query: '@QuizKnock',
+const sampleVideos: Monitor = {
+  id: 'youtube-videos-fixture', source: 'youtube', query: '@SampleVideoChannel',
   youtubeChannelId: channelId, youtubeVideoType: 'videos', enabled: true, intervalMinutes: 60,
 };
 const normalVideoId = 'Normal12345';
@@ -42,14 +42,14 @@ function mock(response = feed(), check?: (url:URL)=>void):typeof fetch {
   };
 }
 
-test('QuizKnock opts in without changing other YouTube subscriptions',()=>{
-  assert.equal(MONITORS.find(m=>m.id==='youtube-quizknock')?.youtubeVideoType,'videos');
-  assert.ok(MONITORS.filter(m=>m.source==='youtube' && m.id!=='youtube-quizknock')
-    .every(m=>m.youtubeVideoType===undefined));
+test('videos-only remains opt-in while the public YouTube example is disabled',()=>{
+  assert.equal(MONITORS.find(m=>m.id==='youtube-example')?.enabled,false);
+  assert.ok(MONITORS.filter(m=>m.source==='youtube')
+    .every(m=>m.youtubeVideoType===undefined && !m.enabled));
   assert.doesNotThrow(()=>validateMonitors(MONITORS));
   const priv = {
     targets:{qiita:[],zenn:[],arxiv:[],youtube:[
-      {id:'private-yt',channel:'@QuizKnock',channelId,videoType:'videos',enabled:true},
+      {id:'private-yt',channel:'@SampleVideoChannel',channelId,videoType:'videos',enabled:true},
     ]},
     wikipediaEnabled:false,intervals:{'private-yt':60},
   };
@@ -61,18 +61,18 @@ test('QuizKnock opts in without changing other YouTube subscriptions',()=>{
     assert.throws(()=>loadRuntimeMonitors(JSON.stringify(bad)));
   }
   const unpinned={...priv,targets:{...priv.targets,youtube:[
-    {id:'private-yt',channel:'@QuizKnock',videoType:'videos',enabled:true},
+    {id:'private-yt',channel:'@SampleVideoChannel',videoType:'videos',enabled:true},
   ]}};
   assert.throws(()=>loadRuntimeMonitors(JSON.stringify(unpinned)));
   const defaultType={...priv,targets:{...priv.targets,youtube:[
-    {id:'private-yt',channel:'@QuizKnock',enabled:true},
+    {id:'private-yt',channel:'@SampleVideoChannel',enabled:true},
   ]}};
   assert.equal(loadRuntimeMonitors(JSON.stringify(defaultType))[0]?.youtubeVideoType,undefined);
 });
 
 test('UULF feed uses one call and retains stable youtube video IDs',async()=>{
   let calls=0;
-  const result=await fetchYouTube(quizknock,mock(feed(),()=>{calls++}));
+  const result=await fetchYouTube(sampleVideos,mock(feed(),()=>{calls++}));
   assert.equal(calls,1);
   assert.deepEqual(result.items,[{
     id:'youtube:'+normalVideoId,title:'Video '+normalVideoId,
@@ -83,24 +83,24 @@ test('UULF feed uses one call and retains stable youtube video IDs',async()=>{
     feed({rootPlaylist:null}),feed({playlist:null}),
     feed({owner:null}),feed({content:''}),
   ]) {
-    await assert.doesNotReject(()=>fetchYouTube(quizknock,mock(xml)));
+    await assert.doesNotReject(()=>fetchYouTube(sampleVideos,mock(xml)));
   }
 });
 
 test('videos-only feed fails closed for wrong/missing playlist, owner or entry',async()=>{
   for(const xml of [
-    feed({playlist:'UULFpLu0KjNy616-E95gPx7LZg'}),
-    feed({rootPlaylist:'UULFpLu0KjNy616-E95gPx7LZg'}),
+    feed({playlist:'UULF9876543210987654321098'}),
+    feed({rootPlaylist:'UULF9876543210987654321098'}),
     feed({rootPlaylist:null,playlist:null}),
-    feed({owner:'UCpLu0KjNy616-E95gPx7LZg'}),
-    feed({owner:'pLu0KjNy616-E95gPx7LZg'}),
-    feed({content:entry(normalVideoId,'UCpLu0KjNy616-E95gPx7LZg')}),
+    feed({owner:'UC9876543210987654321098'}),
+    feed({owner:'9876543210987654321098'}),
+    feed({content:entry(normalVideoId,'UC9876543210987654321098')}),
     '<feed><yt:channelId>'+channelId+'</yt:channelId>'+entry(shortVideoId)+'</feed>',
   ]) {
-    await assert.rejects(()=>fetchYouTube(quizknock,mock(xml)),/identity|channel mismatch/);
+    await assert.rejects(()=>fetchYouTube(sampleVideos,mock(xml)),/identity|channel mismatch/);
   }
   let calls=0;
-  await assert.rejects(()=>fetchYouTube(quizknock,async input=>{
+  await assert.rejects(()=>fetchYouTube(sampleVideos,async input=>{
     calls++;
     assert.equal(new URL(String(input)).searchParams.get('playlist_id'),playlistId);
     return new Response('not found',{status:404});
@@ -110,7 +110,7 @@ test('videos-only feed fails closed for wrong/missing playlist, owner or entry',
 
 test('dry-run with API key still uses UULF RSS, no Discord POST',async()=>{
   let calls=0;
-  const result=await runSmoke(quizknock,{YOUTUBE_API_KEY:'unused'},{
+  const result=await runSmoke(sampleVideos,{YOUTUBE_API_KEY:'unused'},{
     fetcher:mock(feed(),()=>{calls++}),
     sender:async()=>{throw new Error('unexpected Discord send');},
   });
@@ -128,29 +128,29 @@ test('switch to videos-only preserves old Shorts receipt and sends normal once',
     const now=Date.parse('2026-10-13T17:05:22Z');
     const prior=now-60_000;
     raw.prepare('INSERT INTO monitor_state (id,initialized_at,last_complete_at,next_due_at,config_identity) VALUES (?,?,?,?,?)')
-      .run(quizknock.id,prior,prior,now,JSON.stringify(['youtube','@QuizKnock']));
+      .run(sampleVideos.id,prior,prior,now,JSON.stringify(['youtube','@SampleVideoChannel']));
     raw.prepare("INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at,sent_at) VALUES (?,?,'sent',?,?,?,?,?)")
-      .run(quizknock.id,'youtube:'+shortVideoId,'Previously sent #Shorts',
+      .run(sampleVideos.id,'youtube:'+shortVideoId,'Previously sent #Shorts',
         'https://www.youtube.com/watch?v='+shortVideoId,prior,prior,prior);
     const env:Env={DB:db,DISCORD_WEBHOOK_YOUTUBE:'https://discord.com/api/webhooks/123/token'};
     const sent:string[]=[];
     let index=0;
     const deps={
-      fetchItems:()=>fetchYouTube(quizknock,mock(feed())),
+      fetchItems:()=>fetchYouTube(sampleVideos,mock(feed())),
       send:async(_hook:string,_source:string,item:ContentItem)=>{sent.push(item.id)},
       randomId:()=> 'lease-'+ ++index,
       clock:()=>now,
     };
-    await runTick(env,[quizknock],now,deps);
+    await runTick(env,[sampleVideos],now,deps);
     assert.deepEqual(sent,['youtube:'+normalVideoId]);
-    await runTick(env,[quizknock],now+60*60_000,deps);
+    await runTick(env,[sampleVideos],now+60*60_000,deps);
     assert.deepEqual(sent,['youtube:'+normalVideoId]);
-    const rows=raw.prepare('SELECT item_id,status FROM deliveries WHERE monitor_id=? ORDER BY item_id').all(quizknock.id);
+    const rows=raw.prepare('SELECT item_id,status FROM deliveries WHERE monitor_id=? ORDER BY item_id').all(sampleVideos.id);
     // node:sqlite returns null-prototype rows; normalize before strict comparison.
     assert.deepEqual(rows.map(row => ({item_id:row.item_id,status:row.status})),[
       {item_id:'youtube:'+normalVideoId,status:'sent'},
       {item_id:'youtube:'+shortVideoId,status:'sent'},
     ]);
-    assert.equal(raw.prepare('SELECT config_identity FROM monitor_state WHERE id=?').get(quizknock.id)?.config_identity,JSON.stringify(['youtube','@QuizKnock']));
+    assert.equal(raw.prepare('SELECT config_identity FROM monitor_state WHERE id=?').get(sampleVideos.id)?.config_identity,JSON.stringify(['youtube','@SampleVideoChannel']));
   } finally {raw.close();}
 });
