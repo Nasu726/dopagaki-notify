@@ -1346,3 +1346,26 @@ test('Qiita API author icon is forwarded to Discord in the same polling tick', a
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE monitor_id=?")
     .get(monitor.id)?.status,'sent');
 });
+
+
+test('weekday-constrained YouTube accepts independent positive-minute intervals', async()=>{
+  const { nextAllowedJstWeekdayDue } = await import('../src/schedule.ts');
+  const now=Date.parse('2026-10-13T03:00:00Z'); // Tue 12:00 JST
+  const monitor:Monitor={id:'youtube-custom-weekly',source:'youtube',query:'@example',
+    enabled:true,intervalMinutes:135,weeklyJstDay:'tuesday'};
+  assert.doesNotThrow(()=>validateMonitors([monitor]));
+  assert.equal(nextAllowedJstWeekdayDue(now,'tuesday',135),now+135*60_000);
+  assert.equal(nextAllowedJstWeekdayDue(now,'tuesday',10080),now+10080*60_000);
+  assert.equal(nextAllowedJstWeekdayDue(Date.parse('2026-10-13T13:00:00Z'),'tuesday',180),
+    Date.parse('2026-10-19T15:00:00Z'),'interval crossing midnight moves to next selected weekday');
+  assert.equal(nextAllowedJstWeekdayDue(Date.parse('2026-10-14T03:00:00Z'),'tuesday',0),
+    Date.parse('2026-10-19T15:00:00Z'));
+  assert.throws(()=>nextAllowedJstWeekdayDue(now,'tuesday',-2));
+  const s=setup();s.env.DISCORD_WEBHOOK_YOUTUBE=webhook;
+  assert.equal(await runTick(s.env,[monitor],now,s.deps),'processed');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
+    .get(monitor.id)?.next_due_at,now+135*60_000);
+  assert.equal(await runTick(s.env,[monitor],now+60*60_000,s.deps),'processed');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
+    .get(monitor.id)?.next_due_at,now+135*60_000+60*60_000);
+});

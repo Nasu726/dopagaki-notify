@@ -82,7 +82,7 @@ npm install
 }
 ```
 
-`config/intervals.json`には上の各`id`の間隔と、Wikipediaを使う場合は`wikipedia-ja-discovery`の間隔を指定します。YouTubeで`weekdayJst`を指定する場合は間隔を60分にしてください。
+`config/intervals.json`には上の各`id`の間隔と、Wikipediaを使う場合は`wikipedia-ja-discovery`の間隔を指定します。`weekdayJst` は取得可能な曜日のみを制限し、取得間隔(分)は他の監視対象と同じく任意の正の整数です。
 
 **IDの互換性:** すでに稼働した監視`id`で、情報源や`query` / チャンネルを別の対象に変えないでください。D1が対象の識別情報を保持しており、意図しない履歴混在を拒否します。別の対象には新しい`id`を使います。間隔の変更は安全です。
 
