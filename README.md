@@ -38,7 +38,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。**Clou
 | Zenn | ユーザー・トピックRSS | 新しい最大3件を選択 |
 | arXiv | 論文カテゴリ | ページ分割で追跡 |
 | OpenAlex | 検索語・トピックID・著者ID | 直近7日・最大25件のスナップショット |
-| YouTube | 指定チャンネルの動画 | 最新未通知動画は公開日が古くても通知対象 |
+| YouTube | 指定チャンネルの動画 | 保持期間内の最新未通知動画を初回から通知対象にする |
 | 日本語Wikipedia | 秀逸記事＋ランダム記事 | 1回最大2件の推薦 |
 
 **重要な動作:** 投稿IDで重複送信を抑止し、未送信分と再試行時刻をD1に記録します。YouTube以外は初回取得を原則無通知で初期化。YouTubeは最新の未通知動画1件を初回から通知対象にします。Qiita/Zennは鮮度を優先するため、全件保存・完全網羅ではありません。通知済み履歴の既定保持期間は**すべての情報源で10日**です。監視対象IDごとに`retentionDays`で変更できます。
@@ -219,7 +219,7 @@ npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialize
 npx wrangler d1 execute dopagaki-notify --remote --command "SELECT monitor_id,item_id,status,sent_at FROM deliveries ORDER BY discovered_at DESC LIMIT 10;"
 ```
 
-`initialized_at` / `last_complete_at`は最後の正常取得、`status=sent`はDiscord Webhookへの送信成功を示します。**画像が実際に描画された証拠にはなりません。** 投稿が無ければ通知が無いのは正常です。YouTubeのみ古い最新動画が初回に届く場合があります。
+`initialized_at` / `last_complete_at`は最後の正常取得、`status=sent`はDiscord Webhookへの送信成功を示します。**画像が実際に描画された証拠にはなりません。** 投稿が無ければ通知が無いのは正常です。YouTubeの初回通知は保持期間内の最新動画が対象です (既定10日、個別設定可)。
 
 Cloudflare Workers Buildsを接続している場合は、デプロイ済みのバージョンと`main`が一致することも確認してください。
 

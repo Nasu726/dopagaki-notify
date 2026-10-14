@@ -1,5 +1,10 @@
 # Development roadmap
 
+## 2026-10-14 補足: YouTube通知履歴の既定保存期間
+
+すべての監視対象で既定は10日。監視IDごとに`retentionDays`で変更可能 (`null`は無期限)。古い動画を再通知しないため、初回・定期監視の双方で有限保持期間より古い動画は除外する。以前の「YouTubeは無期限保持」「初回は古くても必ず送信」という記述は過去仕様。
+
+
 Updated: 2026-10-13. Current stage: **Wikipedia discovery and basic article notifications observed in Cloudflare; bounded latest-first Qiita/Zenn policy is in CI and awaiting post-deployment verification**.
 
 ## Product scope / frozen choices

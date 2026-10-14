@@ -149,8 +149,9 @@ export async function stage(
     retentionDays?: number | null } = {},
 ): Promise<void> {
   // Usually the first observation is a silent time-based baseline.
-  // For YouTube, always consider the freshest item even if it predates the
-  // baseline. Older videos remain excluded unless published after baseline.
+  // For YouTube, consider the freshest item even if it predates the baseline,
+  // but not when it has passed the configured retention horizon.
+  // Older videos remain excluded unless published after baseline.
   if (baselineAt === null && !options.allowHistoricalFirstItem) return;
   // The default receipt horizon is ten days for EVERY source, including
   // YouTube. null explicitly opts in to unlimited history per monitor.
