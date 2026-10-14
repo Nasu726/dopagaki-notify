@@ -52,6 +52,8 @@ test('setup never overwrites a different existing production binding',()=>{
 test('setup accepts explicit CLI UUID or build environment but never mixes both',()=>{
   assert.equal(parseSetupId([own],undefined),own);
   assert.equal(parseSetupId([],own),own);
-  assert.throws(()=>parseSetupId([own],other),/not both/);
+  assert.equal(parseSetupId([own],own),own,
+    'Workers Builds passes a variable-expanded argv while the variable is also defined');
+  assert.throws(()=>parseSetupId([own],other),/disagrees/);
   assert.throws(()=>parseSetupId([own,other],undefined),/Usage/);
 });

@@ -48,8 +48,12 @@ export function prepareConfig({templatePath, outputPath, id}) {
 
 export function parseSetupId(argv, environmentId) {
   if (argv.length > 1) throw new Error('Usage: npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID');
-  if (argv.length === 1 && environmentId)
-    throw new Error('Provide the D1 UUID using CLI argument or D1_DATABASE_ID, not both');
+  // The same build command must work before and after migration: the old
+  // setup script consumes argv; this version also reads the environment.
+  // When both are provided, accept only an exact matching ID.
+  if (argv.length === 1 && environmentId &&
+      argv[0].toLowerCase() !== environmentId.toLowerCase())
+    throw new Error('CLI D1 UUID disagrees with D1_DATABASE_ID');
   return argv[0] ?? environmentId;
 }
 
@@ -71,7 +75,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       'Expected your own non-placeholder D1 UUID',
       'The public Wrangler example must contain the dummy D1 UUID',
       'Existing Wrangler config points at another D1. Back up and remove it first.',
-      'Provide the D1 UUID using CLI argument or D1_DATABASE_ID, not both',
+      'CLI D1 UUID disagrees with D1_DATABASE_ID',
       'Provide a real D1 UUID via argument or D1_DATABASE_ID',
       'Usage: npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID',
     ];
