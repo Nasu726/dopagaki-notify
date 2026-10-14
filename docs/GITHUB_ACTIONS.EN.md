@@ -21,6 +21,10 @@ The template schedules runs at UTC minutes 07, 17, 27, 37, 47 and 57 (every 10 m
 
 When Wikipedia is enabled, the Wikimedia User-Agent defaults to the current fork's `GITHUB_REPOSITORY` as its operator contact. To use a different contact URL, set `WIKIMEDIA_CONTACT_URL` as a GitHub Actions **Variable** containing a public HTTPS URL. No Wikimedia API key is required.
 
+## Sent receipt retention
+
+Both runtimes use the same top-level `retentionDays` object inside `MONITOR_CONFIG_JSON` to override individual monitor IDs. Positive integer days or `null` (unlimited) are accepted; omitted monitors default to ten days except YouTube (unlimited). This is **not** the encrypted Artifact's retention period (30 days in the template), which cannot be extended through `retentionDays`.
+
 ## How private state works
 
 An Actions hosted runner does not retain files between jobs. This template connects `src/index.ts` and `src/runner.ts` to Node's built-in `node:sqlite`. It encrypts the completed SQLite file using **AES-256-GCM**, stores the ciphertext only in an Action Artifact called `notifier-state`, and decrypts the newest previous artifact on the next run. The upload sets `include-hidden-files: true` for the exact encrypted file, because GitHub otherwise ignores files under the hidden `.private/` folder.
