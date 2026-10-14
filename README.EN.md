@@ -38,10 +38,10 @@ Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using **Clo
 | Zenn | User/topic RSS feeds | Newest three items |
 | arXiv | Research paper categories | Bounded paginated scans |
 | OpenAlex | Search terms, topic IDs, author IDs | Last seven days, at most 25 results |
-| YouTube | Chosen video channels | The latest unseen video is eligible even if old |
+| YouTube | Chosen video channels | Latest unseen video within its configured retention horizon is eligible on first scan |
 | Japanese Wikipedia | Featured and random articles | Up to two recommendations per poll |
 
-**Deduplication:** D1 stores notification receipts, pending deliveries and retry times. Most sources establish a **silent baseline** on their first successful fetch. YouTube exceptionally sends its newest unseen video even on the first poll, regardless of publication age. Sent receipt retention defaults to **10 days for every source, including YouTube**, independently configurable for each monitor ID via `retentionDays`. Qiita and Zenn favor freshness over exhaustive archiving.
+**Deduplication:** D1 stores notification receipts, pending deliveries and retry times. Most sources establish a **silent baseline** on their first successful fetch. YouTube can notify the newest unseen video on the first poll, provided it falls within its configured retention horizon. Sent receipt retention defaults to **10 days for every source, including YouTube**, independently configurable for each monitor ID via `retentionDays`. Qiita and Zenn favor freshness over exhaustive archiving.
 
 **Scheduling:** The Worker runs every five minutes and normally handles one due monitor per invocation. Per-monitor intervals indicate when a fetch becomes eligible, not an exact execution time. It sends at most three items per invocation. Polling and queuing continue **outside allowed notification hours**.
 
@@ -219,7 +219,7 @@ npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialize
 npx wrangler d1 execute dopagaki-notify --remote --command "SELECT monitor_id,item_id,status,sent_at FROM deliveries ORDER BY discovered_at DESC LIMIT 10;"
 ```
 
-`initialized_at` / `last_complete_at` track completed upstream scans. A `sent` receipt means Discord accepted the webhook, **not** that it displayed remote images. No new content generally means no Discord message. YouTube can send one older latest unseen upload on its first poll.
+`initialized_at` / `last_complete_at` track completed upstream scans. A `sent` receipt means Discord accepted the webhook, **not** that it displayed remote images. No new content generally means no Discord message. YouTube may send its latest unseen upload on its first poll if it is within the configured retention horizon.
 
 If Workers Builds is enabled, verify the live deployment is actually the intended `main` revision.
 

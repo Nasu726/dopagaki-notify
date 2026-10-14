@@ -168,9 +168,9 @@ export async function runTick(
             { imageSource: runnable.source as 'qiita' | 'zenn',
               retentionDays: runnable.retentionDays });
         } else if (runnable.source === 'youtube') {
-          // Always notify the latest video if unseen, even when it predates
-          // the baseline or our ten-day horizon. Keep sent YouTube receipts
-          // indefinitely so this never repeats across future polls.
+          // Latest unseen video can predate the initial baseline, but must
+          // stay within the configured receipt horizon (10 days by default).
+          // null explicitly enables unlimited deduplication and staging.
           // Other videos are eligible only when genuinely new.
           const sorted = [...result.items].sort((a, b) =>
             b.publishedAt - a.publishedAt || a.id.localeCompare(b.id));
