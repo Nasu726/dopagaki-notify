@@ -41,7 +41,7 @@ Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using **Clo
 | YouTube | Chosen video channels | The latest unseen video is eligible even if old |
 | Japanese Wikipedia | Featured and random articles | Up to two recommendations per poll |
 
-**Deduplication:** D1 stores notification receipts, pending deliveries and retry times. Most sources establish a **silent baseline** on their first successful fetch. YouTube exceptionally sends its newest unseen video even on the first poll, regardless of publication age. Sent receipt retention defaults to **10 days for non-YouTube sources** and **unlimited for YouTube**, independently configurable for each monitor ID via `retentionDays`. Qiita and Zenn favor freshness over exhaustive archiving.
+**Deduplication:** D1 stores notification receipts, pending deliveries and retry times. Most sources establish a **silent baseline** on their first successful fetch. YouTube exceptionally sends its newest unseen video even on the first poll, regardless of publication age. Sent receipt retention defaults to **10 days for every source, including YouTube**, independently configurable for each monitor ID via `retentionDays`. Qiita and Zenn favor freshness over exhaustive archiving.
 
 **Scheduling:** The Worker runs every five minutes and normally handles one due monitor per invocation. Per-monitor intervals indicate when a fetch becomes eligible, not an exact execution time. It sends at most three items per invocation. Polling and queuing continue **outside allowed notification hours**.
 
@@ -92,7 +92,7 @@ Provide intervals for the IDs above and for `wikipedia-ja-discovery` if using th
 
 ### Per-monitor sent history retention (Cloudflare and GitHub Actions)
 
-`retentionDays` configures **how long acknowledged receipts are stored** and how long old content may remain eligible for rediscovery, independently of the polling interval. In checked-in configuration, set it at the top level of [`config/targets.json`](config/targets.json); for private configurations, put the same field at the top level of `MONITOR_CONFIG_JSON`. Unspecified monitors retain existing defaults: **10 days for non-YouTube sources, indefinitely for YouTube**.
+`retentionDays` configures **how long acknowledged receipts are stored** and how long old content may remain eligible for rediscovery, independently of the polling interval. In checked-in configuration, set it at the top level of [`config/targets.json`](config/targets.json); for private configurations, put the same field at the top level of `MONITOR_CONFIG_JSON`. Unspecified monitors use the **10-day default, including YouTube**.
 
 ```json
 "retentionDays": {

@@ -5,14 +5,12 @@ export const PRUNE_BATCH_SIZE = 20;
 const DAY_MS = 24 * 60 * 60_000;
 
 /** Sent receipt retention is independent of any polling interval.
- * Unspecified monitors keep historical policy: 10 days except YouTube forever.
+ * Unspecified monitors default to 10 days for ALL sources, including YouTube.
  * null explicitly means unlimited. Changing this never deletes pending/ignored
  * outbox rows. Finite YouTube retention also gates stale rediscovery in stage().
  */
 export function receiptRetentionDays(monitor: Monitor): number | null {
-  return monitor.retentionDays === undefined
-    ? (monitor.source === 'youtube' ? null : 10)
-    : monitor.retentionDays;
+  return monitor.retentionDays === undefined ? 10 : monitor.retentionDays;
 }
 
 export async function pruneSentDeliveries(
@@ -37,8 +35,8 @@ export async function pruneSentDeliveries(
   const defaultCutoff = Math.trunc(now - DELIVERY_RETENTION_MS);
   const cutoffSql = cases.length
     ? '(CASE monitor_id ' + cases.join(' ') +
-      " ELSE CASE WHEN item_id LIKE 'youtube:%' THEN NULL ELSE " + defaultCutoff + " END END)"
-    : "(CASE WHEN item_id LIKE 'youtube:%' THEN NULL ELSE " + defaultCutoff + " END)";
+      ' ELSE ' + defaultCutoff + ' END)'
+    : String(defaultCutoff);
   // Bounded one-statement pruning. The sent_at partial index (migration 0009)
   // preserves chronological candidate ordering; no source data is fetched.
   const result = await db.prepare(

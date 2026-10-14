@@ -1163,7 +1163,7 @@ test('YouTube announces only the newest video on the very first successful poll,
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
   const monitor: Monitor = { id: 'youtube-first', source: 'youtube', query: '@example',
-    intervalMinutes: 60, enabled: true };
+    intervalMinutes: 60, enabled: true, retentionDays: null };
   const now = Date.parse('2026-10-13T03:00:00Z');
   s.setItems([
     { id: 'youtube:veryOld0001', title: 'Old video',

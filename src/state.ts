@@ -152,19 +152,19 @@ export async function stage(
   // For YouTube, always consider the freshest item even if it predates the
   // baseline. Older videos remain excluded unless published after baseline.
   if (baselineAt === null && !options.allowHistoricalFirstItem) return;
-  // Normal non-YouTube receipts expire after ten days. YouTube sent receipts
-  // are retained permanently to ensure even an old latest video is not
-  // re-announced after a long interval or temporary feed regression.
+  // The default receipt horizon is ten days for EVERY source, including
+  // YouTube. null explicitly opts in to unlimited history per monitor.
+  // The same horizon must govern both staging and sent receipt deletion.
   const retentionCutoff = options.retentionDays === null ? -Infinity
     : now - (options.retentionDays === undefined
       ? DELIVERY_RETENTION_MS : options.retentionDays * 24 * 60 * 60_000);
   const eligibleAfter = Math.max(baselineAt ?? now, retentionCutoff);
   const eligible = items.filter((item, index) =>
     (options.allowHistoricalFirstItem && index === 0 &&
-      // Explicit finite YouTube retention forbids reannouncing an old latest
-      // upload after its sent receipt expires. Unlimited default preserves
-      // the existing behavior (including arbitrarily old first videos).
-      (options.retentionDays === undefined || item.publishedAt > retentionCutoff)) ||
+      // A finite horizon (including the 10-day default) suppresses
+      // stale latest uploads once their receipts are physically pruned.
+      // Explicit null preserves unlimited discovery and dedup history.
+      item.publishedAt > retentionCutoff) ||
     (baselineAt !== null && item.publishedAt > eligibleAfter));
   // Image-bearing rows use 9 SQL bindings; cap at 10 (90 <= D1's 100).
   // The original 12x7 batching remains for every other source.

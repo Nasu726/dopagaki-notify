@@ -36,7 +36,7 @@ When Wikipedia is enabled, the Wikimedia User-Agent defaults to the current fork
 
 ## Sent receipt retention
 
-Both runtimes use the same top-level `retentionDays` object inside `MONITOR_CONFIG_JSON` to override individual monitor IDs. Positive integer days or `null` (unlimited) are accepted; omitted monitors default to ten days except YouTube (unlimited). This is **not** the encrypted Artifact's retention period (30 days in the template), which cannot be extended through `retentionDays`.
+Both runtimes use the same top-level `retentionDays` object inside `MONITOR_CONFIG_JSON` to override individual monitor IDs. Positive integer days or `null` (unlimited) are accepted; omitted monitors default to ten days for every source, including YouTube. This is **not** the encrypted Artifact's retention period (30 days in the template), which cannot be extended through `retentionDays`.
 
 ## How private state works
 
