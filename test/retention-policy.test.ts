@@ -14,10 +14,10 @@ const monitor = (id: string, source: Monitor['source'], retentionDays?: number |
   ...(retentionDays !== undefined ? {retentionDays} : {}),
 });
 
-test('per-monitor retention validates, preserves unchanged defaults and accepts null forever',()=>{
+test('per-monitor retention defaults every source to 10 days, accepts null forever',()=>{
   const youtube = monitor('yt','youtube');
   const qiita = monitor('qiita','qiita');
-  assert.equal(receiptRetentionDays(youtube),null);
+  assert.equal(receiptRetentionDays(youtube),10);
   assert.equal(receiptRetentionDays(qiita),10);
   assert.equal(receiptRetentionDays(monitor('yt','youtube',365)),365);
   assert.equal(receiptRetentionDays(monitor('qiita','qiita',null)),null);
@@ -60,11 +60,11 @@ test('hourly retention respects independent monitor cutoffs and never deletes pe
     record('yt-default','youtube:default-old','sent',900);
     record('normal','still-pending','pending',1000);
     record('normal','still-ignored','ignored',1000);
-    assert.equal(await pruneSentDeliveries(db,now,monitors),3);
+    assert.equal(await pruneSentDeliveries(db,now,monitors),4);
     const remain=raw.prepare('SELECT item_id FROM deliveries ORDER BY item_id').all().map((x:any)=>x.item_id);
     assert.deepEqual(remain,[
       'forever-old','normal-fresh','older-fresh','still-ignored','still-pending',
-      'youtube:default-old','youtube:rare-fresh',
+      'youtube:rare-fresh',
     ]);
     assert.equal(await pruneSentDeliveries(db,now,monitors),0);
   }finally{raw.close();}
@@ -113,7 +113,7 @@ test('infinite YouTube retention still allows ancient first latest video',async(
   const {raw,db}=openDatabase(':memory:');
   try{
     applyMigrations(raw);
-    const m=monitor('youtube-yearly','youtube');
+    const m=monitor('youtube-yearly','youtube',null);
     const old:ContentItem={id:'youtube:AbCdEf12345',title:'Old latest',
       url:'https://www.youtube.com/watch?v=AbCdEf12345',publishedAt:now-700*DAY};
     const env:Env={DB:db,DISCORD_WEBHOOK_YOUTUBE:'https://discord.com/api/webhooks/123456789/test'};
@@ -124,4 +124,31 @@ test('infinite YouTube retention still allows ancient first latest video',async(
     assert.deepEqual(sent,[old.id]);
     assert.equal(await pruneSentDeliveries(db,now+900*DAY,[m]),0);
   }finally{raw.close();}
+});
+
+test('default YouTube receipt lifetime is bounded and an ancient latest upload is not reannounced', async()=>{
+  const {raw, db} = openDatabase(':memory:');
+  try {
+    applyMigrations(raw);
+    const m = monitor('youtube-default-bounded','youtube');
+    const old: ContentItem = {id:'youtube:AbCdEf12345',title:'Old latest',
+      url:'https://www.youtube.com/watch?v=AbCdEf12345',publishedAt:now-13*DAY};
+    const env: Env={DB:db,DISCORD_WEBHOOK_YOUTUBE:'https://discord.com/api/webhooks/123456789/test'};
+    let sent=0, idx=0;
+    const deps={fetchItems:async()=>({items:[old],potentiallyTruncated:false}),
+      send:async()=>{sent++},randomId:()=> 'token-'+(++idx)};
+    await runTick(env,[m],now,deps);
+    assert.equal(sent,0,'first baseline must not send stale latest beyond default 10 days');
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()?.n,0);
+    const newVideo={...old,id:'youtube:AbCdEf12346',publishedAt:now+1000};
+    await runTick(env,[m],now+60*60_000,{...deps,fetchItems:async()=>({
+      items:[newVideo],potentiallyTruncated:false,
+    })});
+    assert.equal(sent,1);
+    assert.equal(await pruneSentDeliveries(db,now+11*DAY,[m]),1);
+    await runTick(env,[m],now+11*DAY,{...deps,fetchItems:async()=>({
+      items:[newVideo],potentiallyTruncated:false,
+    })});
+    assert.equal(sent,1,'receipt expiry must not resurrect latest video');
+  } finally {raw.close();}
 });

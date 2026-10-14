@@ -36,7 +36,7 @@ When Wikipedia is enabled, the Wikimedia User-Agent defaults to the current fork
 
 ## Sent receipt retention
 
-Both runtimes use the same top-level `retentionDays` object inside `MONITOR_CONFIG_JSON` to override individual monitor IDs. Positive integer days or `null` (unlimited) are accepted; omitted monitors default to ten days except YouTube (unlimited). This is **not** the encrypted Artifact's retention period (30 days in the template), which cannot be extended through `retentionDays`.
+Both runtimes use the same top-level `retentionDays` object inside `MONITOR_CONFIG_JSON` to override individual monitor IDs. Positive integer days or `null` (unlimited) are accepted; omitted monitors default to ten days for every source, including YouTube. This is **not** the encrypted Artifact's retention period (30 days in the template), which cannot be extended through `retentionDays`.
 
 ## How private state works
 
@@ -74,7 +74,7 @@ The Actions backend and Cloudflare D1 **do not share their notification history*
 
 ## Optional YouTube Data API
 
-Register an optional GitHub Actions **Secret `YOUTUBE_API_KEY`** from a Google Cloud project with YouTube Data API v3 enabled to use the official API instead of RSS. Without a key, RSS remains the default. This uses `channels.list` and `playlistItems.list`, shares the same ID-based sent history, and reports API errors rather than silently falling back to RSS. YouTube sent receipts are retained indefinitely to prevent re-notification of old latest videos.
+Register an optional GitHub Actions **Secret `YOUTUBE_API_KEY`** from a Google Cloud project with YouTube Data API v3 enabled to use the official API instead of RSS. Without a key, RSS remains the default. This uses `channels.list` and `playlistItems.list`, shares the same ID-based sent history, and reports API errors rather than silently falling back to RSS. By default, YouTube sent receipts are retained for ten days like other sources; use per-monitor `retentionDays` to extend retention or set `null` for unlimited history. Videos older than a finite retention horizon are excluded from staging to prevent repeats after pruning.
 
 
 ## OpenAlex papers

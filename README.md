@@ -41,7 +41,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。**Clou
 | YouTube | 指定チャンネルの動画 | 最新未通知動画は公開日が古くても通知対象 |
 | 日本語Wikipedia | 秀逸記事＋ランダム記事 | 1回最大2件の推薦 |
 
-**重要な動作:** 投稿IDで重複送信を抑止し、未送信分と再試行時刻をD1に記録します。YouTube以外は初回取得を原則無通知で初期化。YouTubeは最新の未通知動画1件を初回から通知対象にします。Qiita/Zennは鮮度を優先するため、全件保存・完全網羅ではありません。通知済み履歴の既定保持期間は通常10日、YouTubeは無期限です。監視対象IDごとに`retentionDays`で変更できます。
+**重要な動作:** 投稿IDで重複送信を抑止し、未送信分と再試行時刻をD1に記録します。YouTube以外は初回取得を原則無通知で初期化。YouTubeは最新の未通知動画1件を初回から通知対象にします。Qiita/Zennは鮮度を優先するため、全件保存・完全網羅ではありません。通知済み履歴の既定保持期間は**すべての情報源で10日**です。監視対象IDごとに`retentionDays`で変更できます。
 
 **スケジュール:** Workerは5分ごとに起動し、原則1回に1監視対象を処理します。監視対象ごとに設定した間隔は「実行可能になる時刻」であり厳密な実行保証ではありません。送信は1回最大3件。通知時間帯外でも**取得とキュー保存を継続**します。
 
@@ -92,7 +92,7 @@ npm install
 
 ### 監視対象ごとの保存期間 (Cloudflare / GitHub Actions共通)
 
-`retentionDays` は、**通知済み履歴の保存日数**と、期限切れの投稿を再検出しないための期間です。取得間隔(`intervals`)とは独立しています。公開設定は [`config/targets.json`](config/targets.json) の最上位、非公開設定は `MONITOR_CONFIG_JSON` の最上位に指定します。省略した対象は現行の既定値 (YouTube以外10日、YouTubeは無期限) を使用します。
+`retentionDays` は、**通知済み履歴の保存日数**と、期限切れの投稿を再検出しないための期間です。取得間隔(`intervals`)とは独立しています。公開設定は [`config/targets.json`](config/targets.json) の最上位、非公開設定は `MONITOR_CONFIG_JSON` の最上位に指定します。省略した対象はすべて**10日**を使用します。
 
 ```json
 "retentionDays": {

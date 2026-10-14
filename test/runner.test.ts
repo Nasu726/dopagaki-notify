@@ -1163,7 +1163,7 @@ test('YouTube announces only the newest video on the very first successful poll,
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
   const monitor: Monitor = { id: 'youtube-first', source: 'youtube', query: '@example',
-    intervalMinutes: 60, enabled: true };
+    intervalMinutes: 60, enabled: true, retentionDays: null };
   const now = Date.parse('2026-10-13T03:00:00Z');
   s.setItems([
     { id: 'youtube:veryOld0001', title: 'Old video',
@@ -1180,7 +1180,7 @@ test('YouTube announces only the newest video on the very first successful poll,
   await runTick(s.env, [monitor], now + 60 * 60_000, s.deps);
   assert.deepEqual(s.sent, ['youtube:oldNewest01'], 'same video must not be delivered twice');
   const afterRetention = now + 11 * 86400_000;
-  await pruneSentDeliveries(s.env.DB, afterRetention);
+  await pruneSentDeliveries(s.env.DB, afterRetention, [monitor]);
   assert.equal(s.raw.prepare("SELECT COUNT(*) AS c FROM deliveries WHERE monitor_id=?")
     .get(monitor.id)?.c, 1, 'YouTube sent receipts must be retained permanently');
   await runTick(s.env, [monitor], afterRetention, s.deps);
@@ -1234,7 +1234,7 @@ test('a very old YouTube latest upload can notify an already initialized monitor
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
   const monitor: Monitor = { id: 'youtube-oldest-latest', source: 'youtube', query: '@example',
-    intervalMinutes: 60, enabled: true };
+    intervalMinutes: 60, enabled: true, retentionDays: null };
   const now = Date.parse('2026-10-13T02:00:00Z');
   // An empty initial feed successfully initializes the monitor.
   await runTick(s.env, [monitor], now, s.deps);
@@ -1249,7 +1249,7 @@ test('a very old YouTube latest upload can notify an already initialized monitor
     .get(ancient.id)?.status, 'sent');
 });
 
-test('YouTube sent ID receipts outlive the ten-day cleanup while other sources are pruned', async () => {
+test('YouTube sent ID receipts use the same ten-day cleanup as other sources by default', async () => {
   const s = setup();
   const now = Date.parse('2026-10-13T03:00:00Z');
   s.raw.prepare(
@@ -1260,9 +1260,9 @@ test('YouTube sent ID receipts outlive the ten-day cleanup while other sources a
     "INSERT INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at,sent_at) "+
     "VALUES ('qiita-rust','qiita:oldreceipt','sent','Article','https://qiita.com/a',?,?,?)"
   ).run(now-400*86400_000, now-20*86400_000, now-20*86400_000);
-  assert.equal(await pruneSentDeliveries(s.env.DB, now), 1);
+  assert.equal(await pruneSentDeliveries(s.env.DB, now), 2);
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='youtube:abc123DEF00'")
-    .get()?.status, 'sent');
+    .get(), undefined);
   assert.equal(s.raw.prepare("SELECT status FROM deliveries WHERE item_id='qiita:oldreceipt'")
     .get(), undefined);
 });

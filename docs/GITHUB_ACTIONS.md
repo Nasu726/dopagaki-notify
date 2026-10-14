@@ -42,7 +42,7 @@ Wikipedia を有効にした場合、API リクエストの User-Agent はフォ
 
 ## 通知履歴の保存期間
 
-Cloudflare版と同じ`retentionDays`設定を`MONITOR_CONFIG_JSON`の最上位に指定できます。監視ID単位で正の整数(1〜36500日)または`null`(無期限)を使います。省略時は通常10日、YouTubeは無期限。これは**暗号化Artifact自体の保持期限(テンプレートでは30日)**とは別です。短いArtifact期限を`retentionDays`で延長することはできません。
+Cloudflare版と同じ`retentionDays`設定を`MONITOR_CONFIG_JSON`の最上位に指定できます。監視ID単位で正の整数(1〜36500日)または`null`(無期限)を使います。省略時はYouTubeを含む全情報源で10日。これは**暗号化Artifact自体の保持期限(テンプレートでは30日)**とは別です。短いArtifact期限を`retentionDays`で延長することはできません。
 
 ## 状態の保存とプライバシー
 
