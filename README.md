@@ -176,7 +176,21 @@ npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID
 npx wrangler d1 migrations apply dopagaki-notify --remote
 ```
 
-`YOUR_D1_DATABASE_UUID`は**自分が作成した**D1のID。リポジトリの`wrangler.jsonc`にある値は元の作者環境用で、そのまま使わないでください。D1名/Worker名を変更する場合は以後のコマンドにも反映し、バインディング名`DB`は維持します。
+`YOUR_D1_DATABASE_UUID` は自分のCloudflareアカウントで作成したD1のIDです。公開される [`wrangler.example.jsonc`](wrangler.example.jsonc) にはダミーのUUIDしかありません。`setup:cloudflare`が、自分のUUIDを指定した**Git管理対象外の `wrangler.jsonc`** を生成します。D1名/Worker名の変更は生成後のローカル設定に反映し、バインディング名 `DB` は維持してください。
+
+### Cloudflare Workers Buildsで自動デプロイする場合
+
+公開リポジトリに実D1 UUIDをコミットしないため、`wrangler.jsonc` はGitの管理対象外です。CloudflareのGit連携による自動デプロイを利用する場合は、**マージ前に**CloudflareダッシュボードのWorker → **Settings → Builds** で次を設定してください。
+
+- **Build環境変数** `D1_DATABASE_ID` : 自分のCloudflare D1 UUID
+- **Build command** : `npm run setup:cloudflare -- "$D1_DATABASE_ID"`
+- **Deploy command** : `npx wrangler deploy` (通常の既定値)
+
+このBuild commandは**旧版のセットアップスクリプトでも機能する**ため、先にCloudflare側へ設定・試験してからリポジトリ側を切り替えられます。`D1_DATABASE_ID` はWorkerのランタイムSecretとは別のBuild環境変数です。UUID自体はアクセス用資格情報ではありません。
+
+**既存のcloneを更新する場合:** 以前Gitで追跡していた `wrangler.jsonc` が削除されるので、更新前にローカルの設定を安全な場所へバックアップしてください。`git pull`後に `npm run setup:cloudflare -- YOUR_D1_DATABASE_UUID` を再実行し、カスタマイズ箇所も必要に応じて戻します。Gitの過去コミットからUUIDが消えるわけではありませんが、通常はUUIDのためにD1を再作成する必要はありません。
+
+[詳しい移行手順](docs/CLOUDFLARE_BINDING.md)
 
 ### 2-2. DiscordのWebhookを登録
 
