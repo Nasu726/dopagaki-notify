@@ -129,9 +129,20 @@ npx wrangler secret put NOTIFICATION_WINDOW_JST
 
 対話入力に`08:00-20:00`などを指定してください。優先順位は**`NOTIFICATION_WINDOW_JST` Secret ＞ `MONITOR_CONFIG_JSON`内の値 ＞ 公開`targets.json`**です。
 
-> **運用例:** このプロジェクトの実運用では、Cloudflare側のSecretを`08:00-20:00`に設定しています。ただし**公開リポジトリの既定値は`null` (24時間)**のままで、フォークには個人の設定は引き継がれません。
-
 [検証方法とよくある設定ミス](docs/CONFIG_PREFLIGHT.md)
+
+
+### YouTube Data API のキーと無料割当 (任意)
+
+デフォルトでは YouTube RSS を使用し、APIキーは不要です。Google Cloudで YouTube Data API v3 を有効化し、発行したAPIキーを Cloudflare WorkerのSecret `YOUTUBE_API_KEY` に登録すると、`videoType: "all"` (省略時も含む) のYouTube監視は**次の取得から自動的にData APIへ切り替わります**。RSSへの暗黙のフォールバックはしません。
+
+```sh
+npx wrangler secret put YOUTUBE_API_KEY
+```
+
+`videoType: "videos"` はShorts除外のため引き続き非公式の通常動画専用RSSを使用します。Data APIには同等のShorts判定フラグがありません。Google公式の[クォータ表](https://developers.google.com/youtube/v3/determine_quota_cost)では、通常エンドポイントのデフォルト割当は**10,000ユニット/日**です。現実装は1回の取得で `channels.list` (1ユニット) + `playlistItems.list` (1ユニット) = **計2ユニット**。60分間隔なら1チャンネルにつき48ユニット/日、5チャンネルで240ユニット/日 (すべての取得が予定どおり成功した概算)。失敗したリクエストでもクォータを消費します。割当量・リセット日時・利用量はGoogle Cloud Consoleで確認してください。
+
+APIキーは**YouTube Data API v3のみ許可するAPI制限**を設定し、GitHubにコミットしないでください。キーを登録しなくてもRSSモードは継続します。ローカルでAPI動作だけを確認したい場合は、秘密のローカル環境変数 `YOUTUBE_API_KEY` を指定して、`videoType: "all"` の監視を `npm run smoke -- --monitor=ID` で試せます (Discord送信・D1更新なし)。実環境の正常動作はWorkerのログで別途確認してください。
 
 ## 2. Cloudflareで動かす
 

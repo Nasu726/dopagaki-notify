@@ -38,3 +38,5 @@ To claim real end-to-end success, require a successful Cloudflare fetch, the cor
 ## 日本語の要点
 
 デフォルトは **取得と診断のみ** で、Discord通知もD1変更も行いません。明示的に `--send-test --confirm-send` の両方を指定したときだけ `[TEST]` 表記の通知を1件送信します。これはローカル環境での診断であり、Cloudflare本番の正常動作確認にはなりません。本番ではCloudflare LogsとD1の送信履歴を別途確認してください。
+
+When `YOUTUBE_API_KEY` is provided privately, the adapter uses YouTube Data API for `videoType: "all"` monitors; `videoType: "videos"` monitors deliberately stay on UULF RSS. The key is not printed and no D1 or Discord action occurs in default dry-run mode. The key is an optional feature, not required for no-key RSS monitoring.

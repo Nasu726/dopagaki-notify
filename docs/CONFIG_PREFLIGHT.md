@@ -53,10 +53,6 @@ Cron outcome. This does **not** access or echo Secret values. Since a broken
 Secret persists until an operator fixes it, a scheduled error may recur on
 each Cron; the check cannot inspect Cloudflare Secrets from GitHub CI.
 
-The current production operator preference is `08:00-20:00` JST, provided as
-a private Cloudflare Secret. The repository's public default is still
-`null` (unrestricted 24-hour sending).
-
 ## Still requiring live verification
 
 This preflight cannot prove a currently deployed Cloudflare Secret is valid or eliminate repeated scheduled errors on deployments made outside checked tooling. After updating Cloudflare settings, check Observability logs and the next scheduled execution. A runtime-safe single-error/cooldown strategy is tracked separately in Issue #57.

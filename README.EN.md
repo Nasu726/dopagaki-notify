@@ -129,9 +129,20 @@ npx wrangler secret put NOTIFICATION_WINDOW_JST
 
 Enter `08:00-20:00` (or your choice) into the prompt. Precedence: **dedicated Secret > window in private `MONITOR_CONFIG_JSON` > checked-in `targets.json`**.
 
-> **Operator-specific example:** The project's current production Cloudflare Secret is `08:00-20:00`. The **checked-in default is still `null` (unrestricted, 24-hour sending)** and forks do not inherit the operator's Secret.
-
 [Config preflight reference](docs/CONFIG_PREFLIGHT.md).
+
+
+### YouTube Data API key and default quota (optional)
+
+YouTube RSS needs **no API key**. If you enable YouTube Data API v3 in Google Cloud and register your key as the **`YOUTUBE_API_KEY` Cloudflare Worker Secret**, all YouTube monitors using `videoType: "all"` (including the default) **automatically use the official Data API from their next eligible poll**. Failures are retried; the adapter does not silently fall back to RSS.
+
+```sh
+npx wrangler secret put YOUTUBE_API_KEY
+```
+
+`videoType: "videos"` intentionally **stays on the undocumented videos-only RSS** so it can exclude Shorts; the Data API exposes no equivalent Shorts classification flag. Per Google's current [quota calculator](https://developers.google.com/youtube/v3/determine_quota_cost), the default shared daily quota for these read methods is **10,000 units/day**. Each poll of one channel uses `channels.list` (1 unit) + `playlistItems.list` (1 unit) = **2 units**. At 60-minute intervals, that's 48 units/channel/day or 240 units/day for five such channels (assuming the intended number of polls). Failed API requests still consume quota. The Cloud Console shows your actual quota allocation, usage, and reset.
+
+Restrict the key's **allowed APIs to YouTube Data API v3**, keep it out of git, and do not paste it into public logs. RSS mode continues when no key is configured. For an optional *local read-only* API smoke test, privately export `YOUTUBE_API_KEY` and run `npm run smoke -- --monitor=ID` for an `all`-uploads monitor (no D1 access or Discord send). Check deployed Worker logs separately for actual runtime confirmation.
 
 ## 2. Deploy with Cloudflare
 
