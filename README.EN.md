@@ -6,7 +6,7 @@ Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using **Clo
 
 [日本語](README.md) · [Features & delivery policy](#features-and-delivery-policy) · [Commands](#operations-and-troubleshooting) · [MIT License](LICENSE)
 
-> **Runtime:** Choose Cloudflare Workers + D1 or GitHub Actions + SQLite. Sources, private monitor configuration, delivery windows and per-monitor retention are shared; GitHub Actions has different scheduling and Artifact-recovery guarantees. QuizKnock's **regular-video-only RSS → Discord** delivery has been verified in production. YouTube thumbnails currently fail to render in Discord and are a non-blocking, [deferred issue (#64)](https://github.com/Nasu726/dopagaki-notify/issues/64).
+> **Runtime:** Choose Cloudflare Workers + D1 or GitHub Actions + SQLite. Sources, private monitor configuration, delivery windows and per-monitor retention are shared; GitHub Actions has different scheduling and Artifact-recovery guarantees. **All public example monitors are disabled by default**. YouTube thumbnails currently fail to render in Discord and are a non-blocking, [issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64).
 
 ## Choose your path
 
@@ -26,7 +26,7 @@ Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using **Clo
 | `npm run config:check` | Validate local configuration; no sends or D1 writes |
 | `npm run check` | TypeScript typecheck and all tests |
 | `npm run deploy` | Config preflight, then **deploy production Worker** |
-| `npm run smoke -- --monitor=youtube-quizknock` | Fetch one upstream snapshot; no D1 or Discord changes |
+| `npm run smoke -- --monitor=qiita-example` | Fetch one upstream snapshot; no D1 or Discord changes |
 | `npm run inspect:discord -- --help` | Read-only diagnostics for an **existing** Discord message |
 | `npm run dev` | Start the local development Worker |
 
@@ -57,7 +57,7 @@ cd dopagaki-notify
 npm install
 ```
 
-Choose **checked-in public JSON** or a **private runtime Secret**. Both Cloudflare and GitHub Actions support the same target configuration; Actions defaults to private mode for safety:
+Choose **checked-in public JSON** or a **private runtime Secret**. Both Cloudflare and GitHub Actions support the same target configuration; Actions defaults to private mode for safety. **All checked-in sample targets are disabled** until enabled by the fork owner. Wikipedia is controlled by `wikipediaEnabled`:
 
 - [`config/targets.json`](config/targets.json): Sources, targets, `enabled` flags, and the public `notificationWindowJst`.
 - [`config/intervals.json`](config/intervals.json): Positive integer intervals **in minutes**, keyed by monitor `id`.
@@ -78,7 +78,8 @@ Sample target fragment (a complete `targets.json` must include all source catego
     "videoType": "videos",
     "enabled": true
   }],
-  "notificationWindowJst": null
+  "notificationWindowJst": null,
+  "wikipediaEnabled": false
 }
 ```
 
@@ -86,7 +87,7 @@ Provide intervals for the IDs above and for `wikipedia-ja-discovery` if using th
 
 **Monitor identity:** Do not reuse an existing `id` for a different provider/query/channel. D1 pins it to its original source/query identity to protect historical receipts. For a changed subject, create a new `id`. Changing intervals is safe.
 
-**Exclude YouTube Shorts:** Set `"videoType": "videos"` **and a pinned `channelId`** to use the undocumented `UULF` RSS playlist for regular videos only (also excludes live streams). Omitted or `"all"` means all uploads. This URL is **not an officially supported YouTube API contract**; if it fails, the monitor does **not** silently fall back to a Shorts-inclusive feed. Only QuizKnock opts in in the checked-in sample. Videos-only monitors use RSS even if `YOUTUBE_API_KEY` is present; other YouTube monitors can use the optional [YouTube Data API v3](https://developers.google.com/youtube/v3).
+**Exclude YouTube Shorts:** Set `"videoType": "videos"` **and a pinned `channelId`** to use the undocumented `UULF` RSS playlist for regular videos only (also excludes live streams). Omitted or `"all"` means all uploads. This URL is **not an officially supported YouTube API contract**; if it fails, the monitor does **not** silently fall back to a Shorts-inclusive feed. The checked-in sample monitors no channel. Videos-only monitors use RSS even if `YOUTUBE_API_KEY` is present; other YouTube monitors can use the optional [YouTube Data API v3](https://developers.google.com/youtube/v3).
 
 **OpenAlex:** Query formats are `search:graph algorithms`, `topic:T12345`, `author:A12345`. Optional `OPENALEX_API_KEY` increases API allowance. See the [deployment runbook](docs/DEPLOYMENT.md) for details.
 
@@ -95,10 +96,12 @@ Provide intervals for the IDs above and for `wikipedia-ja-discovery` if using th
 `retentionDays` configures **how long acknowledged receipts are stored** and how long old content may remain eligible for rediscovery, independently of the polling interval. In checked-in configuration, set it at the top level of [`config/targets.json`](config/targets.json); for private configurations, put the same field at the top level of `MONITOR_CONFIG_JSON`. Unspecified monitors use the **10-day default, including YouTube**.
 
 ```json
-"retentionDays": {
-  "youtube-example": 365,
-  "qiita-go": 30,
-  "zenn-rust": null
+{
+  "retentionDays": {
+    "youtube-example": 365,
+    "qiita-example": 30,
+    "zenn-example": null
+  }
 }
 ```
 
@@ -235,7 +238,7 @@ npx wrangler d1 execute dopagaki-notify --remote --command "SELECT monitor_id,it
 
 `initialized_at` / `last_complete_at` track completed upstream scans. A `sent` receipt means Discord accepted the webhook, **not** that it displayed remote images. No new content generally means no Discord message. YouTube may send its latest unseen upload on its first poll if it is within the configured retention horizon.
 
-If Workers Builds is enabled, verify the live deployment is actually the intended `main` revision.
+If Workers Builds is enabled, verify the deployed commit matches **your configured production branch**. In this upstream repository, `main` is the public template and `production` is the maintainer's deployment branch. Editing `main` alone does not deploy that production Worker. Branches in a public repository are public, including `production`.
 
 ## 3. GitHub Actions + SQLite (optional)
 
@@ -272,23 +275,23 @@ Set the Actions repository Variable `MONITOR_CONFIG_MODE=private` (default). To 
 npm run config:check
 # Follow deployed Worker logs
 npx wrangler tail dopagaki-notify --format pretty
-# Fetch one source locally without sending or writing D1
-npm run smoke -- --monitor=youtube-quizknock
+# Fetch the disabled public Qiita example locally without sending or writing D1
+npm run smoke -- --monitor=qiita-example
 ```
 
 ### Safe diagnostic commands
 
-**Bring forward the production scan:** `npm run poll:request -- --monitor=youtube-quizknock` previews guarded SQL. Add `--confirm-remote` to update only the selected monitor's D1 due time and request fetching on the **next Cron**; it does not run the Worker immediately or reset sent receipts. [Production polling guide](docs/PRODUCTION_POLL.md).
+**Bring forward the production scan:** `npm run poll:request -- --monitor=qiita-example` previews guarded SQL. Add `--confirm-remote` to update only the selected monitor's D1 due time and request fetching on the **next Cron**; it does not run the Worker immediately or reset sent receipts. [Production polling guide](docs/PRODUCTION_POLL.md).
 
 **One-off fetch:** `npm run smoke -- --monitor=ID` fetches a real snapshot **from your local machine**, not the deployed Cloudflare runtime. Default mode does not access D1 or send Discord messages. Both `--send-test --confirm-send` must be supplied to send one explicitly labeled `[TEST]` notification using your local webhook Secret. See [manual smoke guide](docs/MANUAL_SMOKE.md).
 
 **Discord thumbnail investigation:** Supply the private `DISCORD_WEBHOOK_YOUTUBE` to your local environment, then inspect the **link of an already delivered** Discord notification:
 
 ```sh
-npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image
+npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image --probe-proxy
 ```
 
-The tool uses **GET only**; no notification replay or D1 writes. It reports saved `image` / `thumbnail`, Discord image-proxy presence and dimensions, with sanitized output. Never share the webhook URL or token. [Diagnostic guide](docs/DISCORD_THUMBNAIL_DIAG.md).
+The tool uses **GET only** (message and image probes); no notification replay or D1 writes. It reports saved `image` / `thumbnail`, Discord image-proxy presence and dimensions, with sanitized output. Never share the webhook URL or token. [Diagnostic guide](docs/DISCORD_THUMBNAIL_DIAG.md).
 
 
 **If images do not render:** Queued Qiita/Zenn image persistence and YouTube Discord media rendering are different failure layers. See [media reliability and migration guide](docs/IMAGE_RELIABILITY.md). An additive D1 migration enables source-media retention; the Worker keeps ordinary notification delivery working before it is applied.

@@ -6,7 +6,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。**Clou
 
 [English](README.EN.md) · [機能と制約](#機能と通知ルール) · [運用コマンド](#運用とトラブルシューティング) · [MIT License](LICENSE)
 
-> **実行方式:** Cloudflare Workers + D1、GitHub Actions + SQLiteのいずれかを選択できます。ソース・監視対象・非公開設定・通知時間帯・保存期間は共通です。Actionsにはスケジュール遅延やArtifactの保持期限があります。YouTubeのQuizKnock **通常動画専用RSS → Discord通知は本番で確認済み**。YouTubeのサムネイルはDiscordで表示されない事象があり、[Issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64)で低優先度の調査待ちです。
+> **実行方式:** Cloudflare Workers + D1、GitHub Actions + SQLiteのいずれかを選択できます。ソース・監視対象・非公開設定・通知時間帯・保存期間は共通です。Actionsにはスケジュール遅延やArtifactの保持期限があります。**公開テンプレートの監視対象はすべて初期状態で無効**です。YouTubeのサムネイルはDiscordで表示されない事象があり、[Issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64)で調査中です。
 
 ## どこから始める？
 
@@ -26,7 +26,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。**Clou
 | `npm run config:check` | 公開設定とローカル環境の検証。通知・D1書込なし |
 | `npm run check` | TypeScriptの型検査と自動テスト |
 | `npm run deploy` | 事前設定チェック → **Cloudflare本番へデプロイ** |
-| `npm run smoke -- --monitor=youtube-quizknock` | 今すぐ1回取得するだけ。Discord・D1変更なし |
+| `npm run smoke -- --monitor=qiita-example` | 今すぐ1回取得するだけ。Discord・D1変更なし |
 | `npm run inspect:discord -- --help` | **既存**Discord通知の画像を読み取り専用で診断 |
 | `npm run dev` | ローカルWorkerを起動 |
 
@@ -57,7 +57,7 @@ cd dopagaki-notify
 npm install
 ```
 
-監視設定は**公開JSON**か**Secretによる非公開設定**のどちらかです。Cloudflare Worker・GitHub Actionsともに両方選べます (Actionsは非公開が安全な既定値)。
+監視設定は**公開JSON**か**Secretによる非公開設定**のどちらかです。Cloudflare Worker・GitHub Actionsともに両方選べます (Actionsは非公開が安全な既定値)。**公開サンプルの監視対象はすべて無効**です。購読を始めるには対象の`enabled`を`true`にするか、非公開設定で監視対象を指定してください。Wikipediaは`wikipediaEnabled`で切り替えられます。
 
 - [`config/targets.json`](config/targets.json): 監視対象と`enabled`、公開設定の`notificationWindowJst`。
 - [`config/intervals.json`](config/intervals.json): 監視`id`ごとの取得間隔 (分)。正の整数。
@@ -78,7 +78,8 @@ npm install
     "videoType": "videos",
     "enabled": true
   }],
-  "notificationWindowJst": null
+  "notificationWindowJst": null,
+  "wikipediaEnabled": false
 }
 ```
 
@@ -86,7 +87,7 @@ npm install
 
 **IDの互換性:** すでに稼働した監視`id`で、情報源や`query` / チャンネルを別の対象に変えないでください。D1が対象の識別情報を保持しており、意図しない履歴混在を拒否します。別の対象には新しい`id`を使います。間隔の変更は安全です。
 
-**YouTubeでShortsを除外:** `"videoType": "videos"` と固定の`channelId`を指定すると、通常動画だけの非公式`UULF` RSSを使います (Shortsとライブ配信も除外)。省略・`"all"`は従来どおりすべてのアップロードを取得します。**このフィードはYouTubeの公式保証外**で、取得に失敗してもShorts混在フィードに無断で戻しません。現在の公開設定ではQuizKnockのみ`videos`。`YOUTUBE_API_KEY`を設定していても`videos`の監視はRSSを使用します。その他は任意の[YouTube Data API v3](https://developers.google.com/youtube/v3)に対応します。
+**YouTubeでShortsを除外:** `"videoType": "videos"` と固定の`channelId`を指定すると、通常動画だけの非公式`UULF` RSSを使います (Shortsとライブ配信も除外)。省略・`"all"`は従来どおりすべてのアップロードを取得します。**このフィードはYouTubeの公式保証外**で、取得に失敗してもShorts混在フィードに無断で戻しません。公開例ではチャンネル監視を有効化していません。`YOUTUBE_API_KEY`を設定していても`videos`の監視はRSSを使用します。その他は任意の[YouTube Data API v3](https://developers.google.com/youtube/v3)に対応します。
 
 **OpenAlex:** `search:graph algorithms`、`topic:T12345`、`author:A12345`に対応。APIキー`OPENALEX_API_KEY`は任意です。詳細は[運用資料](docs/DEPLOYMENT.md)。
 
@@ -95,10 +96,12 @@ npm install
 `retentionDays` は、**通知済み履歴の保存日数**と、期限切れの投稿を再検出しないための期間です。取得間隔(`intervals`)とは独立しています。公開設定は [`config/targets.json`](config/targets.json) の最上位、非公開設定は `MONITOR_CONFIG_JSON` の最上位に指定します。省略した対象はすべて**10日**を使用します。
 
 ```json
-"retentionDays": {
-  "youtube-example": 365,
-  "qiita-go": 30,
-  "zenn-rust": null
+{
+  "retentionDays": {
+    "youtube-example": 365,
+    "qiita-example": 30,
+    "zenn-example": null
+  }
 }
 ```
 
@@ -235,7 +238,7 @@ npx wrangler d1 execute dopagaki-notify --remote --command "SELECT monitor_id,it
 
 `initialized_at` / `last_complete_at`は最後の正常取得、`status=sent`はDiscord Webhookへの送信成功を示します。**画像が実際に描画された証拠にはなりません。** 投稿が無ければ通知が無いのは正常です。YouTubeの初回通知は保持期間内の最新動画が対象です (既定10日、個別設定可)。
 
-Cloudflare Workers Buildsを接続している場合は、デプロイ済みのバージョンと`main`が一致することも確認してください。
+Cloudflare Workers Buildsを接続している場合は、**設定した本番ブランチ**とデプロイ済みコミットが一致することを確認してください。このリポジトリでは`main`が公開テンプレート、`production`が作者の本番ブランチです。**`main`への変更だけでは本番Workerは更新されません。**フォーク利用者は自身のデプロイ対象ブランチを設定してください。公開リポジトリ上のブランチはどちらも公開されます。
 
 ## 3. GitHub Actions + SQLiteを使う (任意)
 
@@ -272,23 +275,23 @@ GitHub Actionsの**Variables**に`MONITOR_CONFIG_MODE=private`(既定)を設定�
 npm run config:check
 # 本番Workerの実行ログを見る
 npx wrangler tail dopagaki-notify --format pretty
-# ローカルで動作確認 (本番D1もDiscordも変更しない)
-npm run smoke -- --monitor=youtube-quizknock
+# 公開サンプルのQiita取得 (初期状態では無効・本番D1もDiscordも変更しない)
+npm run smoke -- --monitor=qiita-example
 ```
 
 ### 安全な診断コマンド
 
-**本番で取得を前倒し:** `npm run poll:request -- --monitor=youtube-quizknock` はSQLのプレビューのみ。`--confirm-remote` を付けたときだけCloudflare D1の`next_due_at`を更新し、**次のCron**での取得を依頼します。直ちにWorkerが実行されるわけではありません。既存の送信済み履歴は残ります。[本番実行の手順](docs/PRODUCTION_POLL.md)。
+**本番で取得を前倒し:** `npm run poll:request -- --monitor=qiita-example` はSQLのプレビューのみ。`--confirm-remote` を付けたときだけCloudflare D1の`next_due_at`を更新し、**次のCron**での取得を依頼します。直ちにWorkerが実行されるわけではありません。既存の送信済み履歴は残ります。[本番実行の手順](docs/PRODUCTION_POLL.md)。
 
 **手動取得:** `npm run smoke -- --monitor=ID` はその場で実際の情報源を1回取得しますが、**本番Cloudflare環境ではありません**。デフォルトでDiscord送信もD1変更も行いません。明示的な`--send-test --confirm-send`を**両方指定した場合のみ**、ローカル環境のWebhookで`[TEST]`通知を1件送信します。詳しくは[手動スモークテスト](docs/MANUAL_SMOKE.md)。
 
 **Discord画像:** ローカルの非公開`DISCORD_WEBHOOK_YOUTUBE`を設定し、すでに届いたメッセージのリンクを渡します。
 
 ```sh
-npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image
+npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image --probe-proxy
 ```
 
-これは**既存メッセージのGETのみ**で、再送信しません。`thumbnail` / `image`、Discordの画像プロキシ、画像サイズを検査します。トークンやWebhook URLを共有しないでください。[画像診断手順](docs/DISCORD_THUMBNAIL_DIAG.md)。
+これは**既存メッセージおよび画像の読み取り専用GETのみ**で、再送信しません。`thumbnail` / `image`、Discordの画像プロキシ、画像サイズを検査します。トークンやWebhook URLを共有しないでください。[画像診断手順](docs/DISCORD_THUMBNAIL_DIAG.md)。
 
 
 **画像が表示されない場合:** Qiita/Zennで遅延通知の元画像を保持する機構と、YouTubeのDiscord画像表示の診断は別の問題です。[画像通知の診断・マイグレーション手順](docs/IMAGE_RELIABILITY.md)を参照してください。Qiita/Zenn画像の保持にはD1の新しいオプション列が必要ですが、適用前でも通常通知は継続します。
