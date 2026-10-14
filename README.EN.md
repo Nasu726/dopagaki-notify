@@ -253,6 +253,9 @@ npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID
 
 The tool uses **GET only**; no notification replay or D1 writes. It reports saved `image` / `thumbnail`, Discord image-proxy presence and dimensions, with sanitized output. Never share the webhook URL or token. [Diagnostic guide](docs/DISCORD_THUMBNAIL_DIAG.md).
 
+
+**If images do not render:** Queued Qiita/Zenn image persistence and YouTube Discord media rendering are different failure layers. See [media reliability and migration guide](docs/IMAGE_RELIABILITY.md). An additive D1 migration enables source-media retention; the Worker keeps ordinary notification delivery working before it is applied.
+
 ## Development and design
 
 ```sh

@@ -5,8 +5,8 @@ export interface ContentItem {
   title: string;
   url: string;
   publishedAt: number; // publication time for news; recommendation time for Wikipedia discovery
-  imageUrl?: string; // optional RSS/OG image, enriched at delivery; not stored in D1
-  thumbnailUrl?: string; // Qiita author icon fallback when article OGP is unavailable (transient)
+  imageUrl?: string; // optional RSS/OG image; safely persisted for queued Qiita/Zenn deliveries after migration 0010
+  thumbnailUrl?: string; // Qiita author icon fallback, optionally persisted for queued delivery
   discoveryKind?: 'featured' | 'random'; // transient Wikipedia selection metadata (not persisted)
 }
 export interface Monitor {
@@ -67,4 +67,6 @@ export interface Delivery {
   url: string;
   published_at: number;
   attempts: number;
+  image_url?: string | null; // source-provided public image after optional migration
+  thumbnail_url?: string | null; // public fallback avatar after optional migration
 }

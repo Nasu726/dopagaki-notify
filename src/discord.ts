@@ -85,9 +85,9 @@ async function zennRssThumbnail(item: ContentItem, fetcher: typeof fetch): Promi
   }
 }
 
-/** Production sender: image metadata is best-effort and transient.
- * RSS images are preferred. No outbox migration: queued articles can obtain
- * them from the author's feed, then fall back to HTML Open Graph metadata.
+/** Production sender: image metadata remains optional. Prefer source-provided
+ * media (possibly restored from a queued D1 record); otherwise fetch author
+ * RSS/HTML at delivery time. Missing media must never block notification.
  */
 export async function notifyDiscordWithArticleThumbnails(
   webhook: string, source: string, item: ContentItem, fetcher: typeof fetch = fetch,
