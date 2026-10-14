@@ -145,7 +145,8 @@ export async function stageInitialIgnored(
 
 export async function stage(
   db: Database, monitorId: string, items: readonly ContentItem[], baselineAt: number | null, now: number,
-  options: { allowHistoricalFirstItem?: boolean; imageSource?: 'qiita' | 'zenn' } = {},
+  options: { allowHistoricalFirstItem?: boolean; imageSource?: 'qiita' | 'zenn';
+    retentionDays?: number | null } = {},
 ): Promise<void> {
   // Usually the first observation is a silent time-based baseline.
   // For YouTube, always consider the freshest item even if it predates the
@@ -154,10 +155,16 @@ export async function stage(
   // Normal non-YouTube receipts expire after ten days. YouTube sent receipts
   // are retained permanently to ensure even an old latest video is not
   // re-announced after a long interval or temporary feed regression.
-  const retentionCutoff = now - DELIVERY_RETENTION_MS;
+  const retentionCutoff = options.retentionDays === null ? -Infinity
+    : now - (options.retentionDays === undefined
+      ? DELIVERY_RETENTION_MS : options.retentionDays * 24 * 60 * 60_000);
   const eligibleAfter = Math.max(baselineAt ?? now, retentionCutoff);
   const eligible = items.filter((item, index) =>
-    (options.allowHistoricalFirstItem && index === 0) ||
+    (options.allowHistoricalFirstItem && index === 0 &&
+      // Explicit finite YouTube retention forbids reannouncing an old latest
+      // upload after its sent receipt expires. Unlimited default preserves
+      // the existing behavior (including arbitrarily old first videos).
+      (options.retentionDays === undefined || item.publishedAt > retentionCutoff)) ||
     (baselineAt !== null && item.publishedAt > eligibleAfter));
   // Image-bearing rows use 9 SQL bindings; cap at 10 (90 <= D1's 100).
   // The original 12x7 batching remains for every other source.

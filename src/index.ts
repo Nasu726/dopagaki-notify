@@ -15,7 +15,9 @@ export default {
       // Separate retention invocation keeps its D1 deletion cost outside polling.
       if (event.cron === '10 * * * *') {
         phase = 'retention';
-        const deleted = await pruneSentDeliveries(env.DB, Date.now());
+        const monitors = loadRuntimeMonitors(env.MONITOR_CONFIG_JSON);
+        validateMonitors(monitors);
+        const deleted = await pruneSentDeliveries(env.DB, Date.now(), monitors);
         if (deleted) console.log('retention: pruned ' + deleted + ' sent delivery receipts');
         return;
       }

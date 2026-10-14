@@ -147,7 +147,8 @@ export async function runTick(
               .filter((item) => item.publishedAt > wikipediaCutoff && item.publishedAt <= now)
               .sort((a, b) => b.publishedAt - a.publishedAt || a.id.localeCompare(b.id))
               .slice(0, MAX_NOTIFICATIONS_PER_TICK);
-          await stage(env.DB, runnable.id, newest, state.initialized_at, now);
+          await stage(env.DB, runnable.id, newest, state.initialized_at, now,
+            { retentionDays: runnable.retentionDays });
         } else if (runnable.source === 'openalex') {
           // OpenAlex's publication_date lacks hour-level precision.
           // Persist initial IDs as 'ignored' to avoid a first-run flood, then
@@ -157,14 +158,15 @@ export async function runTick(
             await stageInitialIgnored(env.DB, runnable.id, result.items, now);
           else
             await stage(env.DB, runnable.id, result.items,
-              now - OPENALEX_LOOKBACK_MS, now);
+              now - OPENALEX_LOOKBACK_MS, now, { retentionDays: runnable.retentionDays });
         } else if (latestOnly) {
           const selected = latestArticles(result.items);
           // Only successful polls may discard a prior alert backlog.
           // No refill from outside the top three if one is already sent.
           await pruneUnselectedArticlePending(env.DB, runnable.id, selected.map((item) => item.id));
           await stage(env.DB, runnable.id, selected, state.initialized_at, now,
-            { imageSource: runnable.source as 'qiita' | 'zenn' });
+            { imageSource: runnable.source as 'qiita' | 'zenn',
+              retentionDays: runnable.retentionDays });
         } else if (runnable.source === 'youtube') {
           // Always notify the latest video if unseen, even when it predates
           // the baseline or our ten-day horizon. Keep sent YouTube receipts
@@ -173,10 +175,11 @@ export async function runTick(
           const sorted = [...result.items].sort((a, b) =>
             b.publishedAt - a.publishedAt || a.id.localeCompare(b.id));
           await stage(env.DB, runnable.id, sorted, state.initialized_at, now,
-            { allowHistoricalFirstItem: true });
+            { allowHistoricalFirstItem: true, retentionDays: runnable.retentionDays });
         } else {
           // arXiv retains its chronological multi-page scan.
-          await stage(env.DB, runnable.id, result.items, state.initialized_at, now);
+          await stage(env.DB, runnable.id, result.items, state.initialized_at, now,
+            { retentionDays: runnable.retentionDays });
         }
         const reachedOverlap = paginated && state.last_complete_at !== null &&
           result.items.some((item) => item.publishedAt <= state.last_complete_at! - LOOKBACK_MS);

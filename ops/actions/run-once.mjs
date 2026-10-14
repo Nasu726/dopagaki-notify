@@ -72,7 +72,7 @@ async function main() {
       // Executes exactly one due monitor and the same Discord send policy.
       await Worker.scheduled({ cron: '*/5 * * * *' }, env);
       // Idempotent, bounded retention; no second workflow Cron is needed.
-      await pruneSentDeliveries(db, Date.now());
+      await pruneSentDeliveries(db, Date.now(), monitors);
     } catch {
       failed = true;
     } finally {
