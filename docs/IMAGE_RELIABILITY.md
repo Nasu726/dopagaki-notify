@@ -26,7 +26,7 @@ Keep a normal monitored source active while verifying that no rows or receipts w
 **First** inspect the existing message rather than guessing which embed image field or CDN host to change. No new Discord messages or D1 writes:
 
 ```sh
-npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD/CHANNEL/MESSAGE" --probe-image
+npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD/CHANNEL/MESSAGE" --probe-image --probe-proxy
 ```
 
 This command requires the matching Discord Webhook URL in a **private local environment**. It prints sanitized image field presence, expected URL match, Discord proxy presence, image dimensions, embed suppression and source image HTTP status, never the webhook token or raw message.

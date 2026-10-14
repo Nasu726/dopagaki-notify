@@ -17,6 +17,8 @@ test('persisted media only accepts public HTTPS URLs with innocuous image parame
     'https://res.cloudinary.com/zenn/image/upload/cover.png');
   assert.equal(persistentMediaUrl('qiita',qiitaUrl,'https://avatars.example.com/u.png?v=4'),
     'https://avatars.example.com/u.png?v=4');
+  assert.equal(persistentMediaUrl('zenn',zennUrl,'https://res.cloudinary.com/zenn/image/upload/a.png?x=1&y=2'),
+    'https://res.cloudinary.com/zenn/image/upload/a.png?x=1&y=2');
   for(const value of [
     'http://example.com/a.png','https://127.0.0.1/private.png',
     'https://localhost/og.png','https://user:pass@example.com/cover.png',

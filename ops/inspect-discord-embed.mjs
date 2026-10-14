@@ -34,14 +34,15 @@ export function parseWebhook(raw) {
 
 export function parseOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return { help: true };
-  let link = null, probeImage = false;
+  let link = null, probeImage = false, probeProxy = false;
   for (const arg of argv) {
     if (arg.startsWith('--message-link=') && link === null) link = arg.slice('--message-link='.length);
     else if (arg === '--probe-image' && !probeImage) probeImage = true;
+    else if (arg === '--probe-proxy' && !probeProxy) probeProxy = true;
     else throw new Error('Invalid or duplicate diagnostic option');
   }
   if (!link) throw new Error('Missing --message-link (run --help)');
-  return { help: false, ...parseDiscordMessageLink(link), probeImage };
+  return { help: false, ...parseDiscordMessageLink(link), probeImage, probeProxy };
 }
 
 function videoIdFromEmbed(embed) {
@@ -95,7 +96,19 @@ export function summarizeMessage(message, expectedChannelId, expectedMessageId) 
 /** One read-only GET for a message, optionally one bounded public image GET
  * on the canonical YouTube CDN; no writes to Discord or D1.
  */
-export async function inspectDiscordEmbed({webhook, channelId, messageId, probeImage = false, fetcher = fetch}) {
+function verifiedDiscordImageProxy(raw) {
+  if (typeof raw !== 'string' || raw.length > 2048) return null;
+  let url;
+  try { url = new URL(raw); } catch { return null; }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || url.hash ||
+      !['images-ext-1.discordapp.net','images-ext-2.discordapp.net','media.discordapp.net'].includes(url.hostname) ||
+      !url.pathname.startsWith('/external/')) return null;
+  return url;
+}
+
+export async function inspectDiscordEmbed({
+  webhook, channelId, messageId, probeImage = false, probeProxy = false, fetcher = fetch,
+}) {
   if (!SNOWFLAKE.test(channelId) || !SNOWFLAKE.test(messageId))
     throw new Error('Invalid Discord channel/message ID');
   const base = parseWebhook(webhook);
@@ -106,7 +119,32 @@ export async function inspectDiscordEmbed({webhook, channelId, messageId, probeI
     redirect: 'error', signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error('Discord message lookup failed (HTTP ' + response.status + ')');
-  const report = summarizeMessage(await response.json(), channelId, messageId);
+  const saved = await response.json();
+  const report = summarizeMessage(saved, channelId, messageId);
+  if (probeProxy) {
+    const media = Array.isArray(saved.embeds) ? saved.embeds.flatMap(
+      e => [e?.thumbnail, e?.image]) : [];
+    const candidate = media.find(m => verifiedDiscordImageProxy(m?.proxy_url));
+    const url = candidate ? verifiedDiscordImageProxy(candidate.proxy_url) : null;
+    if (!url) {
+      report.discordProxyImage = { checked: false, reason: 'No safe Discord image proxy URL available' };
+    } else {
+      try {
+        const proxy = await fetcher(url, {
+          method: 'GET', headers: { Accept: 'image/*', Range: 'bytes=0-0' },
+          redirect: 'manual', signal: AbortSignal.timeout(10_000),
+        });
+        report.discordProxyImage = {
+          checked: true, status: proxy.status,
+          contentType: (proxy.headers.get('content-type') ?? '').split(';')[0].toLowerCase() || null,
+          redirected: proxy.status >= 300 && proxy.status < 400,
+        };
+        await proxy.body?.cancel().catch(() => {});
+      } catch {
+        report.discordProxyImage = { checked: true, status: null, error: 'network_or_timeout' };
+      }
+    }
+  }
   if (probeImage) {
     const id = report.embeds.find(x => x.youtubeVideoId)?.youtubeVideoId;
     if (!id) {
@@ -136,7 +174,7 @@ export async function inspectDiscordEmbed({webhook, channelId, messageId, probeI
 async function main() {
   const options = parseOptions(process.argv.slice(2));
   if (options.help) {
-    console.log('Usage: node ops/inspect-discord-embed.mjs --message-link=https://discord.com/channels/GUILD/CHANNEL/MESSAGE [--probe-image]');
+    console.log('Usage: node ops/inspect-discord-embed.mjs --message-link=https://discord.com/channels/GUILD/CHANNEL/MESSAGE [--probe-image] [--probe-proxy]');
     console.log('Requires private DISCORD_WEBHOOK_YOUTUBE. Read-only GET; no Discord messages sent, no D1 access.');
     return;
   }
@@ -145,6 +183,7 @@ async function main() {
     channelId: options.channelId,
     messageId: options.messageId,
     probeImage: options.probeImage,
+    probeProxy: options.probeProxy,
   });
   console.log(JSON.stringify(report, null, 2));
 }

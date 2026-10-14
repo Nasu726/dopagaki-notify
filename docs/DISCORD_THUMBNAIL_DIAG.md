@@ -27,10 +27,10 @@ node ops/inspect-discord-embed.mjs --message-link="https://discord.com/channels/
 Optionally check whether the YouTube image host can deliver the expected public JPEG **from this machine**:
 
 ```sh
-node ops/inspect-discord-embed.mjs --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image
+node ops/inspect-discord-embed.mjs --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image --probe-proxy
 ```
 
-The optional image check issues a bounded HTTPS GET with a Range header against the fixed public `i.ytimg.com` thumbnail URL. Its success **does not** prove that Discord's own image proxy can fetch it. It may also fail due to local network restrictions.
+The optional `--probe-image` check issues a bounded HTTPS GET with a Range header against the fixed public `i.ytimg.com` thumbnail URL. `--probe-proxy` performs the same check against a strictly allowlisted Discord HTTPS image proxy URL **returned by the already-stored message**, without printing the full URL. Neither check follows redirects or sends a Discord message. Direct source success **does not** prove Discord proxy success; a proxy fetch that fails only from your local network does not establish a global Discord outage.
 
 Run for both the first `#Shorts` alert and the newer ordinary video alert, then compare their results. Remove the credential from the current shell afterward:
 
@@ -52,6 +52,8 @@ The script prints only image field presence, public YouTube video ID, expected-U
 | Image, proxy and positive dimensions all present, yet invisible | Prefer testing Discord desktop/web versus mobile and its Display/Chat image settings; could be client rendering/cache |
 | `--probe-image` reports 404/nonimage | CDN URL / missing video thumbnail is a suspect |
 | `--probe-image` reports 200/206 and `image/jpeg` | Source image is accessible from the operator's network, but Discord proxy may still fail |
+| Source image succeeds, `--probe-proxy` reports an HTTP failure/nonimage | Discord proxy path or access is suspicious; compare with another client/network |
+| Both source and Discord proxy report a valid image, but still invisible in UI | More likely a Discord client/cache/display-setting issue, not missing source media |
 
 The next action depends on the **observed result**. Do not switch CDN hosts, retry/repost existing notifications, remove YouTube ID validation, or change D1 history before this test.
 
