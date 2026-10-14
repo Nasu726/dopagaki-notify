@@ -253,6 +253,9 @@ npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID
 
 これは**既存メッセージのGETのみ**で、再送信しません。`thumbnail` / `image`、Discordの画像プロキシ、画像サイズを検査します。トークンやWebhook URLを共有しないでください。[画像診断手順](docs/DISCORD_THUMBNAIL_DIAG.md)。
 
+
+**画像が表示されない場合:** Qiita/Zennで遅延通知の元画像を保持する機構と、YouTubeのDiscord画像表示の診断は別の問題です。[画像通知の診断・マイグレーション手順](docs/IMAGE_RELIABILITY.md)を参照してください。Qiita/Zenn画像の保持にはD1の新しいオプション列が必要ですが、適用前でも通常通知は継続します。
+
 ## 開発・設計
 
 ```sh

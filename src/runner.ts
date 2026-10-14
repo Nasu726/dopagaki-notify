@@ -163,7 +163,8 @@ export async function runTick(
           // Only successful polls may discard a prior alert backlog.
           // No refill from outside the top three if one is already sent.
           await pruneUnselectedArticlePending(env.DB, runnable.id, selected.map((item) => item.id));
-          await stage(env.DB, runnable.id, selected, state.initialized_at, now);
+          await stage(env.DB, runnable.id, selected, state.initialized_at, now,
+            { imageSource: runnable.source as 'qiita' | 'zenn' });
         } else if (runnable.source === 'youtube') {
           // Always notify the latest video if unseen, even when it predates
           // the baseline or our ten-day horizon. Keep sent YouTube receipts
@@ -226,7 +227,7 @@ export async function runTick(
     const pending = !isJstNotificationTime(deliveryNow, deliveryWindow) || state.webhook_cooldown_until > now ||
       state.webhook_blocked_status !== null || (wikipedia && !wikipediaFetchSucceeded)
       ? [] : await getPending(env.DB, runnable.id, now, discovery ? 2 : MAX_NOTIFICATIONS_PER_TICK,
-        wikipedia ? wikipediaCutoff : undefined);
+        wikipedia ? wikipediaCutoff : undefined, runnable.source);
     for (const item of pending) {
       // A slow upstream fetch may have crossed the configured delivery cutoff.
       if (!isJstNotificationTime(deps.clock?.() ?? now, deliveryWindow)) break;
@@ -234,9 +235,12 @@ export async function runTick(
       try {
         await deps.send(webhook, runnable.source, {
           id: item.item_id, title: item.title, url: item.url, publishedAt: item.published_at,
-          ...(fetchedImages.has(item.item_id) ? { imageUrl: fetchedImages.get(item.item_id)! } : {}),
-          ...(fetchedThumbnails.has(item.item_id)
-            ? { thumbnailUrl: fetchedThumbnails.get(item.item_id)! } : {}),
+          // Stored source images win over a newer truncated/changed RSS view.
+          // Pre-migration rows still use the transient current-poll hints.
+          ...(item.image_url || fetchedImages.has(item.item_id)
+            ? { imageUrl: item.image_url || fetchedImages.get(item.item_id)! } : {}),
+          ...(item.thumbnail_url || fetchedThumbnails.has(item.item_id)
+            ? { thumbnailUrl: item.thumbnail_url || fetchedThumbnails.get(item.item_id)! } : {}),
         });
       } catch (error) {
         if (isWebhookInvalid(error)) {

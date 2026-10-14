@@ -2,6 +2,7 @@ import type { Database, Delivery, MonitorState, ContentItem, SourceName } from '
 import { isJstNotificationTime } from './schedule.ts';
 import type { NotificationWindowJst } from './schedule.ts';
 import { DELIVERY_RETENTION_MS } from './maintenance.ts';
+import { persistentMedia, missingDeliveryMediaColumns } from './persisted-media.ts';
 
 export const LEASE_MS = 120_000;
 const MIN_RETRY_MS = 5 * 60_000;
@@ -144,7 +145,7 @@ export async function stageInitialIgnored(
 
 export async function stage(
   db: Database, monitorId: string, items: readonly ContentItem[], baselineAt: number | null, now: number,
-  options: { allowHistoricalFirstItem?: boolean } = {},
+  options: { allowHistoricalFirstItem?: boolean; imageSource?: 'qiita' | 'zenn' } = {},
 ): Promise<void> {
   // Usually the first observation is a silent time-based baseline.
   // For YouTube, always consider the freshest item even if it predates the
@@ -158,8 +159,11 @@ export async function stage(
   const eligible = items.filter((item, index) =>
     (options.allowHistoricalFirstItem && index === 0) ||
     (baselineAt !== null && item.publishedAt > eligibleAfter));
-  for (let offset = 0; offset < eligible.length; offset += OUTBOX_INSERT_BATCH) {
-    const chunk = eligible.slice(offset, offset + OUTBOX_INSERT_BATCH);
+  // Image-bearing rows use 9 SQL bindings; cap at 10 (90 <= D1's 100).
+  // The original 12x7 batching remains for every other source.
+  const batchSize = options.imageSource ? 10 : OUTBOX_INSERT_BATCH;
+  for (let offset = 0; offset < eligible.length; offset += batchSize) {
+    const chunk = eligible.slice(offset, offset + batchSize);
     // Read-before-write avoids D1 writes during the common "no new article" scan.
     // INSERT OR IGNORE still guarantees idempotence if a lease expires mid-scan.
     const placeholders = chunk.map(() => '?').join(',');
@@ -172,6 +176,28 @@ export async function stage(
     const values: unknown[] = [];
     for (const item of unseen) {
       values.push(monitorId, item.id, 'pending', item.title, item.url, item.publishedAt, now);
+    }
+    if (options.imageSource) {
+      const media = unseen.map((item) => persistentMedia(options.imageSource!, item));
+      if (media.some((m) => m.imageUrl || m.thumbnailUrl)) {
+        const extendedValues: unknown[] = [];
+        for (let i = 0; i < unseen.length; i++) {
+          extendedValues.push(...values.slice(i * 7, i * 7 + 7),
+            media[i]!.imageUrl, media[i]!.thumbnailUrl);
+        }
+        try {
+          await db.prepare(
+            'INSERT OR IGNORE INTO deliveries ' +
+            '(monitor_id,item_id,status,title,url,published_at,discovered_at,image_url,thumbnail_url) VALUES ' +
+            unseen.map(() => '(?,?,?,?,?,?,?,?,?)').join(',')
+          ).bind(...extendedValues).run();
+          continue;
+        } catch (error) {
+          // A zero-downtime rollout: keep delivering text/link with the old
+          // schema until the operator applies the new migration.
+          if (!missingDeliveryMediaColumns(error)) throw error;
+        }
+      }
     }
     await db.prepare(
       'INSERT OR IGNORE INTO deliveries (monitor_id,item_id,status,title,url,published_at,discovered_at) ' +
@@ -242,15 +268,26 @@ export async function blockWebhook(
 
 export async function getPending(
   db: Database, id: string, now: number, limit: number, wikipediaCutoff?: number,
+  imageSource?: SourceName,
 ): Promise<Delivery[]> {
   const sample = wikipediaCutoff !== undefined;
-  const rows = await db.prepare(
-    "SELECT item_id, title, url, published_at, attempts FROM deliveries " +
-    "WHERE monitor_id = ? AND status = 'pending' AND next_attempt_at <= ? " +
+  const predicate = "WHERE monitor_id = ? AND status = 'pending' AND next_attempt_at <= ? " +
     (sample ? 'AND published_at > ? ' : '') +
     (sample ? 'ORDER BY published_at DESC, item_id DESC LIMIT ?' :
-      'ORDER BY published_at, item_id LIMIT ?')
-  ).bind(...(sample ? [id, now, wikipediaCutoff, limit] : [id, now, limit])).all<Delivery>();
+      'ORDER BY published_at, item_id LIMIT ?');
+  const args = sample ? [id, now, wikipediaCutoff, limit] : [id, now, limit];
+  const projection = 'SELECT item_id, title, url, published_at, attempts';
+  if (imageSource === 'qiita' || imageSource === 'zenn') {
+    try {
+      const enriched = await db.prepare(projection + ', image_url, thumbnail_url FROM deliveries ' + predicate)
+        .bind(...args).all<Delivery>();
+      return enriched.results;
+    } catch (error) {
+      if (!missingDeliveryMediaColumns(error)) throw error;
+    }
+  }
+  const rows = await db.prepare(projection + ' FROM deliveries ' + predicate)
+    .bind(...args).all<Delivery>();
   return rows.results;
 }
 
