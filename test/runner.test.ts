@@ -729,7 +729,7 @@ test('a long fetch crossing 20:00 JST never initiates a Discord POST', async () 
 
 test('only the configured hourly schedule prunes and it differs from the polling Cron', async () => {
   const s = setup();
-  const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  const config = JSON.parse(readFileSync(new URL('../wrangler.example.jsonc', import.meta.url), 'utf8'));
   assert.deepEqual(config.triggers.crons, ['*/5 * * * *', '10 * * * *']);
   const old = Date.now() - DELIVERY_RETENTION_MS - 60_000;
   s.raw.prepare(
@@ -763,7 +763,7 @@ test('MediaWiki 403 holds its API retry for at least an hour without clearing ba
 
 test('five-minute global tick is independent of per-monitor hourly source intervals', async () => {
   const s = setup();
-  const config = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  const config = JSON.parse(readFileSync(new URL('../wrangler.example.jsonc', import.meta.url), 'utf8'));
   assert.deepEqual(config.triggers.crons, ['*/5 * * * *', '10 * * * *']);
   const minute = 60_000;
   const now = Date.now();
