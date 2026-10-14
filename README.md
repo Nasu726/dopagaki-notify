@@ -2,21 +2,21 @@
 
 **好きな情報源の更新を、Discordにまとめて通知する小さなセルフホストツール。**
 
-Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。Cloudflare Workers + D1で定期実行し、ログイン・Web画面・常駐PCは不要です。監視先を自由に選べます。
+Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。**Cloudflare Workers + D1**または**GitHub Actions + SQLite**で定期実行し、ログイン・Web画面・常駐PCは不要です。監視先と保存期間を自由に設定できます。
 
 [English](README.EN.md) · [機能と制約](#機能と通知ルール) · [運用コマンド](#運用とトラブルシューティング) · [MIT License](LICENSE)
 
-> **現在の状態:** Cloudflare Workers + D1が主な運用環境。GitHub Actions + SQLiteは任意のテンプレートで、定期実行と状態復元の信頼性はCloudflare版と同等ではありません。YouTubeのQuizKnock **通常動画専用RSS → Discord通知は本番で確認済み**。YouTubeのサムネイルはDiscordで表示されない事象があり、[Issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64)で低優先度の調査待ちです。
+> **実行方式:** Cloudflare Workers + D1、GitHub Actions + SQLiteのいずれかを選択できます。ソース・監視対象・非公開設定・通知時間帯・保存期間は共通です。Actionsにはスケジュール遅延やArtifactの保持期限があります。YouTubeのQuizKnock **通常動画専用RSS → Discord通知は本番で確認済み**。YouTubeのサムネイルはDiscordで表示されない事象があり、[Issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64)で低優先度の調査待ちです。
 
 ## どこから始める？
 
 | 目的 | 進む先 |
 | --- | --- |
-| 初めてCloudflareに導入する | [1. 監視対象を決める](#1-監視対象を決める) → [2. Cloudflareで動かす](#2-cloudflareで動かす) |
+| 初めてCloudflareに導入する | [1. 監視対象を決める](#1-監視対象を決める) → [2. Cloudflareで動かす](#2-cloudflare-workers--d1で動かす) |
 | 公開フォークでも購読先を隠したい | [非公開設定](#監視対象を非公開にする) |
 | すでに稼働中で設定だけ変える | [設定の検査](#設定の検査と通知時間帯) → [運用](#運用とトラブルシューティング) |
 | 今すぐ対象を試す・画像問題を調べる | [安全な診断コマンド](#安全な診断コマンド) |
-| Cloudflareを使いたくない | [GitHub Actions + SQLite](#3-github-actions--sqliteを使う任意) |
+| GitHubで実行し、監視対象もSecretで非公開にする | [GitHub Actions + SQLite](#3-github-actions--sqliteを使う-任意) |
 
 **最短コマンド一覧** (リポジトリ直下・Node.js 22以上):
 
@@ -57,11 +57,11 @@ cd dopagaki-notify
 npm install
 ```
 
-設定方法は**公開JSON**か**Cloudflare Secretによる非公開設定**のどちらかです。
+監視設定は**公開JSON**か**Secretによる非公開設定**のどちらかです。Cloudflare Worker・GitHub Actionsともに両方選べます (Actionsは非公開が安全な既定値)。
 
 - [`config/targets.json`](config/targets.json): 監視対象と`enabled`、公開設定の`notificationWindowJst`。
 - [`config/intervals.json`](config/intervals.json): 監視`id`ごとの取得間隔 (分)。正の整数。
-- **公開フォークに個人の購読先を載せたくない場合は、次の「非公開設定」を選んでください。** 両方を混ぜるのではなく、Secretがあれば公開設定を**完全上書き**します。
+- **公開フォークに購読先を載せたくない場合、どちらの実行方式でも「非公開設定」を使えます。** Secretは公開設定を**完全上書き**します。GitHub Actionsでは`MONITOR_CONFIG_MODE`の明示的選択が必要です。
 
 設定例 (抜粋。実際の`targets.json`は対象となる全カテゴリを含みます):
 
@@ -123,7 +123,7 @@ npm run config:check -- --private-config-file=.private/monitor-config.json
 npx wrangler secret put MONITOR_CONFIG_JSON
 ```
 
-最後のコマンドの対話入力で非公開JSONの全文を指定します。**SecretはGitHub・チャット・ログに貼らない**でください。Cloudflare Secretは一覧から元の値を読み出せません。変更前にローカルで検証してください。
+最後のコマンドの対話入力でCloudflareのSecretに非公開JSON全文を指定します。**GitHub Actionsを選ぶ場合は、`gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json`で同じファイルをSecretに保存**します (詳しくは[GitHub Actions導入](#3-github-actions--sqliteを使う-任意))。**SecretはGitHubの公開ファイル・チャット・ログに貼らない**でください。Cloudflare Secretは一覧から元の値を読み出せません。変更前にローカルで検証してください。
 
 ### 設定の検査と通知時間帯
 
@@ -161,7 +161,9 @@ npx wrangler secret put YOUTUBE_API_KEY
 
 APIキーは**YouTube Data API v3のみ許可するAPI制限**を設定し、GitHubにコミットしないでください。キーを登録しなくてもRSSモードは継続します。ローカルでAPI動作だけを確認したい場合は、秘密のローカル環境変数 `YOUTUBE_API_KEY` を指定して、`videoType: "all"` の監視を `npm run smoke -- --monitor=ID` で試せます (Discord送信・D1更新なし)。実環境の正常動作はWorkerのログで別途確認してください。
 
-## 2. Cloudflareで動かす
+## 2. Cloudflare Workers + D1で動かす
+
+Cloudflare方式を選んだ場合のみ実行します。GitHub Actions方式ではCloudflareのアカウントやD1データベースは不要です。
 
 **準備:** Node.js 22以上、Cloudflareアカウント、DiscordのWebhook、上で決めた監視対象。Cloudflareの無料枠・料金はご自身で確認してください。
 
@@ -223,17 +225,21 @@ Cloudflare Workers Buildsを接続している場合は、デプロイ済みの�
 
 ## 3. GitHub Actions + SQLiteを使う (任意)
 
-Cloudflareの代わりに、GitHub Actions上でSQLiteを実行するテンプレートです。状態は暗号化したArtifactsに保存します。Cronの遅延・スキップやArtifact期限による制約があるため、**主な推奨環境はCloudflare版**です。
+GitHub Actions上でSQLiteを実行する、Cloudflareと並ぶ**選択可能な実行方式**です。対応する情報源・曜日/時間帯指定・保存期間・Webhook・任意APIキーは共通です。状態は暗号化Artifactsで保存します。ただしActionsのCronは遅延・スキップがあり、Artifactには保存期限があるため、稼働の保証はCloudflare版と同じではありません。**CloudflareとActionsを同時起動すると通知が重複するので片方だけを選んでください。**
 
 ```sh
-npm run setup:actions
+# 非公開モード (既定): Secretに購読先を登録
+npm run setup:actions -- --config-mode=private
 npm run config:check -- --private-config-file=.private/monitor-config.json
 gh auth login
 gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
 gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-使用する`DISCORD_WEBHOOK_*`をGitHub ActionsのSecretsにも登録した後、生成された`.github/workflows/notifier.yml`だけをcommit・pushし、GitHubの**Actions → Discord notifier (SQLite) → Run workflow**で初回実行します。初回は通常の情報源を無通知で初期化します。**状態鍵は紛失・変更しないこと。**
+GitHub Actionsの**Variables**に`MONITOR_CONFIG_MODE=private`(既定)を設定します。公開JSONを使う場合は代わりに`npm run setup:actions -- --config-mode=public`と`gh variable set MONITOR_CONFIG_MODE --body public`を使用し、`MONITOR_CONFIG_JSON` Secretは削除してください。使う情報源の`DISCORD_WEBHOOK_*`をGitHub ActionsのSecretsに登録した後、生成された`.github/workflows/notifier.yml`だけをcommit・pushし、GitHubの**Actions → Discord notifier (SQLite) → Run workflow**で初回実行します。初回は通常の情報源を無通知で初期化します。**状態鍵は紛失・変更しないこと。**
+
+
+**公開モードを選ぶ場合:** `npm run setup:actions -- --config-mode=public` → 公開JSON編集 → `gh variable set MONITOR_CONFIG_MODE --body public`。その際、既存の`MONITOR_CONFIG_JSON` Secretは削除します。非公開モードではSecretが無いと処理を停止します。どちらの方式でも、最初に登録する前に監視設定を確認してください。
 
 [GitHub Actions導入・復元手順](docs/GITHUB_ACTIONS.md) · [English](docs/GITHUB_ACTIONS.EN.md)
 

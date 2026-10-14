@@ -4,6 +4,19 @@
 
 This opt-in template reuses the same monitoring, scheduling and Discord delivery code as the Cloudflare edition. It substitutes local Node.js SQLite for D1 and GitHub Actions for Cron Triggers. Integration tests are included, but it has not yet been proven over long-running production use.
 
+## Choose your runtime and configuration visibility
+
+Cloudflare Workers + D1 and GitHub Actions + SQLite are **alternative runtimes** with matching sources, private monitor settings, time/weekday windows, optional API keys, and per-monitor `retentionDays`. GitHub schedules can be delayed/skipped, and encrypted Artifacts have expiration limits. **Run one runtime at a time**; their databases are independent, so running both causes duplicate notifications.
+
+For GitHub Actions, set the repository **Variable `MONITOR_CONFIG_MODE`**:
+
+| Mode | Setting source | Visibility |
+| --- | --- | --- |
+| `private` (or unset; safe default) | Required Secret `MONITOR_CONFIG_JSON` | Subscriptions not committed |
+| `public` (explicit) | Checked-in `config/targets.json`, `config/intervals.json` | Public subscriptions |
+
+Public mode requires removing any previous `MONITOR_CONFIG_JSON` Secret to prevent ambiguous settings; the workflow fails closed if both are configured. A private-mode workflow with no Secret also refuses to run.
+
 ## Setup
 
 1. Fork and clone the repository, install Node.js 22+, and run `npm install` and `npm run check`.
@@ -67,3 +80,23 @@ Register an optional GitHub Actions **Secret `YOUTUBE_API_KEY`** from a Google C
 ## OpenAlex papers
 
 Add `{"id":"oa-graph","query":"search:graph algorithms","enabled":true}` to `targets.openalex` in the private config, plus its interval in `intervals`. Set the **`DISCORD_WEBHOOK_OPENALEX` GitHub Actions Secret**. An optional free **`OPENALEX_API_KEY` Secret** increases the request budget; keyless low-volume API access works too. Supported monitor queries are `search:terms`, `topic:T12345`, `author:A12345`. Initial result IDs are silently marked ignored; later unseen IDs published within the last seven days may notify (up to 25 works per poll).
+
+Public setup:
+
+```sh
+npm run setup:actions -- --config-mode=public
+# Edit config/targets.json and config/intervals.json, then validate
+npm run config:check
+gh variable set MONITOR_CONFIG_MODE --body public
+```
+
+Private setup:
+
+```sh
+npm run setup:actions -- --config-mode=private
+npm run config:check -- --private-config-file=.private/monitor-config.json
+gh variable set MONITOR_CONFIG_MODE --body private
+gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
+```
+
+Both modes need `NOTIFY_STATE_KEY` and source-specific Discord Webhook Secrets. Existing `.github/workflows/notifier.yml` files are not overwritten by setup; sync the new `MONITOR_CONFIG_MODE` environment variable from the template when upgrading.

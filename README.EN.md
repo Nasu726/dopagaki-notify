@@ -2,17 +2,17 @@
 
 **A small, self-hosted Discord notifier for the sources you follow.**
 
-Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using Cloudflare Workers + D1. No web UI, app login, or always-running personal computer. Configure your own subscriptions and run it in your account.
+Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using **Cloudflare Workers + D1** or **GitHub Actions + SQLite**. No web UI, app login, or always-running personal computer. Choose your subscriptions, retention and runtime.
 
 [日本語](README.md) · [Features & delivery policy](#features-and-delivery-policy) · [Commands](#operations-and-troubleshooting) · [MIT License](LICENSE)
 
-> **Status:** Cloudflare Workers + D1 is the primary, production-used runtime. GitHub Actions + SQLite is an optional template and does not have equivalent scheduling or state-restoration guarantees. QuizKnock's **regular-video-only RSS → Discord** delivery has been verified in production. YouTube thumbnails currently fail to render in Discord and are a non-blocking, [deferred issue (#64)](https://github.com/Nasu726/dopagaki-notify/issues/64).
+> **Runtime:** Choose Cloudflare Workers + D1 or GitHub Actions + SQLite. Sources, private monitor configuration, delivery windows and per-monitor retention are shared; GitHub Actions has different scheduling and Artifact-recovery guarantees. QuizKnock's **regular-video-only RSS → Discord** delivery has been verified in production. YouTube thumbnails currently fail to render in Discord and are a non-blocking, [deferred issue (#64)](https://github.com/Nasu726/dopagaki-notify/issues/64).
 
 ## Choose your path
 
 | Goal | Start here |
 | --- | --- |
-| First deployment with Cloudflare | [1. Choose monitors](#1-choose-your-monitors) → [2. Deploy with Cloudflare](#2-deploy-with-cloudflare) |
+| First deployment with Cloudflare | [1. Choose monitors](#1-choose-your-monitors) → [2. Deploy with Cloudflare](#2-deploy-with-cloudflare-workers--d1) |
 | Keep personal subscriptions private in a public fork | [Private monitor configuration](#keep-your-monitors-private) |
 | Change settings on an existing deployment | [Preflight and delivery hours](#validate-settings-and-choose-delivery-hours) |
 | Test a source immediately or diagnose images | [Safe diagnostic commands](#safe-diagnostic-commands) |
@@ -57,11 +57,11 @@ cd dopagaki-notify
 npm install
 ```
 
-Choose **checked-in public JSON** or a **private Cloudflare Secret**:
+Choose **checked-in public JSON** or a **private runtime Secret**. Both Cloudflare and GitHub Actions support the same target configuration; Actions defaults to private mode for safety:
 
 - [`config/targets.json`](config/targets.json): Sources, targets, `enabled` flags, and the public `notificationWindowJst`.
 - [`config/intervals.json`](config/intervals.json): Positive integer intervals **in minutes**, keyed by monitor `id`.
-- A private `MONITOR_CONFIG_JSON` **replaces the whole public roster**; it does not merge with it. Use it when subjects should not appear in your public fork.
+- A private `MONITOR_CONFIG_JSON` **replaces the whole public roster** on either runtime; it does not merge with it. GitHub Actions explicitly selects `MONITOR_CONFIG_MODE=private` (default) or `public`.
 
 Sample target fragment (a complete `targets.json` must include all source categories):
 
@@ -123,7 +123,7 @@ npm run config:check -- --private-config-file=.private/monitor-config.json
 npx wrangler secret put MONITOR_CONFIG_JSON
 ```
 
-Paste the JSON content in the interactive Secret prompt. **Never post secrets or private subscriptions in source control, chat, issues or CI logs.** Deployed Cloudflare Secrets cannot be read back, so verify the intended value locally before setting it.
+Paste the JSON into the Cloudflare Secret prompt. For **GitHub Actions**, use `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` to register the same private file. **Never post secrets or private subscriptions in source control, chat, issues or CI logs.** Deployed Cloudflare Secrets cannot be read back, so verify the intended value locally before setting it.
 
 ### Validate settings and choose delivery hours
 
@@ -161,7 +161,9 @@ npx wrangler secret put YOUTUBE_API_KEY
 
 Restrict the key's **allowed APIs to YouTube Data API v3**, keep it out of git, and do not paste it into public logs. RSS mode continues when no key is configured. For an optional *local read-only* API smoke test, privately export `YOUTUBE_API_KEY` and run `npm run smoke -- --monitor=ID` for an `all`-uploads monitor (no D1 access or Discord send). Check deployed Worker logs separately for actual runtime confirmation.
 
-## 2. Deploy with Cloudflare
+## 2. Deploy with Cloudflare Workers + D1
+
+Follow this section **only** if choosing Cloudflare. GitHub Actions needs neither a Cloudflare account nor a D1 database.
 
 **Prerequisites:** Node.js 22+, Cloudflare account, one or more Discord incoming webhooks, and your chosen monitors. Check your plan's applicable limits and prices.
 
@@ -223,17 +225,21 @@ If Workers Builds is enabled, verify the live deployment is actually the intende
 
 ## 3. GitHub Actions + SQLite (optional)
 
-The alternative [GitHub Actions template](templates/github-actions/notifier.yml) runs on GitHub-hosted runners with SQLite state stored in **encrypted Actions Artifacts**. Scheduled workflows can be delayed/skipped and state artifacts can expire; Cloudflare is the primary recommendation.
+[GitHub Actions](templates/github-actions/notifier.yml) is a **fully selectable alternative runtime** with the same sources, private subscriptions, weekday/windows, retention, optional API keys and webhook handling. SQLite state is stored as **encrypted Actions Artifacts**. Scheduled jobs can be delayed/skipped and Artifacts expire, so uptime/recovery guarantees differ from Cloudflare. **Select one runtime; running both against separate states causes duplicate notifications.**
 
 ```sh
-npm run setup:actions
+# Private mode (default): keep subscriptions in Actions Secrets
+npm run setup:actions -- --config-mode=private
 npm run config:check -- --private-config-file=.private/monitor-config.json
 gh auth login
 gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
 gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-Add the required `DISCORD_WEBHOOK_*` GitHub Actions Secrets. Then commit/push **only** the generated `.github/workflows/notifier.yml` and select **Actions → Discord notifier (SQLite) → Run workflow** to establish the initial state. Do **not** lose or rotate your state encryption key without a planned reset.
+Set the Actions repository Variable `MONITOR_CONFIG_MODE=private` (default). To use checked-in public targets instead, run `npm run setup:actions -- --config-mode=public`, set `gh variable set MONITOR_CONFIG_MODE --body public`, and remove the conflicting `MONITOR_CONFIG_JSON` Secret. Add the required `DISCORD_WEBHOOK_*` GitHub Actions Secrets. Then commit/push **only** the generated `.github/workflows/notifier.yml` and select **Actions → Discord notifier (SQLite) → Run workflow** to establish the initial state. Do **not** lose or rotate your state encryption key without a planned reset.
+
+
+**Public Actions config:** `npm run setup:actions -- --config-mode=public`, edit public JSON, then `gh variable set MONITOR_CONFIG_MODE --body public`; remove any existing private `MONITOR_CONFIG_JSON` Secret. Private mode refuses to run without its Secret. Always review enabled monitor targets before activating either mode.
 
 [GitHub Actions guide (English)](docs/GITHUB_ACTIONS.EN.md) · [日本語](docs/GITHUB_ACTIONS.md).
 

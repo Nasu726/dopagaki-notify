@@ -6,7 +6,7 @@ import { parseKey, encryptState, decryptState } from './state-crypto.mjs';
 import { openDatabase, applyMigrations } from './sqlite.mjs';
 import Worker from '../../src/index.ts';
 import { pruneSentDeliveries } from '../../src/maintenance.ts';
-import { loadRuntimeMonitors } from '../../src/config.ts';
+import { selectActionsConfig } from './runtime-config.mjs';
 
 const stateDir = join(process.cwd(), '.private');
 const encryptedPath = join(stateDir, 'notify-state.enc');
@@ -27,15 +27,14 @@ function silenceInternalLogs() {
 
 async function main() {
   const key = parseKey(process.env.NOTIFY_STATE_KEY);
-  if (!process.env.MONITOR_CONFIG_JSON) {
-    throw new Error('MONITOR_CONFIG_JSON must be configured as a GitHub Actions Secret');
-  }
-  const monitors = loadRuntimeMonitors(process.env.MONITOR_CONFIG_JSON);
+  const config = selectActionsConfig(process.env.MONITOR_CONFIG_MODE,
+    process.env.MONITOR_CONFIG_JSON);
+  const monitors = config.monitors;
   if (!monitors.some((m) => m.enabled)) {
-    throw new Error('Private monitoring configuration has no enabled targets');
+    throw new Error('Configured monitor roster has no enabled targets');
   }
   const env = {
-    MONITOR_CONFIG_JSON: process.env.MONITOR_CONFIG_JSON,
+    MONITOR_CONFIG_JSON: config.configJson,
     NOTIFICATION_WINDOW_JST: process.env.NOTIFICATION_WINDOW_JST || undefined,
     WIKIMEDIA_CONTACT_URL: process.env.WIKIMEDIA_CONTACT_URL ||
       (process.env.GITHUB_REPOSITORY ? 'https://github.com/' + process.env.GITHUB_REPOSITORY : undefined),

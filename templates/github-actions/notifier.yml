@@ -26,6 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      # Select 'public' explicitly under Actions repository Variables to use
+      # checked-in targets/intervals. Unset = private for safe fork defaults.
+      MONITOR_CONFIG_MODE: ${{ vars.MONITOR_CONFIG_MODE }}
       NOTIFY_STATE_KEY: ${{ secrets.NOTIFY_STATE_KEY }}
       MONITOR_CONFIG_JSON: ${{ secrets.MONITOR_CONFIG_JSON }}
       NOTIFICATION_WINDOW_JST: ${{ secrets.NOTIFICATION_WINDOW_JST }}
