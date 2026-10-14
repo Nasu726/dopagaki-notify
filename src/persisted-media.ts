@@ -18,7 +18,7 @@ export function persistentMediaUrl(source: SourceName, articleUrl: string, raw: 
   // Known public image-resizing switches are acceptable, with short values.
   let unsafeQuery = false;
   url.searchParams.forEach((value, key) => {
-    if (!/^(v|s|size|w|h|width|height|q|quality|fit|format|auto)$/i.test(key)
+    if (!/^(v|s|size|w|h|x|y|width|height|q|quality|fit|format|auto)$/i.test(key)
         || value.length > 32 || !/^[a-zA-Z0-9,._-]*$/.test(value))
       unsafeQuery = true;
   });
