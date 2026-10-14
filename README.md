@@ -41,7 +41,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。Cloudf
 | YouTube | 指定チャンネルの動画 | 最新未通知動画は公開日が古くても通知対象 |
 | 日本語Wikipedia | 秀逸記事＋ランダム記事 | 1回最大2件の推薦 |
 
-**重要な動作:** 投稿IDで重複送信を抑止し、未送信分と再試行時刻をD1に記録します。YouTube以外は初回取得を原則無通知で初期化。YouTubeは最新の未通知動画1件を初回から通知対象にします。Qiita/Zennは鮮度を優先するため、全件保存・完全網羅ではありません。YouTubeの送信済みIDは繰り返し通知しないよう永続保持します (それ以外の通常送信済み履歴は原則10日)。
+**重要な動作:** 投稿IDで重複送信を抑止し、未送信分と再試行時刻をD1に記録します。YouTube以外は初回取得を原則無通知で初期化。YouTubeは最新の未通知動画1件を初回から通知対象にします。Qiita/Zennは鮮度を優先するため、全件保存・完全網羅ではありません。通知済み履歴の既定保持期間は通常10日、YouTubeは無期限です。監視対象IDごとに`retentionDays`で変更できます。
 
 **スケジュール:** Workerは5分ごとに起動し、原則1回に1監視対象を処理します。監視対象ごとに設定した間隔は「実行可能になる時刻」であり厳密な実行保証ではありません。送信は1回最大3件。通知時間帯外でも**取得とキュー保存を継続**します。
 
@@ -89,6 +89,23 @@ npm install
 **YouTubeでShortsを除外:** `"videoType": "videos"` と固定の`channelId`を指定すると、通常動画だけの非公式`UULF` RSSを使います (Shortsとライブ配信も除外)。省略・`"all"`は従来どおりすべてのアップロードを取得します。**このフィードはYouTubeの公式保証外**で、取得に失敗してもShorts混在フィードに無断で戻しません。現在の公開設定ではQuizKnockのみ`videos`。`YOUTUBE_API_KEY`を設定していても`videos`の監視はRSSを使用します。その他は任意の[YouTube Data API v3](https://developers.google.com/youtube/v3)に対応します。
 
 **OpenAlex:** `search:graph algorithms`、`topic:T12345`、`author:A12345`に対応。APIキー`OPENALEX_API_KEY`は任意です。詳細は[運用資料](docs/DEPLOYMENT.md)。
+
+### 監視対象ごとの保存期間 (Cloudflare / GitHub Actions共通)
+
+`retentionDays` は、**通知済み履歴の保存日数**と、期限切れの投稿を再検出しないための期間です。取得間隔(`intervals`)とは独立しています。公開設定は [`config/targets.json`](config/targets.json) の最上位、非公開設定は `MONITOR_CONFIG_JSON` の最上位に指定します。省略した対象は現行の既定値 (YouTube以外10日、YouTubeは無期限) を使用します。
+
+```json
+"retentionDays": {
+  "youtube-example": 365,
+  "qiita-go": 30,
+  "zenn-rust": null
+}
+```
+
+- 正の整数 (1〜36500) = 保持日数、`null` = 無期限。
+- **YouTubeの有限保持期間は、その期間を過ぎた古い最新動画を再通知しないように判定**します。古い動画の初回通知も対象外になるので、年に数回だけ更新するチャンネルでは十分長くするか、`null` を使ってください。
+- 未送信(`pending`)・初回除外(`ignored`)の記録はこの削除処理で消しません。削除処理はCronで1回20件まで。設定を長くしても、すでに削除した記録は復元できません。
+- GitHub Actionsも**同じ設定とSQLite側の削除ロジック**を使用します。DBの保持期間とActionsの暗号化Artifactの有効期限は別物です。
 
 ### 監視対象を非公開にする
 

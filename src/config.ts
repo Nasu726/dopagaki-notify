@@ -77,21 +77,31 @@ const definitions: readonly Omit<Monitor, 'intervalMinutes'>[] = [
 export function withIntervals(
   configured: readonly Omit<Monitor, 'intervalMinutes'>[],
   values: Record<string, unknown>,
+  retentionDays: Record<string, unknown> = {},
 ): readonly Monitor[] {
   const ids = new Set(configured.map((monitor) => monitor.id));
   for (const id of Object.keys(values)) {
     if (!ids.has(id)) throw new Error('Unknown interval setting: ' + id);
+  }
+  for (const [id, value] of Object.entries(retentionDays)) {
+    if (!ids.has(id)) throw new Error('Unknown retention setting: ' + id);
+    if (value !== null && (!Number.isSafeInteger(value) || (value as number) < 1 ||
+        (value as number) > 36500))
+      throw new Error('Monitor ' + id + ': retentionDays must be a positive integer up to 36500 or null');
   }
   return configured.map((monitor) => {
     const value = values[monitor.id];
     if (!Number.isSafeInteger(value) || (value as number) < 1) {
       throw new Error('Monitor ' + monitor.id + ': interval must be a positive integer (minutes)');
     }
-    return { ...monitor, intervalMinutes: value as number };
+    return { ...monitor, intervalMinutes: value as number,
+      ...(Object.hasOwn(retentionDays, monitor.id)
+        ? { retentionDays: retentionDays[monitor.id] as number | null } : {}) };
   });
 }
 
-export const MONITORS: readonly Monitor[] = withIntervals(definitions, intervals);
+export const MONITORS: readonly Monitor[] = withIntervals(definitions, intervals,
+  (targets as unknown as { retentionDays?: Record<string, unknown> }).retentionDays ?? {});
 
 
 /**
@@ -132,7 +142,8 @@ export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[
   let raw: unknown;
   try { raw = JSON.parse(json); }
   catch { throw new Error('MONITOR_CONFIG_JSON contains invalid JSON'); }
-  if (!objectRecord(raw) || !objectRecord(raw.targets) || !objectRecord(raw.intervals)) {
+  if (!objectRecord(raw) || !objectRecord(raw.targets) || !objectRecord(raw.intervals) ||
+      (raw.retentionDays !== undefined && !objectRecord(raw.retentionDays))) {
     throw new Error('MONITOR_CONFIG_JSON requires targets and intervals objects');
   }
   if (raw.wikipediaEnabled !== undefined && typeof raw.wikipediaEnabled !== 'boolean') {
@@ -192,7 +203,7 @@ export function loadRuntimeMonitors(json: string | undefined): readonly Monitor[
       ...queryMonitorsFromTargets('zenn', targetsBySource.zenn as unknown as QueryTarget[]),
       ...youtubeMonitorsFromTargets(targetsBySource.youtube as unknown as YouTubeTarget[]),
     ];
-    const result = withIntervals(definitions, raw.intervals);
+    const result = withIntervals(definitions, raw.intervals, raw.retentionDays as Record<string, unknown> | undefined);
     validateMonitors(result);
     return result;
   } catch {
@@ -207,6 +218,9 @@ export function validateMonitors(monitors: readonly Monitor[]): void {
     if (ids.has(monitor.id)) throw new Error('Duplicate monitor id: ' + monitor.id);
     if (!Number.isSafeInteger(monitor.intervalMinutes) || monitor.intervalMinutes < 1)
       throw new Error('Monitor ' + monitor.id + ': intervalMinutes must be a positive integer');
+    if (monitor.retentionDays !== undefined && monitor.retentionDays !== null &&
+        (!Number.isSafeInteger(monitor.retentionDays) || monitor.retentionDays < 1 || monitor.retentionDays > 36500))
+      throw new Error('Monitor ' + monitor.id + ': retentionDays must be 1..36500 or null');
     if (monitor.query.length > 512) throw new Error('Monitor ' + monitor.id + ': query too long');
     if (typeof monitor.enabled !== 'boolean')
       throw new Error('Monitor ' + monitor.id + ': enabled must be a boolean');

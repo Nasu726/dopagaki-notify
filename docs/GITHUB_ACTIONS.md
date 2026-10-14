@@ -27,6 +27,10 @@
 
 Wikipedia を有効にした場合、API リクエストの User-Agent はフォーク先の `GITHUB_REPOSITORY` を連絡先として自動構築します。別の連絡先を使いたいときは GitHub Actions の **Variables** に `WIKIMEDIA_CONTACT_URL` (公開 HTTPS URL) を設定してください。Secret は不要です。
 
+## 通知履歴の保存期間
+
+Cloudflare版と同じ`retentionDays`設定を`MONITOR_CONFIG_JSON`の最上位に指定できます。監視ID単位で正の整数(1〜36500日)または`null`(無期限)を使います。省略時は通常10日、YouTubeは無期限。これは**暗号化Artifact自体の保持期限(テンプレートでは30日)**とは別です。短いArtifact期限を`retentionDays`で延長することはできません。
+
 ## 状態の保存とプライバシー
 
 GitHub-hosted runner のローカルファイルは実行後に消えるため、Node.js `node:sqlite` で作成した DB を **AES-256-GCM で暗号化して** GitHub Actions Artifact `notifier-state` に保存します。次のジョブは最新の Artifact を復元し、復号して実行します。ローカルの平文 DB は Artifact に含めません。アップロード対象は暗号化済み `.private/notify-state.enc` の1ファイルのみです。`actions/upload-artifact@v4` が隠しディレクトリを通常除外するため、テンプレートでは `include-hidden-files: true` を指定しています。

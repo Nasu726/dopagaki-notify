@@ -41,7 +41,7 @@ Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using Cloud
 | YouTube | Chosen video channels | The latest unseen video is eligible even if old |
 | Japanese Wikipedia | Featured and random articles | Up to two recommendations per poll |
 
-**Deduplication:** D1 stores notification receipts, pending deliveries and retry times. Most sources establish a **silent baseline** on their first successful fetch. YouTube exceptionally sends its newest unseen video even on the first poll, regardless of publication age. YouTube sent IDs persist indefinitely; ordinary sent receipts for other sources normally expire after ten days. Qiita and Zenn favor freshness over exhaustive archiving.
+**Deduplication:** D1 stores notification receipts, pending deliveries and retry times. Most sources establish a **silent baseline** on their first successful fetch. YouTube exceptionally sends its newest unseen video even on the first poll, regardless of publication age. Sent receipt retention defaults to **10 days for non-YouTube sources** and **unlimited for YouTube**, independently configurable for each monitor ID via `retentionDays`. Qiita and Zenn favor freshness over exhaustive archiving.
 
 **Scheduling:** The Worker runs every five minutes and normally handles one due monitor per invocation. Per-monitor intervals indicate when a fetch becomes eligible, not an exact execution time. It sends at most three items per invocation. Polling and queuing continue **outside allowed notification hours**.
 
@@ -89,6 +89,23 @@ Provide intervals for the IDs above and for `wikipedia-ja-discovery` if using th
 **Exclude YouTube Shorts:** Set `"videoType": "videos"` **and a pinned `channelId`** to use the undocumented `UULF` RSS playlist for regular videos only (also excludes live streams). Omitted or `"all"` means all uploads. This URL is **not an officially supported YouTube API contract**; if it fails, the monitor does **not** silently fall back to a Shorts-inclusive feed. Only QuizKnock opts in in the checked-in sample. Videos-only monitors use RSS even if `YOUTUBE_API_KEY` is present; other YouTube monitors can use the optional [YouTube Data API v3](https://developers.google.com/youtube/v3).
 
 **OpenAlex:** Query formats are `search:graph algorithms`, `topic:T12345`, `author:A12345`. Optional `OPENALEX_API_KEY` increases API allowance. See the [deployment runbook](docs/DEPLOYMENT.md) for details.
+
+### Per-monitor sent history retention (Cloudflare and GitHub Actions)
+
+`retentionDays` configures **how long acknowledged receipts are stored** and how long old content may remain eligible for rediscovery, independently of the polling interval. In checked-in configuration, set it at the top level of [`config/targets.json`](config/targets.json); for private configurations, put the same field at the top level of `MONITOR_CONFIG_JSON`. Unspecified monitors retain existing defaults: **10 days for non-YouTube sources, indefinitely for YouTube**.
+
+```json
+"retentionDays": {
+  "youtube-example": 365,
+  "qiita-go": 30,
+  "zenn-rust": null
+}
+```
+
+- Positive integer (1–36500) = number of days; `null` = never delete sent receipts.
+- For YouTube **a finite value also excludes old uploads once they fall outside the retention horizon**. This avoids re-alerting the same latest video after deleting its receipt, but means an older video can be skipped even on the first scan. Prefer a long interval or `null` for infrequently publishing channels.
+- The maintenance Cron removes at most 20 sent receipts per invocation and **never deletes pending or ignored rows**. Increasing retention cannot restore records already deleted.
+- GitHub Actions uses the **same retention logic on SQLite**, independently from the Actions Artifact expiration/availability limit.
 
 ### Keep your monitors private
 

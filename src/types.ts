@@ -15,6 +15,8 @@ export interface Monitor {
   query: string;
   intervalMinutes: number;
   enabled: boolean;
+  /** Optional sent receipt + rediscovery horizon override in days; null = retain forever. */
+  retentionDays?: number | null;
   weeklyJstDay?: string; // optional fixed weekday for weekly YouTube polling
   youtubeChannelId?: string; // optional pinned UC... ID, preserving query/monitor identity
   youtubeVideoType?: 'all' | 'videos'; // opt-in RSS videos-only (UULF), no Shorts/live

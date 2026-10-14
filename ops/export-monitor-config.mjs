@@ -1,4 +1,10 @@
 import { readFileSync } from 'node:fs';
-const targets = JSON.parse(readFileSync(new URL('../config/targets.json', import.meta.url), 'utf8'));
+const raw = JSON.parse(readFileSync(new URL('../config/targets.json', import.meta.url), 'utf8'));
+const { notificationWindowJst: _publicWindow, retentionDays: publicRetention, ...targets } = raw;
 const intervals = JSON.parse(readFileSync(new URL('../config/intervals.json', import.meta.url), 'utf8'));
-process.stdout.write(JSON.stringify({ targets, intervals, wikipediaEnabled: true, notificationWindowJst: null }, null, 2) + '\n');
+// The public targets file also contains *top-level* notification/retention
+// controls. Private config keeps these siblings of targets, not within it.
+process.stdout.write(JSON.stringify({
+  targets, intervals, retentionDays: publicRetention ?? {},
+  wikipediaEnabled: true, notificationWindowJst: null,
+}, null, 2) + '\n');
