@@ -1365,7 +1365,8 @@ test('weekday-constrained YouTube accepts independent positive-minute intervals'
   assert.equal(await runTick(s.env,[monitor],now,s.deps),'processed');
   assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
     .get(monitor.id)?.next_due_at,now+135*60_000);
-  assert.equal(await runTick(s.env,[monitor],now+60*60_000,s.deps),'processed');
+  assert.equal(await runTick(s.env,[monitor],now+120*60_000,s.deps),'idle');
+  assert.equal(await runTick(s.env,[monitor],now+135*60_000,s.deps),'processed');
   assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id=?')
-    .get(monitor.id)?.next_due_at,now+135*60_000+60*60_000);
+    .get(monitor.id)?.next_due_at,now+270*60_000);
 });
