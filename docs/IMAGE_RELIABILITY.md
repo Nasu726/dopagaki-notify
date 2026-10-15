@@ -3,7 +3,7 @@
 Two distinct image problems are tracked as one troubleshooting workflow:
 
 1. **Qiita/Zenn outbox metadata (Issue #58):** A source may provide an image at poll time, but the Discord delivery can happen on another Cron. Previously the D1 outbox retained only title/URL/time, so the original media could disappear.
-2. **YouTube rendering (Issue #64):** Discord has accepted a video notification, but the external YouTube thumbnail is not visibly rendered. D1 storage changes **cannot** fix a Discord media proxy or client rendering failure.
+2. **Discord thumbnail display (Issue #64, resolved):** The images were present in Discord, including valid proxy URLs and dimensions, but the user's Discord client hid link-embedded images. Setting **ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき → ON** restored Qiita, Zenn and YouTube images. This was not a Worker or D1 defect.
 
 ## Zero-downtime migration for source image persistence
 
@@ -23,7 +23,7 @@ Keep a normal monitored source active while verifying that no rows or receipts w
 
 ## If an image is still invisible in Discord
 
-**First** inspect the existing message rather than guessing which embed image field or CDN host to change. No new Discord messages or D1 writes:
+**First** check the Discord image-preview preference: **ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき → ON**. In the production investigation this alone fixed missing Qiita/Zenn/YouTube images. If images remain hidden, inspect the existing message instead of guessing which embed image field or CDN host to change. No new Discord messages or D1 writes:
 
 ```sh
 npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD/CHANNEL/MESSAGE" --probe-image --probe-proxy
@@ -34,7 +34,7 @@ This command requires the matching Discord Webhook URL in a **private local envi
 Interpretation:
 - Saved embed lacks an image: investigate payload generation or Discord ingestion.
 - Saved image URL is correct but has no proxy/dimensions: investigate Discord media fetching.
-- A valid proxy/dimensions exists but remains invisible: compare desktop/web/mobile client settings.
+- A valid proxy/dimensions exists but remains invisible: check Discord's link-preview toggle first, then compare desktop/web/mobile clients.
 - The canonical source image request fails: investigate the URL/host/media before changing embeds.
 
 A `deliveries.status = 'sent'` row proves only Discord webhook acceptance. Resolving #58 (persisting source media) does **not** establish #64's root cause or visual acceptance.

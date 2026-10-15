@@ -6,7 +6,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。**Clou
 
 [English](README.EN.md) · [機能と制約](#機能と通知ルール) · [運用コマンド](#運用とトラブルシューティング) · [MIT License](LICENSE)
 
-> **実行方式:** Cloudflare Workers + D1、GitHub Actions + SQLiteのいずれかを選択できます。ソース・監視対象・非公開設定・通知時間帯・保存期間は共通です。Actionsにはスケジュール遅延やArtifactの保持期限があります。**公開テンプレートの監視対象はすべて初期状態で無効**です。YouTubeのサムネイルはDiscordで表示されない事象があり、[Issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64)で調査中です。
+> **実行方式:** Cloudflare Workers + D1、GitHub Actions + SQLiteのいずれかを選択できます。ソース・監視対象・非公開設定・通知時間帯・保存期間は共通です。Actionsにはスケジュール遅延やArtifactの保持期限があります。**公開テンプレートの監視対象はすべて初期状態で無効**です。画像が表示されない場合は[Discordの表示設定](#サムネイル画像が表示されない場合)を確認してください。
 
 ## どこから始める？
 
@@ -15,6 +15,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。**Clou
 | 初めてCloudflareに導入する | [1. 監視対象を決める](#1-監視対象を決める) → [2. Cloudflareで動かす](#2-cloudflare-workers--d1で動かす) |
 | 公開フォークでも購読先を隠したい | [非公開設定](#監視対象を非公開にする) |
 | すでに稼働中で設定だけ変える | [設定の検査](#設定の検査と通知時間帯) → [運用](#運用とトラブルシューティング) |
+| サムネイル画像が表示されない | [Discordの表示設定](#サムネイル画像が表示されない場合) |
 | 今すぐ対象を試す・画像問題を調べる | [安全な診断コマンド](#安全な診断コマンド) |
 | GitHubで実行し、監視対象もSecretで非公開にする | [GitHub Actions + SQLite](#3-github-actions--sqliteを使う-任意) |
 
@@ -45,7 +46,7 @@ Qiita / Zenn / arXiv / OpenAlex / YouTube / 日本語Wikipediaに対応。**Clou
 
 **スケジュール:** Workerは5分ごとに起動し、原則1回に1監視対象を処理します。監視対象ごとに設定した間隔は「実行可能になる時刻」であり厳密な実行保証ではありません。送信は1回最大3件。通知時間帯外でも**取得とキュー保存を継続**します。
 
-**画像:** Qiita/ZennはRSS画像や記事OGP (Qiitaは投稿者アイコンへのフォールバックあり) を使用します。YouTubeは動画IDからサムネイルURLを生成しますが、現時点で**Discord上の表示は未解決**です。画像が無くてもタイトルとリンクを送ります。
+**画像:** Qiita/ZennはRSS画像や記事OGP (Qiitaは投稿者アイコンへのフォールバックあり) を使用します。YouTubeは動画IDからサムネイルURLを生成します。**サムネイルの表示にはDiscord側の表示設定が影響します。**画像が無くてもタイトルとリンクを送ります。
 
 ## 1. 監視対象を決める
 
@@ -262,12 +263,20 @@ GitHub Actionsの**Variables**に`MONITOR_CONFIG_MODE=private`(既定)を設定�
 
 ## 運用とトラブルシューティング
 
+### サムネイル画像が表示されない場合
+
+Discord側でリンクの埋め込み画像を非表示にしていると、Workerが画像URLを正常に送信し、Discord側で画像の取得に成功していても**画面には表示されません**。
+
+Discordの日本語UIで、**「ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき」をON**にしてください。設定後、すでに届いているQiita・Zenn・YouTubeの通知も再度表示して確認できます。実際にこの設定変更だけで3種類すべての画像が表示された事例があります ([解決記録 #64](https://github.com/Nasu726/dopagaki-notify/issues/64))。
+
+それでも表示されない場合に限り、[安全な診断コマンド](#安全な診断コマンド)で`image` / `thumbnail`、Discord画像プロキシ、サイズを調べてください。最初からWebhookの再送、D1リセット、画像URLの変更は不要です。
+
 | 症状 | 最初に確認すること |
 | --- | --- |
 | Discordに何も来ない | 対象が`enabled`か、対応`DISCORD_WEBHOOK_*`があるか、初回基準化だけか、時間帯外か |
 | 取得が進まない | Cloudflare Logs、`last_complete_at`と`next_due_at`、Secret設定の有効性 |
 | Shortsが届く | YouTube対象の`videoType`と固定`channelId`、非公開`MONITOR_CONFIG_JSON`の上書き |
-| 画像が見えない | 通知は維持し、下のDiscord画像診断で`proxy_url`/画像サイズを確認 |
+| 画像が見えない | まず[Discordの設定](#サムネイル画像が表示されない場合)をONにする。それでも表示されない場合だけ診断 |
 | Webhookを更新しても送れない | 情報源ごとのブロック状態を確認。[運用資料](docs/DEPLOYMENT.md)参照 |
 
 ```sh
@@ -294,7 +303,7 @@ npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID
 これは**既存メッセージおよび画像の読み取り専用GETのみ**で、再送信しません。`thumbnail` / `image`、Discordの画像プロキシ、画像サイズを検査します。トークンやWebhook URLを共有しないでください。[画像診断手順](docs/DISCORD_THUMBNAIL_DIAG.md)。
 
 
-**画像が表示されない場合:** Qiita/Zennで遅延通知の元画像を保持する機構と、YouTubeのDiscord画像表示の診断は別の問題です。[画像通知の診断・マイグレーション手順](docs/IMAGE_RELIABILITY.md)を参照してください。Qiita/Zenn画像の保持にはD1の新しいオプション列が必要ですが、適用前でも通常通知は継続します。
+**画像が表示されない場合:** まず上記の[Discordの表示設定](#サムネイル画像が表示されない場合)を確認してください。Qiita/Zennで遅延通知の元画像を保持する機構と、Discordクライアントの表示設定は別の問題です。[画像通知の診断・マイグレーション手順](docs/IMAGE_RELIABILITY.md)を参照してください。Qiita/Zenn画像の保持にはD1の新しいオプション列が必要ですが、適用前でも通常通知は継続します。
 
 ## 開発・設計
 
