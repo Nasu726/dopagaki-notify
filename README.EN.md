@@ -6,7 +6,7 @@ Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using **Clo
 
 [日本語](README.md) · [Features & delivery policy](#features-and-delivery-policy) · [Commands](#operations-and-troubleshooting) · [MIT License](LICENSE)
 
-> **Runtime:** Choose Cloudflare Workers + D1 or GitHub Actions + SQLite. Sources, private monitor configuration, delivery windows and per-monitor retention are shared; GitHub Actions has different scheduling and Artifact-recovery guarantees. **All public example monitors are disabled by default**. YouTube thumbnails currently fail to render in Discord and are a non-blocking, [issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64).
+> **Runtime:** Choose Cloudflare Workers + D1 or GitHub Actions + SQLite. Sources, private monitor configuration, delivery windows and per-monitor retention are shared; GitHub Actions has different scheduling and Artifact-recovery guarantees. **All public example monitors are disabled by default**. If thumbnails are hidden, check the [Discord client display preference](#if-thumbnail-images-are-not-visible) before investigating webhook delivery.
 
 ## Choose your path
 
@@ -15,6 +15,7 @@ Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using **Clo
 | First deployment with Cloudflare | [1. Choose monitors](#1-choose-your-monitors) → [2. Deploy with Cloudflare](#2-deploy-with-cloudflare-workers--d1) |
 | Keep personal subscriptions private in a public fork | [Private monitor configuration](#keep-your-monitors-private) |
 | Change settings on an existing deployment | [Preflight and delivery hours](#validate-settings-and-choose-delivery-hours) |
+| Thumbnail images are hidden | [Discord display preference](#if-thumbnail-images-are-not-visible) |
 | Test a source immediately or diagnose images | [Safe diagnostic commands](#safe-diagnostic-commands) |
 | Run without Cloudflare | [GitHub Actions + SQLite](#3-github-actions--sqlite-optional) |
 
@@ -45,7 +46,7 @@ Monitor Qiita, Zenn, arXiv, OpenAlex, YouTube and Japanese Wikipedia using **Clo
 
 **Scheduling:** The Worker runs every five minutes and normally handles one due monitor per invocation. Per-monitor intervals indicate when a fetch becomes eligible, not an exact execution time. It sends at most three items per invocation. Polling and queuing continue **outside allowed notification hours**.
 
-**Images:** Qiita and Zenn can show RSS/OGP images (Qiita may fall back to author avatar). YouTube generates a thumbnail URL from the video ID, but **its rendering in Discord is still unresolved**. Missing images never block title/link delivery.
+**Images:** Qiita and Zenn can show RSS/OGP images (Qiita may fall back to author avatar). YouTube generates a thumbnail URL from the video ID. **Discord's client-side preview setting controls whether embedded images are visible.** Missing images never block title/link delivery.
 
 ## 1. Choose your monitors
 
@@ -262,12 +263,20 @@ Set the Actions repository Variable `MONITOR_CONFIG_MODE=private` (default). To 
 
 ## Operations and troubleshooting
 
+### If thumbnail images are not visible
+
+Discord can hide embedded images in the client **even when the Worker sends a valid image URL and Discord's image proxy fetches it successfully**. First enable link preview images in Discord.
+
+**Verified Japanese UI path:** **ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき → ON** (User Settings → Theme → Messages → When links are posted in chat). Exact English labels may vary with the Discord client version. After enabling it, revisit already-delivered Qiita, Zenn and YouTube notifications. This single client-side change restored all three providers' images in a real incident ([resolved issue #64](https://github.com/Nasu726/dopagaki-notify/issues/64)).
+
+Only if the images are still missing, follow the [read-only diagnostics](#safe-diagnostic-commands) to check saved embeds and Discord's image proxy. Do not resend notifications, reset D1 or change image URLs as an initial troubleshooting step.
+
 | Symptom | Check first |
 | --- | --- |
 | No Discord alert | Enabled target, `DISCORD_WEBHOOK_*` Secret, initial silent baseline, delivery hours |
 | Upstream scan stalls | Cloudflare Logs, `last_complete_at` / `next_due_at`, current Secret validity |
 | Shorts still sent | `videoType` + pinned `channelId`, complete private `MONITOR_CONFIG_JSON` override |
-| Missing images | Keep notifications working; inspect Discord's saved embed and proxy metadata |
+| Missing images | First [enable Discord's preview setting](#if-thumbnail-images-are-not-visible); inspect the saved embed only if images remain hidden |
 | Secret fixed, webhook still blocked | Source-wide blocked state; see [runbook](docs/DEPLOYMENT.md) |
 
 ```sh
@@ -294,7 +303,7 @@ npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID
 The tool uses **GET only** (message and image probes); no notification replay or D1 writes. It reports saved `image` / `thumbnail`, Discord image-proxy presence and dimensions, with sanitized output. Never share the webhook URL or token. [Diagnostic guide](docs/DISCORD_THUMBNAIL_DIAG.md).
 
 
-**If images do not render:** Queued Qiita/Zenn image persistence and YouTube Discord media rendering are different failure layers. See [media reliability and migration guide](docs/IMAGE_RELIABILITY.md). An additive D1 migration enables source-media retention; the Worker keeps ordinary notification delivery working before it is applied.
+**If images do not render:** First check the [Discord preview setting](#if-thumbnail-images-are-not-visible). Queued Qiita/Zenn image persistence and Discord client image rendering are separate concerns. See [media reliability and migration guide](docs/IMAGE_RELIABILITY.md). An additive D1 migration enables source-media retention; the Worker keeps ordinary notification delivery working before it is applied.
 
 ## Development and design
 

@@ -1,4 +1,12 @@
-# Discord YouTube thumbnail diagnostic / サムネイル表示の原因切り分け
+# Discord image and thumbnail diagnostic / サムネイル表示の原因切り分け
+
+## First check the Discord client setting / まず表示設定を確認
+
+**確認済みの解決手順 (日本語UI): 「ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき」をON。**
+
+Qiita・Zenn・YouTubeの画像がすべて見えなかった事例で、この設定を有効化しただけで**過去の通知も含めて正常表示**されました ([Issue #64: resolved](https://github.com/Nasu726/dopagaki-notify/issues/64))。通知を送り直したり、Workerを変更したりする必要はありません。
+
+**English:** Enable link preview images in Discord. Verified Japanese UI path: **ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき → ON**. English labels may differ by client version. Only run the commands below if the images remain invisible after enabling the client preference.
 
 The Discord Webhook `wait=true` response indicates that a message was created, **not** that Discord's image proxy successfully fetched a remote thumbnail or that the client displayed it.
 
@@ -49,11 +57,11 @@ The script prints only image field presence, public YouTube video ID, expected-U
 | `thumbnail.present=false` and `image.present=false` | The image metadata was not saved in the message (not a proxy problem yet) |
 | Image present but `matchesExpectedYouTubeUrl=false` | Unexpected/stale CDN URL or video ID association |
 | Image present but proxy missing, or `width/height=0` | Discord media retrieval/metadata processing is a primary suspect |
-| Image, proxy and positive dimensions all present, yet invisible | Prefer testing Discord desktop/web versus mobile and its Display/Chat image settings; could be client rendering/cache |
+| Image, proxy and positive dimensions all present, yet invisible | **First enable ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき**; then compare desktop/browser clients only if needed |
 | `--probe-image` reports 404/nonimage | CDN URL / missing video thumbnail is a suspect |
 | `--probe-image` reports 200/206 and `image/jpeg` | Source image is accessible from the operator's network, but Discord proxy may still fail |
 | Source image succeeds, `--probe-proxy` reports an HTTP failure/nonimage | Discord proxy path or access is suspicious; compare with another client/network |
-| Both source and Discord proxy report a valid image, but still invisible in UI | More likely a Discord client/cache/display-setting issue, not missing source media |
+| Both source and Discord proxy report a valid image, but still invisible in UI | Check the client image-preview toggle first; Issue #64 was caused by this setting, not by failed Worker delivery |
 
 The next action depends on the **observed result**. Do not switch CDN hosts, retry/repost existing notifications, remove YouTube ID validation, or change D1 history before this test.
 
