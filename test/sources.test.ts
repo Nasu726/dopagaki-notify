@@ -168,7 +168,7 @@ test('arXiv category query config and dormant YouTube reference are explicit', (
   const expected = [
     { id: 'youtube-yurugengo', query: '@yurugengo', weekday: 'tuesday' },
     { id: 'youtube-yurucom', query: '@yurucom', weekday: 'sunday' },
-    { id: 'youtube-3blue1brown-japan', query: '@3Blue1BrownJapan', weekday: 'sunday' },
+    { id: 'youtube-3blue1brown-japan', query: '@3Blue1BrownJapan', weekday: undefined },
   ];
   assert.equal(MONITORS.find((m) => m.id === 'youtube-3blue1brown-japan')?.youtubeChannelId,
     'UCBevyiJ2ierZY-0yZhfLrmQ', '3Blue1BrownJapan must bypass mutable handle cache');
