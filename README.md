@@ -285,7 +285,7 @@ npm run smoke -- --monitor=qiita-example
 
 **手動取得:** `npm run smoke -- --monitor=ID` はその場で実際の情報源を1回取得しますが、**本番Cloudflare環境ではありません**。デフォルトでDiscord送信もD1変更も行いません。明示的な`--send-test --confirm-send`を**両方指定した場合のみ**、ローカル環境のWebhookで`[TEST]`通知を1件送信します。詳しくは[手動スモークテスト](docs/MANUAL_SMOKE.md)。
 
-**Discord画像:** ローカルの非公開`DISCORD_WEBHOOK_YOUTUBE`を設定し、すでに届いたメッセージのリンクを渡します。
+**Discord画像:** 対応するWebhookをローカル環境変数に設定し、すでに届いたメッセージのリンクを渡します。Qiita/Zennも`--source=qiita`または`--source=zenn`と`--probe-proxy`で確認できます。
 
 ```sh
 npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image --probe-proxy

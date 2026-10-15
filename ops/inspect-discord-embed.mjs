@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 const SNOWFLAKE = /^\d{15,22}$/;
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+const SOURCES = new Set(['youtube','qiita','zenn']);
 export function parseDiscordMessageLink(raw) {
   let url;
   try { url = new URL(raw); } catch { throw new Error('Invalid Discord message link'); }
@@ -21,28 +22,31 @@ export function parseDiscordMessageLink(raw) {
   return { channelId: parts[2], messageId: parts[3] };
 }
 
-export function parseWebhook(raw) {
+export function parseWebhook(raw, source = 'youtube') {
+  if (!SOURCES.has(source)) throw new Error('Invalid Discord diagnostic source');
   let url;
-  try { url = new URL(raw); } catch { throw new Error('Missing or invalid DISCORD_WEBHOOK_YOUTUBE'); }
+  try { url = new URL(raw); } catch { throw new Error('Missing or invalid DISCORD_WEBHOOK_' + source.toUpperCase()); }
   if (url.protocol !== 'https:' || !['discord.com', 'discordapp.com'].includes(url.hostname) ||
       url.username || url.password || url.port || url.search || url.hash ||
       !/^\/api\/webhooks\/\d{15,22}\/[^/]+$/.test(url.pathname)) {
-    throw new Error('Missing or invalid DISCORD_WEBHOOK_YOUTUBE');
+    throw new Error('Missing or invalid DISCORD_WEBHOOK_' + source.toUpperCase());
   }
   return url;
 }
 
 export function parseOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return { help: true };
-  let link = null, probeImage = false, probeProxy = false;
+  let link = null, probeImage = false, probeProxy = false, source = null;
   for (const arg of argv) {
     if (arg.startsWith('--message-link=') && link === null) link = arg.slice('--message-link='.length);
+    else if (arg.startsWith('--source=') && source === null && SOURCES.has(arg.slice(9))) source = arg.slice(9);
     else if (arg === '--probe-image' && !probeImage) probeImage = true;
     else if (arg === '--probe-proxy' && !probeProxy) probeProxy = true;
     else throw new Error('Invalid or duplicate diagnostic option');
   }
   if (!link) throw new Error('Missing --message-link (run --help)');
-  return { help: false, ...parseDiscordMessageLink(link), probeImage, probeProxy };
+  return { help: false, ...parseDiscordMessageLink(link), probeImage, probeProxy,
+    ...(source !== null ? {source} : {}) };
 }
 
 function videoIdFromEmbed(embed) {
@@ -71,7 +75,7 @@ function mediaSummary(media, expected) {
   };
 }
 
-export function summarizeMessage(message, expectedChannelId, expectedMessageId) {
+export function summarizeMessage(message, expectedChannelId, expectedMessageId, source = 'youtube') {
   if (!message || typeof message !== 'object' || message.id !== expectedMessageId ||
       message.channel_id !== expectedChannelId) throw new Error('Discord response does not identify the requested message');
   const embeds = Array.isArray(message.embeds) ? message.embeds : [];
@@ -83,8 +87,15 @@ export function summarizeMessage(message, expectedChannelId, expectedMessageId) 
     embeds: embeds.slice(0, 5).map(embed => {
       const videoId = videoIdFromEmbed(embed);
       const expected = videoId ? 'https://i.ytimg.com/vi/' + videoId + '/hqdefault.jpg' : null;
+      let articleHost = null;
+      if (source !== 'youtube') {
+        try { articleHost = new URL(embed?.url).hostname; } catch { /* no raw URL output */ }
+      }
       return {
         type: typeof embed?.type === 'string' ? embed.type : null,
+        ...(source !== 'youtube' ? {
+          articleHost, matchesExpectedArticleHost: articleHost === (source === 'qiita' ? 'qiita.com' : 'zenn.dev'),
+        } : {}),
         youtubeVideoId: videoId,
         thumbnail: mediaSummary(embed?.thumbnail, expected),
         image: mediaSummary(embed?.image, expected),
@@ -107,11 +118,12 @@ function verifiedDiscordImageProxy(raw) {
 }
 
 export async function inspectDiscordEmbed({
-  webhook, channelId, messageId, probeImage = false, probeProxy = false, fetcher = fetch,
+  webhook, channelId, messageId, source = 'youtube', probeImage = false, probeProxy = false, fetcher = fetch,
 }) {
+  if (!SOURCES.has(source)) throw new Error('Invalid Discord diagnostic source');
   if (!SNOWFLAKE.test(channelId) || !SNOWFLAKE.test(messageId))
     throw new Error('Invalid Discord channel/message ID');
-  const base = parseWebhook(webhook);
+  const base = parseWebhook(webhook,source);
   const endpoint = new URL(base.href);
   endpoint.pathname += '/messages/' + messageId;
   const response = await fetcher(endpoint, {
@@ -120,7 +132,7 @@ export async function inspectDiscordEmbed({
   });
   if (!response.ok) throw new Error('Discord message lookup failed (HTTP ' + response.status + ')');
   const saved = await response.json();
-  const report = summarizeMessage(saved, channelId, messageId);
+  const report = summarizeMessage(saved, channelId, messageId, source);
   if (probeProxy) {
     const media = Array.isArray(saved.embeds) ? saved.embeds.flatMap(
       e => [e?.thumbnail, e?.image]) : [];
@@ -145,7 +157,8 @@ export async function inspectDiscordEmbed({
       }
     }
   }
-  if (probeImage) {
+  if (probeImage && source !== 'youtube') report.sourceImage = { checked:false, reason:'Article URLs not probed: use --probe-proxy' };
+  if (probeImage && source === 'youtube') {
     const id = report.embeds.find(x => x.youtubeVideoId)?.youtubeVideoId;
     if (!id) {
       report.sourceImage = { checked: false, reason: 'No YouTube video ID present in the message embed' };
@@ -174,12 +187,13 @@ export async function inspectDiscordEmbed({
 async function main() {
   const options = parseOptions(process.argv.slice(2));
   if (options.help) {
-    console.log('Usage: node ops/inspect-discord-embed.mjs --message-link=https://discord.com/channels/GUILD/CHANNEL/MESSAGE [--probe-image] [--probe-proxy]');
-    console.log('Requires private DISCORD_WEBHOOK_YOUTUBE. Read-only GET; no Discord messages sent, no D1 access.');
+    console.log('Usage: node ops/inspect-discord-embed.mjs --message-link=https://discord.com/channels/GUILD/CHANNEL/MESSAGE [--source=youtube|qiita|zenn] [--probe-image] [--probe-proxy]');
+    console.log('Requires private DISCORD_WEBHOOK_<SOURCE>. Read-only GET; no Discord messages sent, no D1 access.');
     return;
   }
   const report = await inspectDiscordEmbed({
-    webhook: process.env.DISCORD_WEBHOOK_YOUTUBE,
+    webhook: process.env['DISCORD_WEBHOOK_' + (options.source ?? 'youtube').toUpperCase()],
+    source: options.source ?? 'youtube',
     channelId: options.channelId,
     messageId: options.messageId,
     probeImage: options.probeImage,
@@ -191,8 +205,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   try { await main(); }
   catch (error) {
     const message = error instanceof Error && (/^Discord message lookup failed \(HTTP \d{3}\)$/.test(error.message) ||
+      /^Missing or invalid DISCORD_WEBHOOK_(?:YOUTUBE|QIITA|ZENN)$/.test(error.message) ||
       ['Invalid Discord message link','Expected Discord message link with channel and message IDs',
-        'Missing --message-link (run --help)','Missing or invalid DISCORD_WEBHOOK_YOUTUBE',
+        'Missing --message-link (run --help)','Invalid Discord diagnostic source',
         'Invalid or duplicate diagnostic option', 'Invalid Discord channel/message ID',
         'Discord response does not identify the requested message'].includes(error.message))
       ? error.message : 'Discord diagnostic failed (check network and private webhook configuration)';

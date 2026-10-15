@@ -285,7 +285,7 @@ npm run smoke -- --monitor=qiita-example
 
 **One-off fetch:** `npm run smoke -- --monitor=ID` fetches a real snapshot **from your local machine**, not the deployed Cloudflare runtime. Default mode does not access D1 or send Discord messages. Both `--send-test --confirm-send` must be supplied to send one explicitly labeled `[TEST]` notification using your local webhook Secret. See [manual smoke guide](docs/MANUAL_SMOKE.md).
 
-**Discord thumbnail investigation:** Supply the private `DISCORD_WEBHOOK_YOUTUBE` to your local environment, then inspect the **link of an already delivered** Discord notification:
+**Discord thumbnail investigation:** Supply the relevant private Discord webhook URL in `DISCORD_WEBHOOK_YOUTUBE`, `DISCORD_WEBHOOK_QIITA`, or `DISCORD_WEBHOOK_ZENN`, then inspect an **already delivered** notification. Qiita/Zenn use `--source=qiita|zenn` and `--probe-proxy`:
 
 ```sh
 npm run inspect:discord -- --message-link="https://discord.com/channels/GUILD_ID/CHANNEL_ID/MESSAGE_ID" --probe-image --probe-proxy

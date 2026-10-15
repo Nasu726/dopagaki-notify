@@ -128,3 +128,33 @@ test('proxy and source probes report distinct read-only HTTP failures',async()=>
   assert.equal(r.discordProxyImage.status,404);
   assert.equal(r.sourceImage.status,206);
 });
+
+test('Qiita and Zenn diagnostics inspect existing Discord image and proxy with no untrusted source fetch',async()=>{
+  for(const [source,host] of [['qiita','qiita.com'],['zenn','zenn.dev']]){
+    const opts=parseOptions(['--message-link='+link,'--source='+source,'--probe-proxy']);
+    assert.equal(opts.source,source);
+    const existing={id:messageId,channel_id:channelId,embeds:[{
+      type:'rich',url:'https://'+host+'/user/articles/secret-title',
+      image:{url:'https://images.example.org/test.png?token=private',
+        proxy_url:'https://images-ext-1.discordapp.net/external/test',width:720,height:360},
+    }]};
+    let calls=0;
+    const report=await inspectDiscordEmbed({webhook,channelId,messageId,source,probeProxy:true,probeImage:true,
+      fetcher:async(input,init)=>{
+        calls++;assert.equal(init.method,'GET');
+        if(calls===1)return Response.json(existing);
+        assert.equal(new URL(String(input)).hostname,'images-ext-1.discordapp.net');
+        return new Response(new Uint8Array([0xff]),{status:206,headers:{'content-type':'image/png'}});
+      },
+    });
+    assert.equal(calls,2);
+    assert.equal(report.embeds[0].articleHost,host);
+    assert.equal(report.embeds[0].matchesExpectedArticleHost,true);
+    assert.equal(report.embeds[0].image.present,true);
+    assert.equal(report.sourceImage.checked,false);
+    assert.equal(report.discordProxyImage.status,206);
+    assert.doesNotMatch(JSON.stringify(report),/private|secret-title|external\/test/);
+  }
+  assert.throws(()=>parseOptions(['--message-link='+link,'--source=arxiv']));
+  assert.throws(()=>parseOptions(['--message-link='+link,'--source=qiita','--source=zenn']));
+});
