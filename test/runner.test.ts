@@ -833,7 +833,7 @@ test('off-day YouTube initialization is deferred until specified day, with no up
   assert.equal(state?.next_due_at, sunday + 60 * 60_000);
 });
 
-test('all three YouTube monitors use independent Tuesday/Sunday hourly schedules', async () => {
+test('JST weekday-restricted YouTube monitors retain Tuesday/Sunday hourly schedules', async () => {
   const s = setup();
   s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
   const monitors = MONITORS.filter((m) => m.source === 'youtube' && m.weeklyJstDay !== undefined);
@@ -859,6 +859,29 @@ test('all three YouTube monitors use independent Tuesday/Sunday hourly schedules
       .get(monitor.id)?.next_due_at,
       nextHourlyJstWeekdayDue(base + 24 * 60 * 60_000, monitor.weeklyJstDay!));
   }
+});
+
+test('3Blue1Brown Japan polls on non-Sundays hourly while keeping the original monitor identity', async () => {
+  const monitor = MONITORS.find(m => m.id === 'youtube-3blue1brown-japan')!;
+  assert.equal(monitor.query, '@3Blue1BrownJapan');
+  assert.equal(monitor.youtubeChannelId, 'UCBevyiJ2ierZY-0yZhfLrmQ');
+  assert.equal(monitor.intervalMinutes, 60);
+  assert.equal(monitor.enabled, true);
+  assert.equal(monitor.weeklyJstDay, undefined);
+  const s = setup();
+  s.env.DISCORD_WEBHOOK_YOUTUBE = webhook;
+  let fetchCount = 0;
+  const deps = { ...s.deps, fetchItems: async () => {
+    fetchCount++;
+    return { items: [], potentiallyTruncated: false };
+  }};
+  const thursday = Date.parse('2026-10-15T03:00:00Z');
+  assert.equal(await runTick(s.env, [monitor], thursday, deps), 'processed');
+  assert.equal(fetchCount, 1, 'weekday restriction must not suppress a Thursday poll');
+  assert.equal(s.raw.prepare('SELECT next_due_at FROM monitor_state WHERE id = ?')
+    .get(monitor.id)?.next_due_at, thursday + 60 * 60_000);
+  assert.equal(await runTick(s.env, [monitor], thursday + 60 * 60_000, deps), 'processed');
+  assert.equal(fetchCount, 2, 'subsequent non-Sunday due poll must run hourly');
 });
 
 test('Sunday YouTube API failure retries on Sunday then resumes hourly; off-day retries defer', async () => {

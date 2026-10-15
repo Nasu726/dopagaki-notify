@@ -315,11 +315,10 @@ The three owner-approved YouTube channels are **enabled**:
 | --- | --- | --- |
 | `youtube-yurugengo` | `@yurugengo` | Tuesday each hour 00:00–23:00 |
 | `youtube-yurucom` | `@yurucom` | Sunday each hour 00:00–23:00 |
-| `youtube-3blue1brown-japan` | `@3Blue1BrownJapan` | Sunday each hour 00:00–23:00 |
+| `youtube-3blue1brown-japan` | `@3Blue1BrownJapan` | Every day, approximately hourly |
 
-All three use `intervalMinutes=60` in `config/intervals.json`
-and `weekdayJst` in `config/targets.json`. Checks run **only on the
-specified JST day**. The first successful YouTube check on that day records the baseline and queues its latest unseen video **only if it remains within the configured receipt retention horizon** (10 days by default); subsequent checks continue to catch newly published videos.
+All three use `intervalMinutes=60` in `config/intervals.json`.
+Only the two Yuru channels retain `weekdayJst` restrictions in `config/targets.json`; 3Blue1Brown Japan is eligible **every day**. The first successful YouTube check records the baseline and queues its latest unseen video **only if it remains within the configured receipt retention horizon** (10 days by default); subsequent checks continue to catch newly published videos.
 Subsequent checks use the top of each JST hour. Actual Cron timing can lag
 by up to one dispatcher interval. When an API fetch fails near midnight, an
 off-day retry is skipped until the next selected weekday. This choice favors
@@ -335,7 +334,7 @@ Verify after deployment:
 npx wrangler d1 execute dopagaki-notify --remote --command "SELECT id,initialized_at,last_complete_at,next_due_at FROM monitor_state WHERE id LIKE 'youtube-%' ORDER BY id;"
 ```
 
-A Sunday monitor's `initialized_at = NULL` before Sunday is expected;
+A Sunday-only monitor's `initialized_at = NULL` before Sunday is expected;
 the first successful on-day fetch sets it. Real YouTube `@handle`
 resolution and RSS compatibility in Workers are **not yet live-verified**.
 All active YouTube monitors share `DISCORD_WEBHOOK_YOUTUBE`, while
