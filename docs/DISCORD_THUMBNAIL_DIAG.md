@@ -62,3 +62,19 @@ Discord reference: https://docs.discord.com/developers/resources/webhook (Get We
 ## 日本語の要約
 
 Discordの通知済みメッセージをGETするだけで、Discordが `thumbnail` / `image` のURLと `proxy_url`、画像の幅・高さを保持しているか調べます。通知を再送したりD1を更新したりしません。**Webhook URLは機密情報なので共有しないでください。** 取得された診断JSONのみ共有すれば、原因をさらに絞れます。
+
+## Qiita / Zenn image diagnostic
+
+This same read-only CLI can inspect previously sent Qiita and Zenn notifications with the corresponding private webhook. The webhook must be available locally; a Cloudflare runtime Secret cannot be read back from GitHub.
+
+```sh
+read -rs -p "Qiita webhook URL: " DISCORD_WEBHOOK_QIITA
+printf '\n'
+export DISCORD_WEBHOOK_QIITA
+npm run inspect:discord -- --source=qiita --message-link="https://discord.com/channels/GUILD/CHANNEL/MESSAGE" --probe-proxy
+unset DISCORD_WEBHOOK_QIITA
+```
+
+For Zenn use `DISCORD_WEBHOOK_ZENN` and `--source=zenn`. The output omits message text, titles, full image URLs, and webhook credentials. Inspect `image.present`, `thumbnail.present`, `proxyPresent`, width/height and `discordProxyImage`. `articleHost` and `matchesExpectedArticleHost` verify the expected publisher. The CLI deliberately does not fetch arbitrary article source images because those URLs are untrusted. `--probe-image` is only useful for YouTube; for Qiita/Zenn use `--probe-proxy`.
+
+The additive D1 migration 0010 and Discord image rendering are distinct layers: the migration preserves safe image URLs across delayed deliveries but does not guarantee Discord displays them.
