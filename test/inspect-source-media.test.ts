@@ -49,7 +49,7 @@ test('Zenn inspection counts raw enclosures, safe parsed URLs, and persistence r
     rejectedImageLocationTypes:{zenn_cloudinary_upload:1},
     enclosuresWithoutParsedImage:0,
   });
-  assert.doesNotMatch(JSON.stringify(report),/private|cloudinary|author|Article|typescript/);
+  assert.doesNotMatch(JSON.stringify(report),/private|res\.cloudinary\.com|author|Article|typescript/);
 });
 
 test('Qiita inspection uses first API page and counts public avatars without reporting URLs',async()=>{
