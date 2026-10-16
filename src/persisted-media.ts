@@ -40,7 +40,8 @@ export function inspectPersistentMediaUrl(
   // the strict rejection policy below.
   if (source === 'zenn' && url.hostname === 'res.cloudinary.com' &&
       url.pathname.startsWith('/zenn/image/upload/')) {
-    const keys = [...url.searchParams.keys()];
+    const keys: string[] = [];
+    url.searchParams.forEach((_value, key) => keys.push(key));
     if (keys.length === 1 && /^_[A-Za-z0-9_-]{1,3}$/.test(keys[0]!)) {
       url.search = '';
       return { url: url.href, reason: null, rejectedKeys: [] };
