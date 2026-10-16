@@ -161,3 +161,42 @@ test('image-persisting inserts honor D1 100-parameter cap, no repeat writes',asy
     assert.equal(pending[0]?.image_url,'https://res.cloudinary.com/zenn/image/upload/0.png');
   }finally{raw.close()}
 });
+
+
+test('production stores query-free Zenn Cloudinary image URL for an observed underscore key',()=>{
+  const canonical='https://res.cloudinary.com/zenn/image/upload/s--path-sig--/v1234/article.png';
+  assert.equal(persistentMediaUrl('zenn',zennUrl,canonical+'?_rv=opaque-value'),canonical);
+  assert.equal(persistentMediaUrl('zenn',zennUrl,canonical+'?_sv=long-value'),canonical);
+  for(const candidate of [
+    canonical+'?token=private',
+    canonical+'?X-Amz-Signature=private',
+    canonical+'?__token=private',
+    canonical+'?_rv=a&other=b',
+    canonical+'?_rv=a&_sv=b',
+    canonical+'?_rv=a#secret',
+    'https://res.cloudinary.com/other/image/upload/a.png?_rv=x',
+    'https://res.cloudinary.com/zenn/image/fetch/a.png?_rv=x',
+    'https://other.example.com/zenn/image/upload/a.png?_rv=x',
+  ])assert.equal(persistentMediaUrl('zenn',zennUrl,candidate),null,candidate);
+  assert.equal(persistentMediaUrl('qiita',qiitaUrl,canonical+'?_rv=x'),null);
+});
+
+test('Zenn short underscore query key is stripped BEFORE storing pending D1 row',async()=>{
+  const {raw,db}=openDatabase(':memory:');
+  try {
+    applyMigrations(raw);
+    const original='https://res.cloudinary.com/zenn/image/upload/v1234/new-article.png?_rv=cache';
+    const now=date+60_000;
+    const item:ContentItem={id:'zenn:new-opaque',title:'Article',url:zennUrl,
+      publishedAt:now,imageUrl:original};
+    await stage(db,'zenn-opaque-monitor',[item],date-60_000,now,{imageSource:'zenn'});
+    const rows=await getPending(db,'zenn-opaque-monitor',now,3,undefined,'zenn');
+    const canonical=original.split('?')[0];
+    assert.equal(rows.length,1);
+    assert.equal(rows[0]?.image_url,canonical);
+    assert.equal(raw.prepare('SELECT image_url FROM deliveries WHERE item_id=?')
+      .get(item.id)?.image_url,canonical);
+    assert.equal(raw.prepare('SELECT status FROM deliveries WHERE item_id=?')
+      .get(item.id)?.status,'pending');
+  } finally {raw.close();}
+});

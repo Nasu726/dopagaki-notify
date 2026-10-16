@@ -40,3 +40,21 @@ Interpretation:
 A `deliveries.status = 'sent'` row proves only Discord webhook acceptance. Resolving #58 (persisting source media) does **not** establish #64's root cause or visual acceptance.
 
 [Existing Discord diagnostic](DISCORD_THUMBNAIL_DIAG.md) · [manual smoke test](MANUAL_SMOKE.md).
+
+## 2026-10-16: Zenn D1 URL persistence correction
+
+Discord image previews for Qiita, Zenn, and YouTube are already working. The resolved display issue (#64) was a Discord client preference: **ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき → ON**. It is unrelated to D1 persistence.
+
+The open durability issue (#58) was traced to a strict URL-persistence filter rejecting 20/20 live Zenn RSS enclosure URLs, despite the images displaying correctly at notification time. A read-only public-image check returned identical image bytes (SHA-256) for **20/20** Zenn Cloudinary originals and their query-free equivalents. In this production fix, only Zenn `https://res.cloudinary.com/zenn/image/upload/...` links with a single underscore-prefixed 2–4 character query key are reduced to their **query-free canonical URL before D1 insertion**. The removed query value is never stored. Unrecognized signed/private/multiple-key URLs and unrelated hosts remain rejected. Existing sent rows stay unchanged; only newly staged eligible article deliveries receive the canonical value.
+
+**Deployment and follow-up:** The owner has already applied migration `0010_delivery_media.sql`. On a fresh Zenn notification after deploying this change, run this **read-only** D1 query and confirm `stored_images > 0` for one or more freshly staged items; no historical records need rewriting:
+
+```sql
+SELECT monitor_id, status, COUNT(*) AS total,
+       SUM(image_url IS NOT NULL) AS stored_images
+FROM deliveries
+WHERE monitor_id LIKE 'zenn-%' AND discovered_at >= ?
+GROUP BY monitor_id, status;
+```
+
+Replace `?` with the actual deployment timestamp in milliseconds. Zero new rows is inconclusive. The source RSS changes over time and old sent rows cannot prove the new staging path. Do not close #58 until post-deployment evidence arrives.
