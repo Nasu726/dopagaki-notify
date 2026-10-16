@@ -1,0 +1,20 @@
+name: Read-only Zenn public media investigation
+on:
+  push:
+    branches:
+      - diagnostics/zenn-public-url-comparison
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Read public RSS and compare bounded public image bytes
+        run: node --experimental-strip-types ops/probe-zenn-public-media.mjs
