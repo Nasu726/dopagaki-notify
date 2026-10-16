@@ -16,6 +16,7 @@
     "predeploy": "npm run config:check && node ops/verify-cloudflare-config.mjs",
     "smoke": "node --experimental-strip-types ops/manual-smoke.mjs",
     "inspect:discord": "node ops/inspect-discord-embed.mjs",
+    "inspect:source-media": "node --experimental-strip-types ops/inspect-source-media.mjs",
     "poll:request": "node ops/request-production-poll.mjs",
     "predev": "node ops/verify-cloudflare-config.mjs"
   },

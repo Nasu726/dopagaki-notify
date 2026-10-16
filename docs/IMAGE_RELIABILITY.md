@@ -21,6 +21,41 @@ npx wrangler d1 execute dopagaki-notify --remote --command "PRAGMA table_info(de
 
 Keep a normal monitored source active while verifying that no rows or receipts were reset. The pre-migration fallback exists precisely to prevent notification outages during auto-deploy / migration ordering.
 
+
+## Source RSS/API media preflight (Issue #58)
+
+To distinguish **upstream absent images**, **RSS parsing**, and **URL rejection before D1 persistence**, run this **read-only public-source diagnostic** locally. It makes exactly **one** HTTP request to the Qiita Items API or the selected Zenn RSS feed. It does not read or modify Cloudflare D1, SQLite state or Discord and needs no secrets:
+
+```sh
+npm run inspect:source-media -- --source=zenn --query=topic:typescript
+npm run inspect:source-media -- --source=qiita --query=tag:Rust
+```
+
+Use the actual monitor's query, but **never share private queries**. The JSON reports only aggregate counts, not article titles, IDs, queries, source URLs, image URLs, response bodies or credentials.
+
+- `entriesWithEnclosureTag`: count of Zenn RSS items containing an enclosure element; absent enclosures cannot be persisted from the RSS alone.
+- `imageUrlsParsed` / `imageUrlsPersistable`: how many Zenn article images survived RSS parsing and strict public URL persistence validation.
+- `enclosuresWithoutParsedImage`: enclosure tags whose image URLs were rejected during parsing or not extracted.
+- `imageUrlsRejectedForPersistence`: safely parsed URLs excluded from D1, such as URL queries containing tokens or unknown parameters.
+- `thumbnailUrlsParsed` / `thumbnailUrlsPersistable`: Qiita author-avatar fallback counts.
+- `potentiallyTruncated`: source page might omit older entries; this is not an image failure.
+
+**Caveat:** the source feed changes over time. This preflight observes **current** feed entries only, not the contents of the feed when older D1 records were first staged. On the real D1 database use a **read-only** query to inspect rows staged after the migration:
+
+```sql
+SELECT monitor_id, status,
+       COUNT(*) AS rows_count,
+       SUM(image_url IS NOT NULL) AS stored_image_urls,
+       SUM(thumbnail_url IS NOT NULL) AS stored_fallback_urls
+FROM deliveries
+WHERE (monitor_id LIKE 'qiita-%' OR monitor_id LIKE 'zenn-%')
+  AND discovered_at >= unixepoch('2026-10-15 00:00:00') * 1000
+GROUP BY monitor_id, status
+ORDER BY monitor_id, status;
+```
+
+Replace the cutoff with the actual migration time if known. Newly staged data, rather than historical NULL rows, is needed to decide whether persistence is failing. Do not overwrite old sent receipts to retest media.
+
 ## If an image is still invisible in Discord
 
 **First** check the Discord image-preview preference: **ユーザー設定 → テーマ → メッセージ → チャットにリンクが投稿されたとき → ON**. In the production investigation this alone fixed missing Qiita/Zenn/YouTube images. If images remain hidden, inspect the existing message instead of guessing which embed image field or CDN host to change. No new Discord messages or D1 writes:
