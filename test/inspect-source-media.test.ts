@@ -44,6 +44,7 @@ test('Zenn inspection counts raw enclosures, safe parsed URLs, and persistence r
     entriesWithEnclosureTag:2,imageUrlsParsed:2,imageUrlsPersistable:1,
     imageUrlsRejectedForPersistence:1,thumbnailUrlsParsed:0,
     thumbnailUrlsPersistable:0,thumbnailUrlsRejectedForPersistence:0,
+    rejectionReasons:{unapproved_query_key:1},rejectedQueryKeys:{'[redacted]':1},
     enclosuresWithoutParsedImage:0,
   });
   assert.doesNotMatch(JSON.stringify(report),/private|cloudinary|author|Article|typescript/);
@@ -73,6 +74,7 @@ test('Qiita inspection uses first API page and counts public avatars without rep
     ok:true,source:'qiita',items:3,potentiallyTruncated:false,
     imageUrlsParsed:0,imageUrlsPersistable:0,imageUrlsRejectedForPersistence:0,
     thumbnailUrlsParsed:2,thumbnailUrlsPersistable:1,thumbnailUrlsRejectedForPersistence:1,
+    rejectionReasons:{unapproved_query_key:1},rejectedQueryKeys:{'[redacted]':1},
   });
   assert.doesNotMatch(JSON.stringify(report),/Private-title|secret|author|images.example/);
 });

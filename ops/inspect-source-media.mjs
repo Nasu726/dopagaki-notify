@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { fetchQiita } from '../src/sources/qiita.ts';
 import { zennFeedUrl, parseZenn } from '../src/sources/zenn.ts';
 import { fetchTextBounded, entries } from '../src/sources/xml.ts';
-import { persistentMedia } from '../src/persisted-media.ts';
+import { persistentMedia, inspectPersistentMediaUrl } from '../src/persisted-media.ts';
 
 export function parseOptions(argv) {
   if (argv.length === 1 && argv[0] === '--help') return {help:true};
@@ -55,8 +55,22 @@ export async function inspectSourceMedia(source,query,fetcher=fetch) {
     potentiallyTruncated=feed.potentiallyTruncated || feed.nextCursor != null;
   }
   let withImage=0,persistableImage=0,withThumbnail=0,persistableThumbnail=0;
+  const reasons={};
+  const queryKeyCounts={};
   for (const item of items) {
     const media=persistentMedia(options.source,item);
+    for(const field of ['imageUrl','thumbnailUrl']) {
+      if (!item[field]) continue;
+      const result=inspectPersistentMediaUrl(options.source,item.url,item[field]);
+      // A regression in the inspector should never misreport the runtime
+      // persistence policy as an upstream image defect.
+      if (result.url !== media[field]) throw new Error('Media inspection policy mismatch');
+      if (result.reason !== null) {
+        reasons[result.reason]=(reasons[result.reason] ?? 0)+1;
+        for (const key of result.rejectedKeys)
+          queryKeyCounts[key]=(queryKeyCounts[key] ?? 0)+1;
+      }
+    }
     if (item.imageUrl) {
       withImage++;
       if (media.imageUrl) persistableImage++;
@@ -66,6 +80,10 @@ export async function inspectSourceMedia(source,query,fetcher=fetch) {
       if (media.thumbnailUrl) persistableThumbnail++;
     }
   }
+  // Sort and cap all untrusted-source-dependent outputs.
+  const rejectionReasons=Object.fromEntries(Object.entries(reasons).sort(([a],[b])=>a.localeCompare(b)));
+  const rejectedQueryKeys=Object.fromEntries(Object.entries(queryKeyCounts).sort(([a],[b])=>
+    a.localeCompare(b)).slice(0,16));
   return {
     ok:true,source:options.source,items:items.length,potentiallyTruncated,
     ...(options.source === 'zenn' ? {entriesWithEnclosureTag:enclosureTags} : {}),
@@ -73,6 +91,7 @@ export async function inspectSourceMedia(source,query,fetcher=fetch) {
     imageUrlsRejectedForPersistence:withImage-persistableImage,
     thumbnailUrlsParsed:withThumbnail,thumbnailUrlsPersistable:persistableThumbnail,
     thumbnailUrlsRejectedForPersistence:withThumbnail-persistableThumbnail,
+    rejectionReasons,rejectedQueryKeys,
     // For Zenn this is the number of enclosure tags that failed URL parsing /
     // extraction (not a claim that their source URLs were image files).
     ...(options.source === 'zenn' ? {enclosuresWithoutParsedImage:enclosureTags-withImage} : {}),

@@ -37,8 +37,12 @@ Use the actual monitor's query, but **never share private queries**. The JSON re
 - `imageUrlsParsed` / `imageUrlsPersistable`: how many Zenn article images survived RSS parsing and strict public URL persistence validation.
 - `enclosuresWithoutParsedImage`: enclosure tags whose image URLs were rejected during parsing or not extracted.
 - `imageUrlsRejectedForPersistence`: safely parsed URLs excluded from D1, such as URL queries containing tokens or unknown parameters.
+- `rejectionReasons`: sanitized histogram classifying rejection as `unapproved_query_key`, `unapproved_query_value`, `unsafe_image_url`, `image_fragment`, or invalid article/source. These categories use the same validation policy as production staging.
+- `rejectedQueryKeys`: bounded histogram of simple non-sensitive rejected query *names only*, with auth/token/signature-like or arbitrary names reported as `[redacted]`. Query values and whole image URLs are never output. A nonempty unknown key is evidence for **investigation**, not permission to store signed/private URLs.
 - `thumbnailUrlsParsed` / `thumbnailUrlsPersistable`: Qiita author-avatar fallback counts.
 - `potentiallyTruncated`: source page might omit older entries; this is not an image failure.
+
+**Observed production pattern (2026-10-16):** the `topic:typescript` feed returned 20/20 enclosure tags and 20/20 safely parsed images, but **0/20 passed the strict persistence filter**. Images nevertheless display correctly in Discord, recovered on the sending path. The remaining task is strictly queued-source URL retention, not image rendering. The detailed rejection histogram distinguishes a genuinely safe URL-format change from an intentionally excluded token/signature.
 
 **Caveat:** the source feed changes over time. This preflight observes **current** feed entries only, not the contents of the feed when older D1 records were first staged. On the real D1 database use a **read-only** query to inspect rows staged after the migration:
 

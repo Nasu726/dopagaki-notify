@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {openDatabase,applyMigrations} from '../ops/actions/sqlite.mjs';
 import {stage,getPending} from '../src/state.ts';
 import {runTick} from '../src/runner.ts';
-import {persistentMediaUrl,missingDeliveryMediaColumns} from '../src/persisted-media.ts';
+import {persistentMediaUrl,inspectPersistentMediaUrl,missingDeliveryMediaColumns} from '../src/persisted-media.ts';
 import type {Monitor,Env,ContentItem} from '../src/types.ts';
 
 const date=Date.parse('2026-10-13T00:00:00Z');
@@ -160,4 +160,29 @@ test('image-persisting inserts honor D1 100-parameter cap, no repeat writes',asy
     assert.equal(pending.length,35);
     assert.equal(pending[0]?.image_url,'https://res.cloudinary.com/zenn/image/upload/0.png');
   }finally{raw.close()}
+});
+
+
+test('rejection inspection follows exact runtime URL policy without exposing query values',()=>{
+  const allowed='https://res.cloudinary.com/zenn/image/upload/example.png?format=png';
+  assert.deepEqual(inspectPersistentMediaUrl('zenn',zennUrl,allowed),
+    {url:allowed,reason:null,rejectedKeys:[]});
+  const unknown=inspectPersistentMediaUrl('zenn',zennUrl,
+    'https://res.cloudinary.com/zenn/image/upload/example.png?cache=1&token=secret');
+  assert.equal(unknown.url,null);
+  assert.equal(unknown.reason,'unapproved_query_key');
+  assert.deepEqual(unknown.rejectedKeys,['[redacted]','cache']);
+  const badValue=inspectPersistentMediaUrl('zenn',zennUrl,
+    'https://res.cloudinary.com/zenn/image/upload/example.png?format=png%2Fjpeg');
+  assert.equal(badValue.reason,'unapproved_query_value');
+  assert.deepEqual(badValue.rejectedKeys,[]);
+  const badFragment=inspectPersistentMediaUrl('zenn',zennUrl,
+    'https://res.cloudinary.com/zenn/image/upload/example.png#private');
+  assert.equal(badFragment.reason,'image_fragment');
+  const invalid=inspectPersistentMediaUrl('zenn',zennUrl,'http://localhost/secret.png');
+  assert.equal(invalid.reason,'unsafe_image_url');
+  for(const [url,result] of [[allowed,allowed],['https://cdn.test/og.png?token=x',null],
+    ['http://localhost/secret.png',null]]){
+    assert.equal(persistentMediaUrl('zenn',zennUrl,url),result);
+  }
 });
