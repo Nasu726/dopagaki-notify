@@ -35,6 +35,36 @@ function hasStructuralEnclosure(xml) {
   return /<enclosure\b[^>]{0,4096}>/i.test(structure);
 }
 
+/** Group rejected URL keys without disclosing raw key names or any values.
+ * Deliberately does not authorize persistence: auth/signature-like parameters
+ * may contain bearer credentials, even on an otherwise public RSS feed.
+ */
+export function classifyRejectedQueryKeys(raw) {
+  const summary={};
+  let url;
+  try { url=new URL(raw); } catch { return summary; }
+  url.searchParams.forEach((_value,key)=>{
+    if (/^(v|s|size|w|h|x|y|width|height|q|quality|fit|format|auto)$/i.test(key))
+      return;
+    const category=/(?:token|secret|key|pass|auth|sign|sig|credential|session|nonce)/i.test(key)
+      ? 'credential_or_signature_like'
+      : key.length > 24 ? 'long_parameter_name'
+      : !/^[a-z][a-z0-9_-]{0,23}$/i.test(key) ? 'nonstandard_parameter_name'
+      : 'ordinary_unapproved_name';
+    summary[category]=(summary[category] ?? 0)+1;
+  });
+  return summary;
+}
+
+export function classifyImageLocation(raw) {
+  let url;
+  try { url=new URL(raw); } catch { return 'other_or_invalid'; }
+  if (url.hostname !== 'res.cloudinary.com') return 'other_host';
+  if (url.pathname.startsWith('/zenn/image/upload/')) return 'zenn_cloudinary_upload';
+  if (url.pathname.startsWith('/zenn/image/fetch/')) return 'zenn_cloudinary_fetch';
+  return 'other_cloudinary_path';
+}
+
 /** The output contains only aggregate counts and booleans. It does not
  * infer production D1 status or assert the Discord client displayed media.
  */
@@ -57,6 +87,8 @@ export async function inspectSourceMedia(source,query,fetcher=fetch) {
   let withImage=0,persistableImage=0,withThumbnail=0,persistableThumbnail=0;
   const reasons={};
   const queryKeyCounts={};
+  const redactedKeyClasses={};
+  const rejectedImageLocations={};
   for (const item of items) {
     const media=persistentMedia(options.source,item);
     for(const field of ['imageUrl','thumbnailUrl']) {
@@ -69,6 +101,15 @@ export async function inspectSourceMedia(source,query,fetcher=fetch) {
         reasons[result.reason]=(reasons[result.reason] ?? 0)+1;
         for (const key of result.rejectedKeys)
           queryKeyCounts[key]=(queryKeyCounts[key] ?? 0)+1;
+        if (result.reason === 'unapproved_query_key') {
+          const classes=classifyRejectedQueryKeys(item[field]);
+          for (const [kind,count] of Object.entries(classes))
+            redactedKeyClasses[kind]=(redactedKeyClasses[kind] ?? 0)+count;
+        }
+        if (field === 'imageUrl') {
+          const location=classifyImageLocation(item[field]);
+          rejectedImageLocations[location]=(rejectedImageLocations[location] ?? 0)+1;
+        }
       }
     }
     if (item.imageUrl) {
@@ -84,6 +125,8 @@ export async function inspectSourceMedia(source,query,fetcher=fetch) {
   const rejectionReasons=Object.fromEntries(Object.entries(reasons).sort(([a],[b])=>a.localeCompare(b)));
   const rejectedQueryKeys=Object.fromEntries(Object.entries(queryKeyCounts).sort(([a],[b])=>
     a.localeCompare(b)).slice(0,16));
+  const rejectedKeyCategories=Object.fromEntries(Object.entries(redactedKeyClasses).sort(([a],[b])=>a.localeCompare(b)));
+  const rejectedImageLocationTypes=Object.fromEntries(Object.entries(rejectedImageLocations).sort(([a],[b])=>a.localeCompare(b)));
   return {
     ok:true,source:options.source,items:items.length,potentiallyTruncated,
     ...(options.source === 'zenn' ? {entriesWithEnclosureTag:enclosureTags} : {}),
@@ -91,7 +134,7 @@ export async function inspectSourceMedia(source,query,fetcher=fetch) {
     imageUrlsRejectedForPersistence:withImage-persistableImage,
     thumbnailUrlsParsed:withThumbnail,thumbnailUrlsPersistable:persistableThumbnail,
     thumbnailUrlsRejectedForPersistence:withThumbnail-persistableThumbnail,
-    rejectionReasons,rejectedQueryKeys,
+    rejectionReasons,rejectedQueryKeys,rejectedKeyCategories,rejectedImageLocationTypes,
     // For Zenn this is the number of enclosure tags that failed URL parsing /
     // extraction (not a claim that their source URLs were image files).
     ...(options.source === 'zenn' ? {enclosuresWithoutParsedImage:enclosureTags-withImage} : {}),

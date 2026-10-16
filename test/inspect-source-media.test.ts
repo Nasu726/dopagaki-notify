@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {parseOptions,inspectSourceMedia} from '../ops/inspect-source-media.mjs';
+import {parseOptions,inspectSourceMedia,classifyRejectedQueryKeys,classifyImageLocation} from '../ops/inspect-source-media.mjs';
 import {openDatabase,applyMigrations} from '../ops/actions/sqlite.mjs';
 import {stage,getPending} from '../src/state.ts';
 import {parseZenn} from '../src/sources/zenn.ts';
@@ -45,9 +45,11 @@ test('Zenn inspection counts raw enclosures, safe parsed URLs, and persistence r
     imageUrlsRejectedForPersistence:1,thumbnailUrlsParsed:0,
     thumbnailUrlsPersistable:0,thumbnailUrlsRejectedForPersistence:0,
     rejectionReasons:{unapproved_query_key:1},rejectedQueryKeys:{'[redacted]':1},
+    rejectedKeyCategories:{credential_or_signature_like:1},
+    rejectedImageLocationTypes:{zenn_cloudinary_upload:1},
     enclosuresWithoutParsedImage:0,
   });
-  assert.doesNotMatch(JSON.stringify(report),/private|cloudinary|author|Article|typescript/);
+  assert.doesNotMatch(JSON.stringify(report),/private|res\.cloudinary\.com|author|Article|typescript/);
 });
 
 test('Qiita inspection uses first API page and counts public avatars without reporting URLs',async()=>{
@@ -75,6 +77,8 @@ test('Qiita inspection uses first API page and counts public avatars without rep
     imageUrlsParsed:0,imageUrlsPersistable:0,imageUrlsRejectedForPersistence:0,
     thumbnailUrlsParsed:2,thumbnailUrlsPersistable:1,thumbnailUrlsRejectedForPersistence:1,
     rejectionReasons:{unapproved_query_key:1},rejectedQueryKeys:{'[redacted]':1},
+    rejectedKeyCategories:{credential_or_signature_like:1},
+    rejectedImageLocationTypes:{},
   });
   assert.doesNotMatch(JSON.stringify(report),/Private-title|secret|author|images.example/);
 });
@@ -94,4 +98,24 @@ test('Zenn parsed RSS image survives real D1 stage/getPending across invocations
     assert.equal(raw.prepare('SELECT image_url FROM deliveries WHERE item_id=?')
       .get(entry.id)?.image_url,valid);
   } finally {raw.close();}
+});
+
+test('query-key classes and media locations are fixed enums and do not expose upstream bytes',()=>{
+  const keyClasses=classifyRejectedQueryKeys(
+    'https://res.cloudinary.com/zenn/image/upload/a.png?token=secret&' +
+    'abcdefghijklmnopqrstuvwxy=long&co%3Alor=odd&cache=1&quality=80');
+  assert.deepEqual(keyClasses,{
+    credential_or_signature_like:1,
+    long_parameter_name:1,
+    nonstandard_parameter_name:1,
+    ordinary_unapproved_name:1,
+  });
+  for (const [url,kind] of [
+    ['https://res.cloudinary.com/zenn/image/upload/a.png?private=x','zenn_cloudinary_upload'],
+    ['https://res.cloudinary.com/zenn/image/fetch/a.png?private=x','zenn_cloudinary_fetch'],
+    ['https://res.cloudinary.com/other/image/upload/a.png?private=x','other_cloudinary_path'],
+    ['https://other.example.com/image.jpg?private=x','other_host'],
+    ['INVALID','other_or_invalid'],
+  ]) assert.equal(classifyImageLocation(url),kind);
+  assert.doesNotMatch(JSON.stringify(keyClasses),/secret|abcdefghijklmnop|co%3A|cache/);
 });
