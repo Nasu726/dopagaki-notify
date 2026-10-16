@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { parseZenn, zennFeedUrl } from '../src/sources/zenn.ts';
 import { fetchTextBounded } from '../src/sources/xml.ts';
 
-const results = {rssCount:0, rejectedQueryShape:{}, imageLocation:{}, comparisons:[]};
+const results = {rssCount:0, rejectedQueryShape:{}, keyLength:{}, firstCharacter:{}, imageLocation:{}, comparisons:{sampled:0,matching:0,failed:0}};
 function bucket(k){
   if (!k.length) return 'empty';
   if (/[^a-z0-9_-]/i.test(k)) return 'punctuation_or_unicode';
@@ -42,19 +42,20 @@ try {
     const loc=u.hostname==='res.cloudinary.com'&&u.pathname.startsWith('/zenn/image/upload/')?'zenn_cloudinary_upload':'other';
     add(results.imageLocation,loc);
     if(u.search){
-      for(const [key] of u.searchParams)add(results.rejectedQueryShape,bucket(key));
+      for(const [key] of u.searchParams){
+        add(results.rejectedQueryShape,bucket(key));
+        add(results.keyLength,key.length===1?'length_1':key.length<=4?'length_2_to_4':key.length<=12?'length_5_to_12':'length_13_plus');
+        add(results.firstCharacter,key[0]==='_'?'underscore':/^[0-9]$/.test(key[0]||'')?'digit':key[0]==='-'?'hyphen':'other');
+      }
     }
-    if(loc==='zenn_cloudinary_upload'&&u.search && safe.length<2)safe.push(u);
+    if(loc==='zenn_cloudinary_upload'&&u.search && safe.length<20)safe.push(u);
   }
   for(const u of safe){
     const stripped=new URL(u);stripped.search='';
     const a=await digestImage(u),b=await digestImage(stripped);
-    results.comparisons.push({
-      original:a.ok?'image200':a.status??a.reason,
-      withoutQuery:b.ok?'image200':b.status??b.reason,
-      sameImage:a.ok && b.ok && a.hash===b.hash,
-      sameType:a.ok&&b.ok&&a.ctype===b.ctype
-    });
+    results.comparisons.sampled++;
+    if(a.ok&&b.ok&&a.hash===b.hash&&a.ctype===b.ctype)results.comparisons.matching++;
+    else results.comparisons.failed++;
   }
   console.log(JSON.stringify(results));
 }catch{
