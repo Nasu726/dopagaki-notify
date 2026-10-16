@@ -39,6 +39,10 @@ Use the actual monitor's query, but **never share private queries**. The JSON re
 - `imageUrlsRejectedForPersistence`: safely parsed URLs excluded from D1, such as URL queries containing tokens or unknown parameters.
 - `rejectionReasons`: sanitized histogram classifying rejection as `unapproved_query_key`, `unapproved_query_value`, `unsafe_image_url`, `image_fragment`, or invalid article/source. These categories use the same validation policy as production staging.
 - `rejectedQueryKeys`: bounded histogram of simple non-sensitive rejected query *names only*, with auth/token/signature-like or arbitrary names reported as `[redacted]`. Query values and whole image URLs are never output. A nonempty unknown key is evidence for **investigation**, not permission to store signed/private URLs.
+- `rejectedKeyCategories`: fixed-enum counts for **credential/signature-like names**, unusually long names, unusual syntax, or otherwise unapproved names. This explains `[redacted]` without revealing the underlying name.
+- `rejectedImageLocationTypes`: fixed-enum counts distinguishing known Zenn Cloudinary upload/fetch URL paths from other hosts. Does not reveal complete hostnames or image paths.
+
+**Do not lift the safety restriction automatically.** If the source URL contains a token/signature-like parameter, it may be an access credential or an expiring image URL; saving it in D1 would violate the current policy. A separate safe canonical public URL would require additional verification.
 - `thumbnailUrlsParsed` / `thumbnailUrlsPersistable`: Qiita author-avatar fallback counts.
 - `potentiallyTruncated`: source page might omit older entries; this is not an image failure.
 
