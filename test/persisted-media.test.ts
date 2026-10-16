@@ -186,3 +186,42 @@ test('rejection inspection follows exact runtime URL policy without exposing que
     assert.equal(persistentMediaUrl('zenn',zennUrl,url),result);
   }
 });
+
+
+test('Zenn RSS Cloudinary opaque cache parameter is DROPPED, never persisted or sent',()=>{
+  const publicPath='https://res.cloudinary.com/zenn/image/upload/s--sigpath--/v1234/default/og-base.png';
+  const safe=persistentMediaUrl('zenn',zennUrl,publicPath+'?_rv=opaque-value');
+  assert.equal(safe,publicPath);
+  assert.deepEqual(inspectPersistentMediaUrl('zenn',zennUrl,publicPath+'?_rv=sensitive-value'),
+    {url:publicPath,reason:null,rejectedKeys:[]});
+  for(const [u,reason] of [
+    [publicPath+'?token=secret','unapproved_query_key'],
+    [publicPath+'?__token=private','unapproved_query_key'],
+    [publicPath+'?_rv=one&unknown=two','unapproved_query_key'],
+    [publicPath+'?_rv=one&_vs=two','unapproved_query_key'],
+    [publicPath+'?_rv=one#secret','image_fragment'],
+    ['https://other.example.com/image/upload/image.png?_rv=x','unapproved_query_key'],
+    ['https://res.cloudinary.com/another/image/upload/default/a.png?_rv=x','unapproved_query_key'],
+    ['https://res.cloudinary.com/zenn/image/fetch/example.png?_rv=x','unapproved_query_key'],
+  ]) {
+    assert.equal(inspectPersistentMediaUrl('zenn',zennUrl,u).reason,reason,u);
+    assert.equal(persistentMediaUrl('zenn',zennUrl,u),null,u);
+  }
+  assert.equal(persistentMediaUrl('qiita',qiitaUrl,publicPath+'?_rv=x'),null,
+    'never normalize a Qiita source URL');
+});
+
+test('Zenn Cloudinary query canonicalization persists across queued Cron delivery',async()=>{
+  const {raw,db}=openDatabase(':memory:');
+  try {
+    applyMigrations(raw);
+    const publicPath='https://res.cloudinary.com/zenn/image/upload/v1234/default/og.png';
+    const item:ContentItem={id:'zenn:canonical',title:'Canonical',url:zennUrl,publishedAt:date+1,
+      imageUrl:publicPath+'?_rv=cache'};
+    await stage(db,'zenn-canonical-test',[item],date-10,date+60_000,{imageSource:'zenn'});
+    const rows=await getPending(db,'zenn-canonical-test',date+60_000,3,undefined,'zenn');
+    assert.equal(rows[0]?.image_url,publicPath);
+    assert.equal(raw.prepare("SELECT image_url FROM deliveries WHERE item_id='zenn:canonical'")
+      .get()?.image_url,publicPath);
+  } finally {raw.close();}
+});

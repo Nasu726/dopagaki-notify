@@ -119,3 +119,22 @@ test('query-key classes and media locations are fixed enums and do not expose up
   ]) assert.equal(classifyImageLocation(url),kind);
   assert.doesNotMatch(JSON.stringify(keyClasses),/secret|abcdefghijklmnop|co%3A|cache/);
 });
+
+
+test('Zenn parser and public Cloudinary queryless canonicalization in source inspection',async()=>{
+  const canonical='https://res.cloudinary.com/zenn/image/upload/v1234/default/og.png';
+  const snippet='<?xml version="1.0"?><rss><channel>'+
+    row('queryless','<enclosure url="'+canonical+'?_rv=opaque-value" type="image/png"/>')+
+    '</channel></rss>';
+  const report=await inspectSourceMedia('zenn','topic:typescript',
+    async()=>new Response(snippet));
+  assert.equal(report.entriesWithEnclosureTag,1);
+  assert.equal(report.imageUrlsParsed,1);
+  assert.equal(report.imageUrlsPersistable,1);
+  assert.equal(report.imageUrlsRejectedForPersistence,0);
+  assert.deepEqual(report.rejectionReasons,{});
+  assert.deepEqual(report.rejectedQueryKeys,{});
+  assert.doesNotMatch(JSON.stringify(report),/opaque|cloudinary|queryless/);
+  const item=parseZenn(snippet)[0];
+  assert.equal(item.imageUrl,canonical+'?_rv=opaque-value');
+});
