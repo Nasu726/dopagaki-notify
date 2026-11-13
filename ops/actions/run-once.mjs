@@ -4,9 +4,9 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseKey, encryptState, decryptState } from './state-crypto.mjs';
 import { openDatabase, applyMigrations } from './sqlite.mjs';
-import Worker from '../../src/index.ts';
 import { pruneSentDeliveries } from '../../src/maintenance.ts';
-import { selectActionsConfig } from './runtime-config.mjs';
+import { selectActionsConfig, buildActionsEnv } from './runtime-config.mjs';
+import { runDueMonitorsOnce } from './tick-loop.mjs';
 
 const stateDir = join(process.cwd(), '.private');
 const encryptedPath = join(stateDir, 'notify-state.enc');
@@ -33,20 +33,9 @@ async function main() {
   if (!monitors.some((m) => m.enabled)) {
     throw new Error('Configured monitor roster has no enabled targets');
   }
-  const env = {
-    MONITOR_CONFIG_JSON: config.configJson,
-    NOTIFICATION_WINDOW_JST: process.env.NOTIFICATION_WINDOW_JST || undefined,
-    WIKIMEDIA_CONTACT_URL: process.env.WIKIMEDIA_CONTACT_URL ||
-      (process.env.GITHUB_REPOSITORY ? 'https://github.com/' + process.env.GITHUB_REPOSITORY : undefined),
-    DISCORD_WEBHOOK_QIITA: process.env.DISCORD_WEBHOOK_QIITA,
-    DISCORD_WEBHOOK_ZENN: process.env.DISCORD_WEBHOOK_ZENN,
-    DISCORD_WEBHOOK_ARXIV: process.env.DISCORD_WEBHOOK_ARXIV,
-    DISCORD_WEBHOOK_OPENALEX: process.env.DISCORD_WEBHOOK_OPENALEX,
-    OPENALEX_API_KEY: process.env.OPENALEX_API_KEY,
-    DISCORD_WEBHOOK_YOUTUBE: process.env.DISCORD_WEBHOOK_YOUTUBE,
-    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
-    DISCORD_WEBHOOK_WIKIPEDIA: process.env.DISCORD_WEBHOOK_WIKIPEDIA,
-  };
+  // Unregistered Secrets/Variables arrive as '' and are treated as unset.
+  // Wikimedia contact defaults to the fork's own GITHUB_REPOSITORY URL.
+  const env = buildActionsEnv(process.env, config.configJson);
   if (!monitors.some((m) => m.enabled && (
     (m.source === 'qiita' && env.DISCORD_WEBHOOK_QIITA) ||
     (m.source === 'zenn' && env.DISCORD_WEBHOOK_ZENN) ||
@@ -68,8 +57,10 @@ async function main() {
     env.DB = db;
     const restore = silenceInternalLogs();
     try {
-      // Executes exactly one due monitor and the same Discord send policy.
-      await Worker.scheduled({ cron: '*/5 * * * *' }, env);
+      // Visits every monitor that is due at the start of this run once, with
+      // the same per-monitor tick and Discord send policy as the Worker.
+      const summary = await runDueMonitorsOnce(env, monitors);
+      if (summary.failed) failed = true;
       // Idempotent, bounded retention; no second workflow Cron is needed.
       await pruneSentDeliveries(db, Date.now(), monitors);
     } catch {

@@ -26,17 +26,20 @@ Actionsでの監視設定も明示的に選択します:
 5. GitHub の **Settings → Secrets and variables → Actions** で次の Secrets を追加:
    - **`MONITOR_CONFIG_JSON`** : 上記 JSON 全文
    - **`NOTIFY_STATE_KEY`** : セットアップで生成した `.private/notify-state-key.txt` の64桁16進数
-   - **`DISCORD_WEBHOOK_QIITA` / `_ZENN` / `_ARXIV` / `_YOUTUBE` / `_WIKIPEDIA`** : 使用する情報源に対応する Discord Webhook URL
+   - **`DISCORD_WEBHOOK_QIITA` / `_ZENN` / `_ARXIV` / `_OPENALEX` / `_YOUTUBE` / `_WIKIPEDIA`** : 使用する情報源に対応する Discord Webhook URL
+
+   使わない情報源の Webhook や、任意の `OPENALEX_API_KEY`・`YOUTUBE_API_KEY`・`NOTIFICATION_WINDOW_JST` は登録不要です。未登録の Secret は空文字として渡されますが、未設定として扱われます。
 6. GitHub CLI があれば `gh auth login` 後、以下で設定を表示せずに2つの Secret を登録できます (Discord Webhook は別途登録してください)。
 
    ```sh
    gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
    gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
    ```
-7. **Secrets の登録後**、`.github/workflows/notifier.yml` をコミットして push。テンプレートをコピーするまでは通知ワークフローが有効になりません。
-8. GitHub の Actions タブから `Discord notifier (SQLite)` を選び **Run workflow** を1回実行。初回は原則として過去の記事を通知せず基準時刻を記録します。ただし YouTube を有効にしている場合、最初に取得できた最新動画1件を、保持期間内であれば通知します。
+7. **Secrets の登録後**、`.github/workflows/notifier.yml` をコミットして push。テンプレートをコピーするまでは通知ワークフローが有効になりません。定期実行の対象は**デフォルトブランチ (通常 `main`) にあるワークフローだけ**です。別ブランチに push しただけでは起動しません。
+8. フォークしたリポジトリでは GitHub Actions が無効になっている場合があります。Actions タブにワークフローの有効化を求める表示 (例: **I understand my workflows, go ahead and enable them**) が出たら有効化してください。`Discord notifier (SQLite)` に「This scheduled workflow is disabled」と表示される場合は **Enable workflow** を押します。
+9. GitHub の Actions タブから `Discord notifier (SQLite)` を選び **Run workflow** を1回実行。初回は原則として過去の記事を通知せず基準時刻を記録します。ただし YouTube を有効にしている場合、最初に取得できた最新動画1件を、保持期間内であれば通知します。
 
-定期実行は UTC の毎時07・17・27・37・47・57分 (10分間隔) に設定されています。実際の起動はベストエフォートです。**既定では通知時間帯に制限はありません**。個人設定だけで制限するには、`MONITOR_CONFIG_JSON` に `"notificationWindowJst": "09:00-20:00"` を追加するか、別の Actions Secret `NOTIFICATION_WINDOW_JST` に値 `09:00-20:00` を登録してください。時間帯の指定は JST、終了時刻は除外です。時間帯外にも取得・キュー保存は行われます。
+定期実行は UTC の毎時07・17・27・37・47・57分 (10分間隔) に設定されています。実際の起動はベストエフォートです。1回の実行では、**開始時点で取得時刻を迎えている監視 (または送信待ちの通知がある監視) をすべて1回ずつ**、Cloudflare版と同じ優先順で処理します。1監視あたりの通知は1回の実行で最大3件で、残りは次の実行で送信します。1回の実行で新たな監視の処理を始めるのは開始から4分までで、残った監視は次の実行に回ります。**既定では通知時間帯に制限はありません**。個人設定だけで制限するには、`MONITOR_CONFIG_JSON` に `"notificationWindowJst": "09:00-20:00"` を追加するか、別の Actions Secret `NOTIFICATION_WINDOW_JST` に値 `09:00-20:00` を登録してください。時間帯の指定は JST、終了時刻は除外です。時間帯外にも取得・キュー保存は行われます。
 
 Wikipedia を有効にした場合、API リクエストの User-Agent はフォーク先の `GITHUB_REPOSITORY` を連絡先として自動構築します。別の連絡先を使いたいときは GitHub Actions の **Variables** に `WIKIMEDIA_CONTACT_URL` (公開 HTTPS URL) を設定してください。Secret は不要です。
 
@@ -57,7 +60,9 @@ GitHub Actions Secret は定期実行で参照できます。フォーク後に�
 ## 障害対応
 
 - **新着通知が来ない:** 初回は YouTube 以外ではサイレントです。YouTube は初回の保持期間内の最新動画1件が対象ですが、RSS が動画を返さない場合や最新動画が保持期間外の場合には通知できません。その後も新着が無ければ通知されません。Actions 実行結果と各 Secret の存在を確認。
+- **定期実行が起動しない:** `notifier.yml` がデフォルトブランチにあるか、フォークで Actions とワークフローが有効になっているか (上記手順8)、公開リポジトリが60日以上更新されず定期実行が停止していないかを確認します。
 - **State artifact missing:** 保存済み Artifact の保持期限切れ・削除・保存失敗が考えられます。勝手な再初期化はしません。復元できる別の Artifact が無いときは、必要性を理解した上で手動実行時の `reset_state: true` を選択します。
+- **初回実行が失敗した場合:** Secret の登録漏れなどで、チェックポイントを一度も保存できないまま失敗した場合は、Secret を直せば次回の実行で自動的に初回の基準作成から始まります (`reset_state` は不要)。過去に1回でも保存した記録 (期限切れを含む Artifact、または成功した実行) があれば、上記のとおり停止します。
 - **Decrypt error:** `NOTIFY_STATE_KEY` の値が変更されたか、Artifact が損傷しています。元の鍵を復元してください。鍵を再生成すると古い DB は復元できません。
 - **Webhook 401/403/404/410:** Discord Webhook Secret を直し、保存済み SQLite DB の `webhook_source_state` 停止フラグも解除する必要があります。履歴のリセットで対処すると未送信の通知が失われます。
 - **同時実行:** `concurrency` により1つのジョブしか状態を更新しません。ただし GitHub が待機ジョブを省略・置換する可能性はあります。
@@ -72,8 +77,9 @@ GitHub Actions Secret は定期実行で参照できます。フォーク後に�
 - [SQLite アダプタ](../ops/actions/sqlite.mjs)
 - [状態の暗号化](../ops/actions/state-crypto.mjs)
 - [Actions 起動処理](../ops/actions/run-once.mjs)
-- [チェックポイント復元](../ops/actions/restore-state.sh)
-- [テスト](../test/actions-template.test.ts)
+- [1回の実行での監視ループ](../ops/actions/tick-loop.mjs)
+- [チェックポイント復元](../ops/actions/restore-state.sh) / [復元の判定](../ops/actions/checkpoint-plan.mjs)
+- [テスト](../test/actions-template.test.ts) / [実行時の回帰テスト](../test/actions-runtime-hardening.test.ts)
 
 変更の際は `npm run check` を実行してください。**Actions 版は Cloudflare 側の D1 と状態を共有しません。** 両方を並行稼働すると重複通知されるため、どちらか一方を稼働させることを推奨します。
 

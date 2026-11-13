@@ -25,12 +25,15 @@ Public mode requires removing any previous `MONITOR_CONFIG_JSON` Secret to preve
 4. Open **Settings → Secrets and variables → Actions** in your fork and create:
    - `MONITOR_CONFIG_JSON`: the full contents of the private JSON file.
    - `NOTIFY_STATE_KEY`: the 64 hex characters in the generated `.private/notify-state-key.txt`. Keep this key unchanged.
-   - The relevant `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_YOUTUBE`, `DISCORD_WEBHOOK_WIKIPEDIA` URLs.
-5. With GitHub CLI, run `gh auth login`, then `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` and `gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt`. Set the Discord webhook Secrets separately.
-6. **After secrets are in place**, commit and push `.github/workflows/notifier.yml`. The template in `templates/` is inert until copied into your workflows directory.
-7. Under **Actions → Discord notifier (SQLite)** select **Run workflow** once. This creates an initial silent baseline for non-YouTube sources. For YouTube, the latest available video is eligible on the first scan only if published within the configured retention horizon.
+   - The relevant `DISCORD_WEBHOOK_QIITA`, `DISCORD_WEBHOOK_ZENN`, `DISCORD_WEBHOOK_ARXIV`, `DISCORD_WEBHOOK_OPENALEX`, `DISCORD_WEBHOOK_YOUTUBE`, `DISCORD_WEBHOOK_WIKIPEDIA` URLs.
 
-The template schedules runs at UTC minutes 07, 17, 27, 37, 47 and 57 (every 10 minutes, best effort). **Delivery is unrestricted by default**. Optionally set `notificationWindowJst` to `"09:00-20:00"` in `MONITOR_CONFIG_JSON`, or register `NOTIFICATION_WINDOW_JST` as an Actions Secret containing `09:00-20:00`; the dedicated Secret takes precedence. Times are JST with an exclusive end. Source polling continues outside the optional delivery window.
+   Webhooks for unused sources and the optional `OPENALEX_API_KEY`, `YOUTUBE_API_KEY` and `NOTIFICATION_WINDOW_JST` can be left unregistered. GitHub passes an unregistered Secret as an empty string; the runner treats it as unset.
+5. With GitHub CLI, run `gh auth login`, then `gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json` and `gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt`. Set the Discord webhook Secrets separately.
+6. **After secrets are in place**, commit and push `.github/workflows/notifier.yml`. The template in `templates/` is inert until copied into your workflows directory. Scheduled runs only use the workflow on the **default branch (usually `main`)**; pushing it to another branch does not start the schedule.
+7. GitHub Actions may be disabled in a fork. If the Actions tab asks you to enable workflows (for example **I understand my workflows, go ahead and enable them**), enable them. If `Discord notifier (SQLite)` says "This scheduled workflow is disabled", choose **Enable workflow**.
+8. Under **Actions → Discord notifier (SQLite)** select **Run workflow** once. This creates an initial silent baseline for non-YouTube sources. For YouTube, the latest available video is eligible on the first scan only if published within the configured retention horizon.
+
+The template schedules runs at UTC minutes 07, 17, 27, 37, 47 and 57 (every 10 minutes, best effort). Each run visits **every monitor that is due (or has a due queued notification) when the run starts, once each**, in the same priority order as the Cloudflare edition. A monitor sends at most three notifications per run; the rest follow in later runs. A run stops starting new monitors four minutes after it begins; remaining monitors keep their priority for the next run. **Delivery is unrestricted by default**. Optionally set `notificationWindowJst` to `"09:00-20:00"` in `MONITOR_CONFIG_JSON`, or register `NOTIFICATION_WINDOW_JST` as an Actions Secret containing `09:00-20:00`; the dedicated Secret takes precedence. Times are JST with an exclusive end. Source polling continues outside the optional delivery window.
 
 When Wikipedia is enabled, the Wikimedia User-Agent defaults to the current fork's `GITHUB_REPOSITORY` as its operator contact. To use a different contact URL, set `WIKIMEDIA_CONTACT_URL` as a GitHub Actions **Variable** containing a public HTTPS URL. No Wikimedia API key is required.
 
@@ -51,7 +54,9 @@ GitHub Secrets belonging to the upstream project are **not** copied to your fork
 ## Recovery and limits
 
 - **No notifications**: non-YouTube sources start silently; YouTube can send the newest available video after its first successful poll, if the feed contains an eligible upload within its retention horizon. Later scans send only if eligible content exists; inspect workflow results and secret names.
+- **Scheduled runs never start**: check that `notifier.yml` is on the default branch, that Actions and the workflow are enabled in your fork (setup step 7), and that a public repository's schedule was not disabled after 60 days without activity.
 - **Checkpoint missing**: an expired, deleted or failed artifact upload can leave no usable state. The workflow fails closed; it will not silently discard deduplication. Use `workflow_dispatch` with `reset_state: true` **only after accepting loss of old pending messages and history**.
+- **First run failed**: if every earlier run failed before saving its first checkpoint (for example, a Secret was missing), fix the Secrets and the next run automatically starts the first silent baseline; `reset_state` is not needed. Any record of earlier state (a live or expired checkpoint artifact, or a successful run) still stops the workflow as described above.
 - **Decryption failure**: the key may have changed or the artifact may be corrupt. Restore the original key; generating a new key cannot recover old ciphertext.
 - **Invalid Discord Webhook**: update the GitHub Secret and clear the stored source-wide block in the SQLite `webhook_source_state` table. Resetting all history merely to clear a webhook error can drop pending messages.
 - **Concurrency**: the workflow serializes jobs, but queued events can be replaced or missed under GitHub load.
@@ -66,8 +71,9 @@ GitHub scheduled runs may be delayed or dropped; inactive public repositories ca
 - [SQLite adapter](../ops/actions/sqlite.mjs)
 - [Authenticated encryption](../ops/actions/state-crypto.mjs)
 - [Runner](../ops/actions/run-once.mjs)
-- [Checkpoint recovery](../ops/actions/restore-state.sh)
-- [Integration tests](../test/actions-template.test.ts)
+- [Per-run monitor loop](../ops/actions/tick-loop.mjs)
+- [Checkpoint recovery](../ops/actions/restore-state.sh) / [Restore decisions](../ops/actions/checkpoint-plan.mjs)
+- [Integration tests](../test/actions-template.test.ts) / [Runtime regression tests](../test/actions-runtime-hardening.test.ts)
 
 The Actions backend and Cloudflare D1 **do not share their notification history**. Running both at once can duplicate notifications. Choose one active runtime for a given target set.
 

@@ -5,6 +5,7 @@ import {
   WIKIMEDIA_USER_AGENT, wikimediaUserAgent, fetchWikipedia, fetchWikipediaDiscovery,
 } from '../src/sources/wikipedia.ts';
 import type { Monitor } from '../src/types.ts';
+import { buildActionsEnv } from '../ops/actions/runtime-config.mjs';
 
 const monitor: Monitor = {
   id: 'wikipedia-ja-discovery', source: 'wikipedia', query: 'ja:discover',
@@ -68,5 +69,10 @@ test('GitHub Actions passes custom Wikimedia Variable and infers fork URL by def
   const workflow = readFileSync(new URL('../templates/github-actions/notifier.yml', import.meta.url), 'utf8');
   const runner = readFileSync(new URL('../ops/actions/run-once.mjs', import.meta.url), 'utf8');
   assert.match(workflow, /WIKIMEDIA_CONTACT_URL: \$\{\{ vars\.WIKIMEDIA_CONTACT_URL \}\}/);
-  assert.match(runner, /process\.env\.GITHUB_REPOSITORY/);
+  assert.match(runner, /buildActionsEnv\(process\.env,/);
+  // An unset Variable arrives as '' and must fall back to the fork's own URL.
+  assert.equal(buildActionsEnv({ WIKIMEDIA_CONTACT_URL: '', GITHUB_REPOSITORY: 'friend/fork' }, undefined)
+    .WIKIMEDIA_CONTACT_URL, 'https://github.com/friend/fork');
+  assert.equal(buildActionsEnv({ WIKIMEDIA_CONTACT_URL: 'https://example.org/contact', GITHUB_REPOSITORY: 'friend/fork' },
+    undefined).WIKIMEDIA_CONTACT_URL, 'https://example.org/contact');
 });

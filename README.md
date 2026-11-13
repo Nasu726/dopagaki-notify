@@ -254,7 +254,7 @@ gh secret set MONITOR_CONFIG_JSON < .private/monitor-config.json
 gh secret set NOTIFY_STATE_KEY < .private/notify-state-key.txt
 ```
 
-GitHub Actionsの**Variables**に`MONITOR_CONFIG_MODE=private`(既定)を設定します。公開JSONを使う場合は代わりに`npm run setup:actions -- --config-mode=public`と`gh variable set MONITOR_CONFIG_MODE --body public`を使用し、`MONITOR_CONFIG_JSON` Secretは削除してください。使う情報源の`DISCORD_WEBHOOK_*`をGitHub ActionsのSecretsに登録した後、生成された`.github/workflows/notifier.yml`だけをcommit・pushし、GitHubの**Actions → Discord notifier (SQLite) → Run workflow**で初回実行します。初回は通常の情報源を無通知で初期化します。**状態鍵は紛失・変更しないこと。**
+GitHub Actionsの**Variables**に`MONITOR_CONFIG_MODE=private`(既定)を設定します。公開JSONを使う場合は代わりに`npm run setup:actions -- --config-mode=public`と`gh variable set MONITOR_CONFIG_MODE --body public`を使用し、`MONITOR_CONFIG_JSON` Secretは削除してください。使う情報源の`DISCORD_WEBHOOK_*`をGitHub ActionsのSecretsに登録した後、生成された`.github/workflows/notifier.yml`だけをデフォルトブランチ(通常`main`)にcommit・pushし、GitHubの**Actions → Discord notifier (SQLite) → Run workflow**で初回実行します。フォークではActionsが無効な場合があるので、Actionsタブに有効化の案内が出たら有効にしてください。初回は通常の情報源を無通知で初期化します。**状態鍵は紛失・変更しないこと。**
 
 
 **公開モードを選ぶ場合:** `npm run setup:actions -- --config-mode=public` → 公開JSON編集 → `gh variable set MONITOR_CONFIG_MODE --body public`。その際、既存の`MONITOR_CONFIG_JSON` Secretは削除します。非公開モードではSecretが無いと処理を停止します。どちらの方式でも、最初に登録する前に監視設定を確認してください。
